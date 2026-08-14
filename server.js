@@ -10,48 +10,27 @@ const DOMAIN =
     process.env.DOMAIN ||
     "https://Lexinx-protect.onrender.com";
 
+const DATA_DIR = path.join(__dirname, "data");
+const DB_FILE = path.join(DATA_DIR, "scripts.json");
+const PUBLIC_DIR = path.join(__dirname, "public");
+
 /*
 ========================================================
 CONFIG
 ========================================================
 */
 
-const TOKEN_TTL = 30 * 1000;
+const SESSION_TTL = 2 * 60 * 1000;
+const TOKEN_TTL = 20 * 1000;
 
 const RATE_WINDOW = 60 * 1000;
-const MAX_REQUESTS = 60;
-
-const BURST_WINDOW = 5 * 1000;
-const MAX_BURST = 10;
-
-/*
-Đặt biến này trên Render:
-
-LEXINX_SECRET=chuoi-bi-mat-cua-ban
-
-Không bắt buộc để chạy,
-nhưng nên đặt để secret không đổi
-sau mỗi lần restart.
-*/
-
-const SECRET =
-    process.env.LEXINX_SECRET ||
-    crypto.randomBytes(48).toString("hex");
+const RATE_LIMIT = 60;
 
 /*
 ========================================================
-PATH
+FILES
 ========================================================
 */
-
-const DATA_DIR =
-    path.join(__dirname, "data");
-
-const DB_FILE =
-    path.join(DATA_DIR, "scripts.json");
-
-const PUBLIC_DIR =
-    path.join(__dirname, "public");
 
 fs.mkdirSync(DATA_DIR, {
     recursive: true
@@ -62,18 +41,16 @@ fs.mkdirSync(PUBLIC_DIR, {
 });
 
 if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(
-        DB_FILE,
-        "{}",
-        "utf8"
-    );
+    fs.writeFileSync(DB_FILE, "{}", "utf8");
 }
 
 /*
 ========================================================
-MIDDLEWARE
+EXPRESS
 ========================================================
 */
+
+app.disable("x-powered-by");
 
 app.use(
     express.json({
@@ -92,25 +69,19 @@ DATABASE
 */
 
 function readDB() {
-
     try {
-
         return JSON.parse(
             fs.readFileSync(
                 DB_FILE,
                 "utf8"
             )
         );
-
     } catch {
-
         return {};
-
     }
 }
 
 function writeDB(db) {
-
     fs.writeFileSync(
         DB_FILE,
         JSON.stringify(
@@ -120,35 +91,21 @@ function writeDB(db) {
         ),
         "utf8"
     );
-
 }
 
 /*
 ========================================================
-UTILITIES
+RANDOM
 ========================================================
 */
 
-function createID() {
-
-    return crypto
-        .randomBytes(16)
-        .toString("hex");
-
-}
-
-function randomString(
-    bytes = 32
-) {
-
+function randomHex(bytes = 24) {
     return crypto
         .randomBytes(bytes)
         .toString("hex");
-
 }
 
 function cleanName(name) {
-
     return String(
         name || "Script"
     )
@@ -156,11 +113,32 @@ function cleanName(name) {
             /[^\w .-]/g,
             "_"
         )
-        .slice(
-            0,
-            80
-        );
+        .slice(0, 80);
+}
 
+/*
+========================================================
+CONSTANT-TIME COMPARE
+========================================================
+*/
+
+function safeEqual(a, b) {
+
+    if (
+        typeof a !== "string" ||
+        typeof b !== "string"
+    ) {
+        return false;
+    }
+
+    const A = Buffer.from(a);
+    const B = Buffer.from(b);
+
+    if (A.length !== B.length) {
+        return false;
+    }
+
+    return crypto.timingSafeEqual(A, B);
 }
 
 /*
@@ -172,25 +150,20 @@ IP
 function getIP(req) {
 
     const forwarded =
-        req.headers[
-            "x-forwarded-for"
-        ];
+        req.headers["x-forwarded-for"];
 
     if (forwarded) {
-
         return String(
             forwarded
         )
             .split(",")[0]
             .trim();
-
     }
 
-    return String(
+    return (
         req.socket?.remoteAddress ||
         "unknown"
     );
-
 }
 
 /*
@@ -199,42 +172,9 @@ RATE LIMIT
 ========================================================
 */
 
-const rateStore =
-    new Map();
+const rateMap = new Map();
 
-function cleanupRateStore() {
-
-    const now =
-        Date.now();
-
-    for (
-        const [ip, data]
-        of rateStore
-    ) {
-
-        if (
-            now - data.windowStart >
-            RATE_WINDOW
-        ) {
-
-            rateStore.delete(ip);
-
-        }
-
-    }
-
-}
-
-setInterval(
-    cleanupRateStore,
-    60 * 1000
-).unref();
-
-function rateLimit(
-    req,
-    res,
-    next
-) {
+function rateLimit(req, res, next) {
 
     const ip =
         getIP(req);
@@ -242,287 +182,134 @@ function rateLimit(
     const now =
         Date.now();
 
-    let data =
-        rateStore.get(ip);
+    let record =
+        rateMap.get(ip);
 
-    if (!data) {
+    if (!record) {
 
-        data = {
-
-            windowStart: now,
-
+        record = {
             count: 0,
-
-            burstStart: now,
-
-            burst: 0
-
+            resetAt:
+                now + RATE_WINDOW
         };
 
-        rateStore.set(
+        rateMap.set(
             ip,
-            data
+            record
         );
-
     }
 
     if (
-        now - data.windowStart >=
-        RATE_WINDOW
+        now >
+        record.resetAt
     ) {
 
-        data.windowStart = now;
-        data.count = 0;
-
+        record.count = 0;
+        record.resetAt =
+            now + RATE_WINDOW;
     }
 
-    if (
-        now - data.burstStart >=
-        BURST_WINDOW
-    ) {
-
-        data.burstStart = now;
-        data.burst = 0;
-
-    }
-
-    data.count++;
-    data.burst++;
+    record.count++;
 
     if (
-        data.count > MAX_REQUESTS ||
-        data.burst > MAX_BURST
+        record.count >
+        RATE_LIMIT
     ) {
-
-        res.set(
-            "Retry-After",
-            "10"
-        );
 
         return res
             .status(429)
             .type("text/plain")
+            .set(
+                "Retry-After",
+                "60"
+            )
             .send(
-                "LEXINX BLOCK - RATE LIMITED"
+                "LEXINX RATE LIMIT"
             );
-
     }
 
     next();
-
 }
 
 app.use(
-    "/api/",
+    "/api",
     rateLimit
 );
 
 /*
 ========================================================
-BROWSER DETECTION
+BROWSER DIRECT ACCESS BLOCK
 ========================================================
 
-Không kiểm tra "Mozilla" hoặc "Android"
-để tránh chặn nhầm loader.
-
-Chỉ coi request là browser khi có
-các dấu hiệu navigation/browser rõ ràng.
+Không cố xác định "Roblox".
+Chỉ từ chối navigation/browser request
+đến API.
 ========================================================
 */
 
-function looksLikeDirectBrowser(req) {
+function isBrowserNavigation(req) {
 
     const accept =
         String(
-            req.headers[
-                "accept"
-            ] || ""
+            req.headers.accept || ""
         ).toLowerCase();
 
-    const secFetchDest =
-        String(
-            req.headers[
-                "sec-fetch-dest"
-            ] || ""
-        ).toLowerCase();
-
-    const secFetchMode =
+    const mode =
         String(
             req.headers[
                 "sec-fetch-mode"
             ] || ""
         ).toLowerCase();
 
-    const secChUa =
-        req.headers[
-            "sec-ch-ua"
-        ];
+    const dest =
+        String(
+            req.headers[
+                "sec-fetch-dest"
+            ] || ""
+        ).toLowerCase();
 
-    const htmlNavigation =
+    const documentRequest =
+        dest === "document" ||
+        mode === "navigate";
+
+    const html =
         accept.includes(
             "text/html"
-        ) &&
-        (
-            secFetchDest ===
-                "document" ||
-
-            secFetchMode ===
-                "navigate"
         );
 
-    const browserHeaders =
-        Boolean(secChUa);
-
     return (
-        htmlNavigation ||
-        browserHeaders
+        documentRequest ||
+        html
     );
-
 }
 
-/*
-========================================================
-BLOCK
-========================================================
-*/
-
-function lexinxBlock(
-    res,
-    status = 403
-) {
+function block(res) {
 
     return res
-        .status(status)
+        .status(403)
         .type("text/plain")
         .set(
             "Cache-Control",
             "no-store"
         )
-        .set(
-            "X-Content-Type-Options",
-            "nosniff"
-        )
         .send(
             "LEXINX BLOCK"
         );
-
 }
 
 /*
 ========================================================
-HMAC
+SESSION STORE
+========================================================
+
+RAM store:
+- nhanh
+- session cũ chết khi server restart
 ========================================================
 */
 
-function sign(value) {
-
-    return crypto
-        .createHmac(
-            "sha256",
-            SECRET
-        )
-        .update(value)
-        .digest("hex");
-
-}
-
-function safeEqual(
-    a,
-    b
-) {
-
-    if (
-        typeof a !== "string" ||
-        typeof b !== "string"
-    ) {
-
-        return false;
-
-    }
-
-    const aa =
-        Buffer.from(a);
-
-    const bb =
-        Buffer.from(b);
-
-    if (
-        aa.length !==
-        bb.length
-    ) {
-
-        return false;
-
-    }
-
-    return crypto.timingSafeEqual(
-        aa,
-        bb
-    );
-
-}
-
-/*
-========================================================
-SECURITY STORAGE
-========================================================
-*/
-
-const challenges =
+const sessions =
     new Map();
-
-const usedTokens =
-    new Map();
-
-function cleanupSecurityStore() {
-
-    const now =
-        Date.now();
-
-    for (
-        const [
-            challenge,
-            data
-        ] of challenges
-    ) {
-
-        if (
-            data.expiresAt <= now
-        ) {
-
-            challenges.delete(
-                challenge
-            );
-
-        }
-
-    }
-
-    for (
-        const [
-            token,
-            expiresAt
-        ] of usedTokens
-    ) {
-
-        if (
-            expiresAt <= now
-        ) {
-
-            usedTokens.delete(
-                token
-            );
-
-        }
-
-    }
-
-}
-
-setInterval(
-    cleanupSecurityStore,
-    10 * 1000
-).unref();
 
 /*
 ========================================================
@@ -530,404 +317,220 @@ TOKEN
 ========================================================
 */
 
-function createSecurityToken(
-    id,
-    challenge,
-    ip
-) {
-
-    const timestamp =
-        Date.now();
-
-    const nonce =
-        randomString(24);
-
-    const payload =
-        [
-            id,
-            challenge,
-            timestamp,
-            nonce,
-            ip
-        ].join("|");
-
-    const signature =
-        sign(payload);
-
-    const object = {
-
-        id,
-
-        challenge,
-
-        timestamp,
-
-        nonce,
-
-        signature
-
-    };
-
-    return Buffer
-        .from(
-            JSON.stringify(object)
-        )
-        .toString(
-            "base64url"
-        );
-
-}
-
-/*
-========================================================
-VERIFY TOKEN
-========================================================
-*/
-
-function verifySecurityToken(
-    token,
-    expectedID,
-    req
-) {
-
-    if (
-        typeof token !== "string" ||
-        token.length < 20
-    ) {
-
-        return {
-            ok: false,
-            error: "INVALID_TOKEN"
-        };
-
-    }
-
-    let decoded;
-
-    try {
-
-        decoded =
-            JSON.parse(
-                Buffer
-                    .from(
-                        token,
-                        "base64url"
-                    )
-                    .toString(
-                        "utf8"
-                    )
-            );
-
-    } catch {
-
-        return {
-            ok: false,
-            error: "INVALID_TOKEN"
-        };
-
-    }
-
-    if (
-        !decoded ||
-        typeof decoded !== "object"
-    ) {
-
-        return {
-            ok: false,
-            error: "INVALID_TOKEN"
-        };
-
-    }
-
-    const {
-        id,
-        challenge,
-        timestamp,
-        nonce,
-        signature
-    } = decoded;
-
-    if (
-        id !== expectedID ||
-        typeof challenge !== "string" ||
-        typeof timestamp !== "number" ||
-        typeof nonce !== "string" ||
-        typeof signature !== "string"
-    ) {
-
-        return {
-            ok: false,
-            error: "INVALID_TOKEN"
-        };
-
-    }
+function makeToken() {
 
     const now =
         Date.now();
 
+    return {
+
+        value:
+            randomHex(32),
+
+        nonce:
+            randomHex(16),
+
+        expiresAt:
+            now + TOKEN_TTL,
+
+        used:
+            false
+    };
+}
+
+/*
+========================================================
+SESSION
+========================================================
+*/
+
+function createSession(
+    scriptID,
+    ip
+) {
+
+    const now =
+        Date.now();
+
+    const sessionID =
+        randomHex(32);
+
+    const session = {
+
+        id:
+            sessionID,
+
+        scriptID,
+
+        ip,
+
+        stage:
+            2,
+
+        createdAt:
+            now,
+
+        expiresAt:
+            now + SESSION_TTL,
+
+        tokens: {
+
+            l2:
+                makeToken(),
+
+            l3:
+                null,
+
+            l4:
+                null,
+
+            l5:
+                null
+        }
+
+    };
+
+    sessions.set(
+        sessionID,
+        session
+    );
+
+    return session;
+}
+
+/*
+========================================================
+SESSION VALIDATION
+========================================================
+*/
+
+function getSession(
+    sessionID,
+    req
+) {
+
     if (
-        Math.abs(
-            now - timestamp
-        ) > TOKEN_TTL
+        typeof sessionID !==
+        "string"
     ) {
-
-        return {
-            ok: false,
-            error: "TOKEN_EXPIRED"
-        };
-
+        return null;
     }
 
-    const challengeData =
-        challenges.get(
-            challenge
+    const session =
+        sessions.get(
+            sessionID
         );
 
-    if (!challengeData) {
-
-        return {
-            ok: false,
-            error: "CHALLENGE_INVALID"
-        };
-
+    if (!session) {
+        return null;
     }
 
     if (
-        challengeData.expiresAt <=
-        now
+        Date.now() >
+        session.expiresAt
     ) {
 
-        challenges.delete(
-            challenge
+        sessions.delete(
+            sessionID
         );
 
-        return {
-            ok: false,
-            error: "CHALLENGE_EXPIRED"
-        };
+        return null;
+    }
 
+    /*
+        Bind session to IP.
+
+        Note:
+        Nếu bạn dùng proxy/CDN,
+        x-forwarded-for phải được
+        cấu hình đúng ở hạ tầng.
+    */
+
+    if (
+        session.ip !==
+        getIP(req)
+    ) {
+        return null;
+    }
+
+    return session;
+}
+
+/*
+========================================================
+CONSUME TOKEN
+========================================================
+*/
+
+function consumeToken(
+    token,
+    value,
+    nonce
+) {
+
+    if (!token) {
+        return false;
+    }
+
+    if (token.used) {
+        return false;
     }
 
     if (
-        challengeData.id !==
-        expectedID
+        Date.now() >
+        token.expiresAt
     ) {
-
-        return {
-            ok: false,
-            error: "CHALLENGE_ID"
-        };
-
+        return false;
     }
-
-    const ip =
-        getIP(req);
-
-    if (
-        challengeData.ip !==
-        ip
-    ) {
-
-        return {
-            ok: false,
-            error: "IP_MISMATCH"
-        };
-
-    }
-
-    const payload =
-        [
-            id,
-            challenge,
-            timestamp,
-            nonce,
-            ip
-        ].join("|");
-
-    const expectedSignature =
-        sign(payload);
 
     if (
         !safeEqual(
-            signature,
-            expectedSignature
+            token.value,
+            String(value || "")
         )
     ) {
-
-        return {
-            ok: false,
-            error: "BAD_SIGNATURE"
-        };
-
+        return false;
     }
 
     if (
-        usedTokens.has(token)
+        !safeEqual(
+            token.nonce,
+            String(nonce || "")
+        )
     ) {
-
-        return {
-            ok: false,
-            error: "TOKEN_USED"
-        };
-
+        return false;
     }
 
-    return {
-        ok: true,
-        challenge
-    };
+    token.used =
+        true;
 
+    return true;
 }
 
 /*
 ========================================================
-LAYER 2
+COMMON RESPONSE HEADERS
 ========================================================
 */
 
-function createLayer2(
-    id,
-    token
-) {
+function secureHeaders(res) {
 
-    const endpoint =
-        `${DOMAIN}/api/data/${id}`;
+    res.set(
+        "Cache-Control",
+        "no-store, no-cache, must-revalidate"
+    );
 
-    return `
-local HttpService = game:GetService("HttpService")
+    res.set(
+        "Pragma",
+        "no-cache"
+    );
 
-local URL = ${JSON.stringify(endpoint)}
+    res.set(
+        "X-Content-Type-Options",
+        "nosniff"
+    );
 
-local TOKEN = ${JSON.stringify(token)}
-
-local response
-
-local ok, result = pcall(function()
-
-    return request({
-
-        Url = URL,
-
-        Method = "POST",
-
-        Headers = {
-
-            ["Content-Type"] =
-                "application/json",
-
-            ["X-Lexinx-Token"] =
-                TOKEN
-
-        },
-
-        Body = "{}"
-
-    })
-
-end)
-
-if not ok or not result then
-
-    warn("[LEXINX] Request failed")
-
-    return
-
-end
-
-response = result
-
-if response.StatusCode ~= 200 then
-
-    warn(
-        "[LEXINX] HTTP:",
-        response.StatusCode
-    )
-
-    return
-
-end
-
-local decoded, data = pcall(function()
-
-    return HttpService:JSONDecode(
-        response.Body
-    )
-
-end)
-
-if not decoded or
-   type(data) ~= "table" then
-
-    warn(
-        "[LEXINX] Invalid response"
-    )
-
-    return
-
-end
-
-if data.ok ~= true then
-
-    warn(
-        "[LEXINX] Server rejected request"
-    )
-
-    return
-
-end
-
-if type(data.code) ~= "string" then
-
-    warn(
-        "[LEXINX] Source missing"
-    )
-
-    return
-
-end
-
-local fn, compileError =
-    loadstring(data.code)
-
-if not fn then
-
-    warn(
-        "[LEXINX] Compile error:",
-        compileError
-    )
-
-    return
-
-end
-
-local success, runtimeError =
-    pcall(fn)
-
-if not success then
-
-    warn(
-        "[LEXINX] Runtime error:",
-        runtimeError
-    )
-
-end
-`.trim();
-
-}
-
-/*
-========================================================
-LAYER 1
-========================================================
-*/
-
-function createLayer1(id) {
-
-    const endpoint =
-        `${DOMAIN}/api/loader/${id}`;
-
-    return `loadstring(game:HttpGet(${JSON.stringify(endpoint)}))()`;
-
+    return res;
 }
 
 /*
@@ -936,23 +539,19 @@ HOME
 ========================================================
 */
 
-app.get(
-    "/",
-    (req, res) => {
+app.get("/", (req, res) => {
 
-        res.sendFile(
-            path.join(
-                PUBLIC_DIR,
-                "index.html"
-            )
-        );
-
-    }
-);
+    res.sendFile(
+        path.join(
+            PUBLIC_DIR,
+            "index.html"
+        )
+    );
+});
 
 /*
 ========================================================
-CREATE
+CREATE SCRIPT
 ========================================================
 */
 
@@ -960,106 +559,77 @@ app.post(
     "/api/create",
     (req, res) => {
 
-        try {
+        const source =
+            typeof req.body?.source ===
+            "string"
+                ? req.body.source
+                : "";
 
-            const source =
-                typeof req.body?.source ===
-                "string"
-                    ? req.body.source
-                    : "";
+        if (!source.trim()) {
 
-            if (!source.trim()) {
-
-                return res
-                    .status(400)
-                    .json({
-
-                        ok: false,
-
-                        error:
-                            "Script is empty"
-
-                    });
-
-            }
-
-            const name =
-                cleanName(
-                    req.body?.name
-                );
-
-            const id =
-                createID();
-
-            const db =
-                readDB();
-
-            db[id] = {
-
-                id,
-
-                name,
-
-                source,
-
-                createdAt:
-                    Date.now(),
-
-                updatedAt:
-                    Date.now()
-
-            };
-
-            writeDB(db);
-
-            /*
-            CREATE chỉ lưu source.
-            Token được tạo khi loader
-            thực sự được request.
-            */
-
-            res.json({
-
-                ok: true,
-
-                id,
-
-                name,
-
-                loader:
-                    createLayer1(id),
-
-                endpoint:
-                    `${DOMAIN}/api/loader/${id}`
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "[CREATE ERROR]",
-                error
-            );
-
-            res
-                .status(500)
+            return res
+                .status(400)
                 .json({
-
                     ok: false,
-
                     error:
-                        "Internal server error"
-
+                        "Script is empty"
                 });
-
         }
 
+        const name =
+            cleanName(
+                req.body?.name
+            );
+
+        const id =
+            randomHex(12);
+
+        const db =
+            readDB();
+
+        db[id] = {
+
+            id,
+
+            name,
+
+            source,
+
+            createdAt:
+                Date.now(),
+
+            updatedAt:
+                Date.now()
+        };
+
+        writeDB(db);
+
+        const loader =
+            `loadstring(game:HttpGet(${JSON.stringify(
+                `${DOMAIN}/api/loader/${id}`
+            )}))()`;
+
+        secureHeaders(res);
+
+        res.json({
+
+            ok: true,
+
+            id,
+
+            name,
+
+            endpoint:
+                `${DOMAIN}/api/loader/${id}`,
+
+            loader
+        });
     }
 );
 
 /*
 ========================================================
-EDIT
+EDIT SCRIPT
 ========================================================
 */
 
@@ -1067,114 +637,87 @@ app.post(
     "/api/edit/:id",
     (req, res) => {
 
-        try {
+        const db =
+            readDB();
 
-            const id =
-                req.params.id;
+        const script =
+            db[
+                req.params.id
+            ];
 
-            const db =
-                readDB();
+        if (!script) {
 
-            if (!db[id]) {
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "Script not found"
+                });
+        }
 
-                return res
-                    .status(404)
-                    .json({
+        if (
+            typeof req.body?.source ===
+            "string"
+        ) {
 
-                        ok: false,
-
-                        error:
-                            "Script not found"
-
-                    });
-
-            }
-
-            const source =
-                typeof req.body?.source ===
-                "string"
-                    ? req.body.source
-                    : "";
-
-            if (!source.trim()) {
+            if (
+                !req.body.source.trim()
+            ) {
 
                 return res
                     .status(400)
                     .json({
-
                         ok: false,
-
                         error:
                             "Script is empty"
-
                     });
-
             }
 
-            db[id].source =
-                source;
-
-            if (
-                typeof req.body?.name ===
-                    "string" &&
-                req.body.name.trim()
-            ) {
-
-                db[id].name =
-                    cleanName(
-                        req.body.name
-                    );
-
-            }
-
-            db[id].updatedAt =
-                Date.now();
-
-            writeDB(db);
-
-            res.json({
-
-                ok: true,
-
-                id,
-
-                name:
-                    db[id].name,
-
-                loader:
-                    createLayer1(id),
-
-                endpoint:
-                    `${DOMAIN}/api/loader/${id}`
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "[EDIT ERROR]",
-                error
-            );
-
-            res
-                .status(500)
-                .json({
-
-                    ok: false,
-
-                    error:
-                        "Internal server error"
-
-                });
-
+            script.source =
+                req.body.source;
         }
 
+        if (
+            typeof req.body?.name ===
+                "string" &&
+            req.body.name.trim()
+        ) {
+
+            script.name =
+                cleanName(
+                    req.body.name
+                );
+        }
+
+        script.updatedAt =
+            Date.now();
+
+        writeDB(db);
+
+        secureHeaders(res);
+
+        res.json({
+
+            ok: true,
+
+            id:
+                script.id,
+
+            name:
+                script.name,
+
+            loader:
+                `loadstring(game:HttpGet(${JSON.stringify(
+                    `${DOMAIN}/api/loader/${script.id}`
+                )}))()`
+        });
     }
 );
 
 /*
 ========================================================
-LIST
+LIST SCRIPTS
 ========================================================
 */
 
@@ -1186,8 +729,7 @@ app.get(
             readDB();
 
         const scripts =
-            Object
-                .values(db)
+            Object.values(db)
                 .reverse()
                 .map(
                     script => ({
@@ -1205,73 +747,468 @@ app.get(
                             script.updatedAt,
 
                         loader:
-                            createLayer1(
-                                script.id
-                            ),
-
-                        endpoint:
-                            `${DOMAIN}/api/loader/${script.id}`
+                            `loadstring(game:HttpGet(${JSON.stringify(
+                                `${DOMAIN}/api/loader/${script.id}`
+                            )}))()`
 
                     })
                 );
 
+        secureHeaders(res);
+
         res.json({
-
             ok: true,
-
             scripts
-
         });
-
     }
 );
 
 /*
 ========================================================
-SOURCE
+L1 → L2
+========================================================
+
+GET /api/loader/:id
+
+Browser navigation → 403.
+
+Không trả source.
+Chỉ tạo session.
 ========================================================
 */
 
 app.get(
-    "/api/source/:id",
+    "/api/loader/:id",
     (req, res) => {
+
+        if (
+            isBrowserNavigation(req)
+        ) {
+            return block(res);
+        }
 
         const db =
             readDB();
 
         const script =
-            db[req.params.id];
+            db[
+                req.params.id
+            ];
 
         if (!script) {
 
             return res
                 .status(404)
-                .json({
-
-                    ok: false,
-
-                    error:
-                        "Script not found"
-
-                });
-
+                .type("text/plain")
+                .send(
+                    "LEXINX BLOCK"
+                );
         }
+
+        const session =
+            createSession(
+                script.id,
+                getIP(req)
+            );
+
+        secureHeaders(res);
 
         res.json({
 
             ok: true,
 
-            id:
-                script.id,
+            stage: 2,
 
-            name:
-                script.name,
+            session:
+                session.id,
 
-            source:
-                script.source
+            token:
+                session.tokens.l2.value,
+
+            nonce:
+                session.tokens.l2.nonce,
+
+            next:
+                `${DOMAIN}/api/l3`
 
         });
+    }
+);
 
+/*
+========================================================
+L2 → L3
+========================================================
+*/
+
+app.get(
+    "/api/l3",
+    (req, res) => {
+
+        return block(res);
+    }
+);
+
+app.post(
+    "/api/l3",
+    (req, res) => {
+
+        if (
+            isBrowserNavigation(req)
+        ) {
+            return block(res);
+        }
+
+        const {
+            session:
+                sessionID,
+
+            token,
+
+            nonce
+        } =
+            req.body || {};
+
+        const session =
+            getSession(
+                sessionID,
+                req
+            );
+
+        if (!session) {
+            return block(res);
+        }
+
+        if (
+            session.stage !== 2
+        ) {
+
+            return block(res);
+        }
+
+        if (
+            !consumeToken(
+                session.tokens.l2,
+                token,
+                nonce
+            )
+        ) {
+
+            return block(res);
+        }
+
+        session.tokens.l3 =
+            makeToken();
+
+        session.stage =
+            3;
+
+        secureHeaders(res);
+
+        res.json({
+
+            ok: true,
+
+            stage: 3,
+
+            session:
+                session.id,
+
+            token:
+                session.tokens.l3.value,
+
+            nonce:
+                session.tokens.l3.nonce,
+
+            next:
+                `${DOMAIN}/api/l4`
+        });
+    }
+);
+
+/*
+========================================================
+L3 → L4
+========================================================
+*/
+
+app.get(
+    "/api/l4",
+    (req, res) => {
+
+        return block(res);
+    }
+);
+
+app.post(
+    "/api/l4",
+    (req, res) => {
+
+        if (
+            isBrowserNavigation(req)
+        ) {
+            return block(res);
+        }
+
+        const {
+            session:
+                sessionID,
+
+            token,
+
+            nonce
+        } =
+            req.body || {};
+
+        const session =
+            getSession(
+                sessionID,
+                req
+            );
+
+        if (!session) {
+            return block(res);
+        }
+
+        if (
+            session.stage !== 3
+        ) {
+            return block(res);
+        }
+
+        if (
+            !consumeToken(
+                session.tokens.l3,
+                token,
+                nonce
+            )
+        ) {
+            return block(res);
+        }
+
+        session.tokens.l4 =
+            makeToken();
+
+        session.stage =
+            4;
+
+        secureHeaders(res);
+
+        res.json({
+
+            ok: true,
+
+            stage: 4,
+
+            session:
+                session.id,
+
+            token:
+                session.tokens.l4.value,
+
+            nonce:
+                session.tokens.l4.nonce,
+
+            next:
+                `${DOMAIN}/api/l5`
+        });
+    }
+);
+
+/*
+========================================================
+L4 → L5
+========================================================
+*/
+
+app.get(
+    "/api/l5",
+    (req, res) => {
+
+        return block(res);
+    }
+);
+
+app.post(
+    "/api/l5",
+    (req, res) => {
+
+        if (
+            isBrowserNavigation(req)
+        ) {
+            return block(res);
+        }
+
+        const {
+            session:
+                sessionID,
+
+            token,
+
+            nonce
+        } =
+            req.body || {};
+
+        const session =
+            getSession(
+                sessionID,
+                req
+            );
+
+        if (!session) {
+            return block(res);
+        }
+
+        if (
+            session.stage !== 4
+        ) {
+            return block(res);
+        }
+
+        if (
+            !consumeToken(
+                session.tokens.l4,
+                token,
+                nonce
+            )
+        ) {
+            return block(res);
+        }
+
+        session.tokens.l5 =
+            makeToken();
+
+        session.stage =
+            5;
+
+        secureHeaders(res);
+
+        res.json({
+
+            ok: true,
+
+            stage: 5,
+
+            session:
+                session.id,
+
+            token:
+                session.tokens.l5.value,
+
+            nonce:
+                session.tokens.l5.nonce,
+
+            next:
+                `${DOMAIN}/api/data`
+        });
+    }
+);
+
+/*
+========================================================
+L5 → SOURCE
+========================================================
+
+SOURCE CHỈ XUẤT HIỆN Ở ĐÂY.
+========================================================
+*/
+
+app.get(
+    "/api/data",
+    (req, res) => {
+
+        return block(res);
+    }
+);
+
+app.post(
+    "/api/data",
+    (req, res) => {
+
+        if (
+            isBrowserNavigation(req)
+        ) {
+            return block(res);
+        }
+
+        const {
+            session:
+                sessionID,
+
+            token,
+
+            nonce
+        } =
+            req.body || {};
+
+        const session =
+            getSession(
+                sessionID,
+                req
+            );
+
+        if (!session) {
+            return block(res);
+        }
+
+        if (
+            session.stage !== 5
+        ) {
+            return block(res);
+        }
+
+        if (
+            !consumeToken(
+                session.tokens.l5,
+                token,
+                nonce
+            )
+        ) {
+            return block(res);
+        }
+
+        const db =
+            readDB();
+
+        const script =
+            db[
+                session.scriptID
+            ];
+
+        if (!script) {
+
+            sessions.delete(
+                sessionID
+            );
+
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "SCRIPT NOT FOUND"
+                });
+        }
+
+        /*
+            Xóa session ngay trước khi
+            trả source để token không
+            thể replay.
+        */
+
+        sessions.delete(
+            sessionID
+        );
+
+        secureHeaders(res);
+
+        res.json({
+
+            ok: true,
+
+            code:
+                script.source
+        });
     }
 );
 
@@ -1288,19 +1225,19 @@ app.delete(
         const db =
             readDB();
 
-        if (!db[req.params.id]) {
+        if (
+            !db[
+                req.params.id
+            ]
+        ) {
 
             return res
                 .status(404)
                 .json({
-
                     ok: false,
-
                     error:
                         "Script not found"
-
                 });
-
         }
 
         delete db[
@@ -1309,280 +1246,25 @@ app.delete(
 
         writeDB(db);
 
+        secureHeaders(res);
+
         res.json({
             ok: true
         });
-
     }
 );
 
 /*
 ========================================================
-LAYER 1
-========================================================
-
-Browser:
-    GET /api/loader/ID
-
-Loader:
-    game:HttpGet(...)
+UNKNOWN API
 ========================================================
 */
 
-app.get(
-    "/api/loader/:id",
+app.use(
+    "/api",
     (req, res) => {
 
-        /*
-        Chặn browser navigation.
-        */
-
-        if (
-            looksLikeDirectBrowser(req)
-        ) {
-
-            return lexinxBlock(
-                res,
-                403
-            );
-
-        }
-
-        const db =
-            readDB();
-
-        const script =
-            db[req.params.id];
-
-        if (!script) {
-
-            return lexinxBlock(
-                res,
-                404
-            );
-
-        }
-
-        /*
-        Tạo challenge mới.
-        */
-
-        const challenge =
-            randomString(24);
-
-        const ip =
-            getIP(req);
-
-        const expiresAt =
-            Date.now() +
-            TOKEN_TTL;
-
-        challenges.set(
-            challenge,
-            {
-
-                id:
-                    req.params.id,
-
-                ip,
-
-                expiresAt
-
-            }
-        );
-
-        /*
-        Tạo signed token.
-        */
-
-        const token =
-            createSecurityToken(
-                req.params.id,
-                challenge,
-                ip
-            );
-
-        /*
-        Tạo Layer 2 chứa token.
-        */
-
-        const layer2 =
-            createLayer2(
-                req.params.id,
-                token
-            );
-
-        res
-            .status(200)
-            .type("text/plain")
-            .set(
-                "Cache-Control",
-                "no-store, no-cache, must-revalidate"
-            )
-            .set(
-                "Pragma",
-                "no-cache"
-            )
-            .set(
-                "X-Content-Type-Options",
-                "nosniff"
-            )
-            .send(
-                layer2
-            );
-
-    }
-);
-
-/*
-========================================================
-DATA GET
-========================================================
-*/
-
-app.get(
-    "/api/data/:id",
-    (req, res) => {
-
-        return lexinxBlock(
-            res,
-            403
-        );
-
-    }
-);
-
-/*
-========================================================
-DATA POST
-========================================================
-*/
-
-app.post(
-    "/api/data/:id",
-    (req, res) => {
-
-        try {
-
-            const token =
-                req.headers[
-                    "x-lexinx-token"
-                ];
-
-            /*
-            Verify token.
-            */
-
-            const verification =
-                verifySecurityToken(
-                    token,
-                    req.params.id,
-                    req
-                );
-
-            if (
-                !verification.ok
-            ) {
-
-                return res
-                    .status(403)
-                    .json({
-
-                        ok: false,
-
-                        error:
-                            "LEXINX BLOCK",
-
-                        reason:
-                            verification.error
-
-                    });
-
-            }
-
-            /*
-            Token one-time.
-            */
-
-            usedTokens.set(
-                token,
-                Date.now() +
-                    TOKEN_TTL
-            );
-
-            /*
-            Challenge one-time.
-            */
-
-            challenges.delete(
-                verification.challenge
-            );
-
-            const db =
-                readDB();
-
-            const script =
-                db[req.params.id];
-
-            if (!script) {
-
-                return lexinxBlock(
-                    res,
-                    404
-                );
-
-            }
-
-            /*
-            Trả source.
-            */
-
-            res
-                .status(200)
-                .set(
-                    "Cache-Control",
-                    "no-store, no-cache, must-revalidate"
-                )
-                .set(
-                    "Pragma",
-                    "no-cache"
-                )
-                .set(
-                    "X-Content-Type-Options",
-                    "nosniff"
-                )
-                .json({
-
-                    ok: true,
-
-                    id:
-                        script.id,
-
-                    code:
-                        script.source
-
-                });
-
-        } catch (error) {
-
-            console.error(
-                "[DATA ERROR]",
-                error
-            );
-
-            res
-                .status(500)
-                .json({
-
-                    ok: false,
-
-                    error:
-                        "Internal server error"
-
-                });
-
-        }
-
+        return block(res);
     }
 );
 
@@ -1601,8 +1283,66 @@ app.use(
             .send(
                 "LEXINX BLOCK"
             );
-
     }
+);
+
+/*
+========================================================
+CLEANUP
+========================================================
+*/
+
+setInterval(
+    () => {
+
+        const now =
+            Date.now();
+
+        for (
+            const [
+                id,
+                session
+            ]
+            of sessions
+        ) {
+
+            if (
+                now >
+                session.expiresAt
+            ) {
+
+                sessions.delete(
+                    id
+                );
+            }
+        }
+
+        /*
+            Dọn rate-limit records.
+        */
+
+        for (
+            const [
+                ip,
+                record
+            ]
+            of rateMap
+        ) {
+
+            if (
+                now >
+                record.resetAt +
+                RATE_WINDOW
+            ) {
+
+                rateMap.delete(
+                    ip
+                );
+            }
+        }
+
+    },
+    30 * 1000
 );
 
 /*
@@ -1616,11 +1356,16 @@ app.listen(
     () => {
 
         console.log(
-            "================================"
+            "======================================"
         );
 
         console.log(
-            "LEXINX PROTECT V2 ONLINE"
+            "LEXINX PROTECT ONLINE"
+        );
+
+        console.log(
+            "DOMAIN:",
+            DOMAIN
         );
 
         console.log(
@@ -1629,8 +1374,8 @@ app.listen(
         );
 
         console.log(
-            "DOMAIN:",
-            DOMAIN
+            "CHAIN:",
+            "L1 -> L2 -> L3 -> L4 -> L5 -> DATA"
         );
 
         console.log(
@@ -1640,30 +1385,21 @@ app.listen(
         );
 
         console.log(
-            "RATE LIMIT:",
-            MAX_REQUESTS,
-            "/ minute"
+            "SESSION TTL:",
+            SESSION_TTL,
+            "ms"
         );
 
         console.log(
-            "================================"
+            "RATE LIMIT:",
+            RATE_LIMIT,
+            "/",
+            RATE_WINDOW,
+            "ms"
         );
 
+        console.log(
+            "======================================"
+        );
     }
 );
-
-Quan trọng: bản này cần "express" thôi nên "package.json" cũ của bạn vẫn đủ:
-
-{
-  "name": "lexinx-protect",
-  "version": "1.0.0",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js"
-  },
-  "dependencies": {
-    "express": "^5.1.0"
-  }
-}
-
-Sau khi deploy, nếu CREATE vẫn không hoạt động, lỗi sẽ không còn nằm ở "createLayer2"; "/api/create" đã được bọc "try/catch" và trả JSON lỗi rõ ràng.
