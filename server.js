@@ -32,19 +32,14 @@ app.use(express.json({
 
 app.use(express.static(PUBLIC_DIR));
 
-/*
-========================================================
-DATABASE
-========================================================
-*/
+/* =====================================================
+   DATABASE
+===================================================== */
 
 function readDB() {
     try {
         return JSON.parse(
-            fs.readFileSync(
-                DB_FILE,
-                "utf8"
-            )
+            fs.readFileSync(DB_FILE, "utf8")
         );
     } catch {
         return {};
@@ -54,20 +49,14 @@ function readDB() {
 function writeDB(db) {
     fs.writeFileSync(
         DB_FILE,
-        JSON.stringify(
-            db,
-            null,
-            2
-        ),
+        JSON.stringify(db, null, 2),
         "utf8"
     );
 }
 
-/*
-========================================================
-RANDOM
-========================================================
-*/
+/* =====================================================
+   RANDOM
+===================================================== */
 
 function randomHex(bytes = 32) {
     return crypto
@@ -76,21 +65,14 @@ function randomHex(bytes = 32) {
 }
 
 function cleanName(name) {
-    return String(
-        name || "Script"
-    )
-        .replace(
-            /[^\w .-]/g,
-            "_"
-        )
+    return String(name || "Script")
+        .replace(/[^\w .-]/g, "_")
         .slice(0, 80);
 }
 
-/*
-========================================================
-SECURITY HEADERS
-========================================================
-*/
+/* =====================================================
+   HEADERS
+===================================================== */
 
 function secure(res) {
     return res
@@ -98,39 +80,25 @@ function secure(res) {
             "Cache-Control",
             "no-store, no-cache, must-revalidate"
         )
-        .set(
-            "Pragma",
-            "no-cache"
-        )
+        .set("Pragma", "no-cache")
         .set(
             "X-Content-Type-Options",
             "nosniff"
         );
 }
 
-/*
-========================================================
-BLOCK
-========================================================
-*/
-
 function block(res) {
     return secure(res)
         .status(403)
         .type("text/plain")
-        .send(
-            "LEXINX BLOCK"
-        );
+        .send("LEXINX BLOCK");
 }
 
-/*
-========================================================
-BROWSER NAVIGATION CHECK
-========================================================
-*/
+/* =====================================================
+   BROWSER CHECK
+===================================================== */
 
 function browserNavigation(req) {
-
     const accept =
         String(
             req.headers.accept || ""
@@ -138,90 +106,60 @@ function browserNavigation(req) {
 
     const mode =
         String(
-            req.headers[
-                "sec-fetch-mode"
-            ] || ""
+            req.headers["sec-fetch-mode"] || ""
         ).toLowerCase();
 
     const dest =
         String(
-            req.headers[
-                "sec-fetch-dest"
-            ] || ""
+            req.headers["sec-fetch-dest"] || ""
         ).toLowerCase();
 
     return (
-        accept.includes(
-            "text/html"
-        ) ||
+        accept.includes("text/html") ||
         mode === "navigate" ||
         dest === "document"
     );
 }
 
-/*
-========================================================
-SESSION
-========================================================
-*/
+/* =====================================================
+   SESSION
+===================================================== */
 
 const sessions = new Map();
 
-function newChallenge() {
-
-    const now =
-        Date.now();
+function createChallenge() {
+    const now = Date.now();
 
     return {
-
-        token:
-            randomHex(32),
-
-        nonce:
-            randomHex(16),
-
-        expiresAt:
-            now + TOKEN_TTL,
-
-        used:
-            false
+        token: randomHex(32),
+        nonce: randomHex(16),
+        expiresAt: now + TOKEN_TTL,
+        used: false
     };
 }
 
-function createSession(
-    scriptID
-) {
-
-    const now =
-        Date.now();
+function createSession(scriptID) {
+    const now = Date.now();
 
     const session = {
-
-        id:
-            randomHex(32),
+        id: randomHex(32),
 
         scriptID,
 
-        createdAt:
-            now,
+        createdAt: now,
 
         expiresAt:
             now + SESSION_TTL,
 
-        stage:
-            2,
+        stage: 2,
 
-        l2:
-            newChallenge(),
+        l2: createChallenge(),
 
-        l3:
-            null,
+        l3: null,
 
-        l4:
-            null,
+        l4: null,
 
-        l5:
-            null
+        l5: null
     };
 
     sessions.set(
@@ -232,13 +170,10 @@ function createSession(
     return session;
 }
 
-function getSession(
-    id
-) {
-
+function getSession(id) {
     if (
-        typeof id !==
-        "string"
+        typeof id !== "string" ||
+        !id
     ) {
         return null;
     }
@@ -254,21 +189,18 @@ function getSession(
         Date.now() >
         session.expiresAt
     ) {
-
         sessions.delete(id);
-
         return null;
     }
 
     return session;
 }
 
-function consume(
+function consumeChallenge(
     challenge,
     token,
     nonce
 ) {
-
     if (!challenge) {
         return false;
     }
@@ -285,33 +217,34 @@ function consume(
     }
 
     if (
-        token !==
-        challenge.token
+        typeof token !== "string" ||
+        typeof nonce !== "string"
     ) {
         return false;
     }
 
     if (
-        nonce !==
-        challenge.nonce
+        token !== challenge.token
     ) {
         return false;
     }
 
-    challenge.used =
-        true;
+    if (
+        nonce !== challenge.nonce
+    ) {
+        return false;
+    }
+
+    challenge.used = true;
 
     return true;
 }
 
-/*
-========================================================
-HOME
-========================================================
-*/
+/* =====================================================
+   HOME
+===================================================== */
 
 app.get("/", (req, res) => {
-
     res.sendFile(
         path.join(
             PUBLIC_DIR,
@@ -320,37 +253,27 @@ app.get("/", (req, res) => {
     );
 });
 
-/*
-========================================================
-CREATE SCRIPT
-========================================================
-*/
+/* =====================================================
+   CREATE SCRIPT
+===================================================== */
 
 app.post(
     "/api/create",
     (req, res) => {
-
         const source =
-            typeof req.body?.source ===
-            "string"
+            typeof req.body?.source === "string"
                 ? req.body.source
                 : "";
 
         if (!source.trim()) {
-
-            return res
-                .status(400)
-                .json({
-                    ok: false,
-                    error:
-                        "Script is empty"
-                });
+            return res.status(400).json({
+                ok: false,
+                error: "Script is empty"
+            });
         }
 
         const name =
-            cleanName(
-                req.body?.name
-            );
+            cleanName(req.body?.name);
 
         const id =
             randomHex(12);
@@ -359,31 +282,16 @@ app.post(
             readDB();
 
         db[id] = {
-
             id,
-
             name,
-
             source,
-
-            createdAt:
-                Date.now(),
-
-            updatedAt:
-                Date.now()
+            createdAt: Date.now(),
+            updatedAt: Date.now()
         };
 
         writeDB(db);
 
-        const loader =
-            `loadstring(game:HttpGet(${JSON.stringify(
-                `${DOMAIN}/api/loader/${id}`
-            )}))()`;
-
-        secure(res);
-
-        res.json({
-
+        secure(res).json({
             ok: true,
 
             id,
@@ -393,57 +301,45 @@ app.post(
             endpoint:
                 `${DOMAIN}/api/loader/${id}`,
 
-            loader
-
+            loader:
+                `loadstring(game:HttpGet(${JSON.stringify(
+                    `${DOMAIN}/api/loader/${id}`
+                )}))()`
         });
     }
 );
 
-/*
-========================================================
-EDIT
-========================================================
-*/
+/* =====================================================
+   EDIT SCRIPT
+===================================================== */
 
 app.post(
     "/api/edit/:id",
     (req, res) => {
-
         const db =
             readDB();
 
         const script =
-            db[
-                req.params.id
-            ];
+            db[req.params.id];
 
         if (!script) {
-
-            return res
-                .status(404)
-                .json({
-                    ok: false,
-                    error:
-                        "Script not found"
-                });
+            return res.status(404).json({
+                ok: false,
+                error: "Script not found"
+            });
         }
 
         if (
             typeof req.body?.source ===
             "string"
         ) {
-
             if (
                 !req.body.source.trim()
             ) {
-
-                return res
-                    .status(400)
-                    .json({
-                        ok: false,
-                        error:
-                            "Script is empty"
-                    });
+                return res.status(400).json({
+                    ok: false,
+                    error: "Script is empty"
+                });
             }
 
             script.source =
@@ -455,7 +351,6 @@ app.post(
                 "string" &&
             req.body.name.trim()
         ) {
-
             script.name =
                 cleanName(
                     req.body.name
@@ -467,37 +362,24 @@ app.post(
 
         writeDB(db);
 
-        secure(res);
-
-        res.json({
-
+        secure(res).json({
             ok: true,
 
-            id:
-                script.id,
+            id: script.id,
 
-            name:
-                script.name,
+            name: script.name,
 
             loader:
                 `loadstring(game:HttpGet(${JSON.stringify(
                     `${DOMAIN}/api/loader/${script.id}`
                 )}))()`
-
         });
     }
 );
 
-/*
-========================================================
-L1
-========================================================
-
-L1 chỉ lấy challenge L2.
-
-Không có source.
-========================================================
-*/
+/* =====================================================
+   L1
+===================================================== */
 
 app.get(
     "/api/loader/:id",
@@ -513,9 +395,7 @@ app.get(
             readDB();
 
         const script =
-            db[
-                req.params.id
-            ];
+            db[req.params.id];
 
         if (!script) {
             return block(res);
@@ -527,54 +407,178 @@ app.get(
             );
 
         /*
-            L1 Lua bootstrap.
-        */
+         * L1 được tạo động.
+         * L1 nhận challenge L2 rồi
+         * tự chạy toàn bộ chain.
+         */
 
         const lua = `
 local HttpService = game:GetService("HttpService")
+
+local DOMAIN = ${JSON.stringify(DOMAIN)}
 
 local SESSION = ${JSON.stringify(
             session.id
         )}
 
-local TOKEN = ${JSON.stringify(
+local L2_TOKEN = ${JSON.stringify(
             session.l2.token
         )}
 
-local NONCE = ${JSON.stringify(
+local L2_NONCE = ${JSON.stringify(
             session.l2.nonce
         )}
 
-local URL = ${JSON.stringify(
-            `${DOMAIN}/api/l3`
-        )}
+local function postJSON(url, body)
 
-local response = request({
-    Url = URL,
-    Method = "POST",
-    Headers = {
-        ["Content-Type"] = "application/json"
-    },
-    Body = HttpService:JSONEncode({
-        session = SESSION,
-        token = TOKEN,
-        nonce = NONCE
-    })
-})
+    local ok, response = pcall(function()
 
-if response.StatusCode ~= 200 then
-    error("LEXINX BLOCK")
+        return request({
+            Url = url,
+
+            Method = "POST",
+
+            Headers = {
+                ["Content-Type"] =
+                    "application/json"
+            },
+
+            Body =
+                HttpService:JSONEncode(body)
+        })
+
+    end)
+
+    if not ok then
+        error("LEXINX BLOCK")
+    end
+
+    if not response then
+        error("LEXINX BLOCK")
+    end
+
+    if response.StatusCode ~= 200 then
+        error(
+            "LEXINX BLOCK HTTP " ..
+            tostring(response.StatusCode)
+        )
+    end
+
+    local decoded, data =
+        pcall(function()
+
+            return HttpService:JSONDecode(
+                response.Body
+            )
+
+        end)
+
+    if not decoded then
+        error("LEXINX BLOCK")
+    end
+
+    if type(data) ~= "table" then
+        error("LEXINX BLOCK")
+    end
+
+    if data.ok ~= true then
+        error("LEXINX BLOCK")
+    end
+
+    return data
 end
 
-local data = HttpService:JSONDecode(
-    response.Body
+--------------------------------------------------------
+-- L2 -> L3
+--------------------------------------------------------
+
+local L3 = postJSON(
+    DOMAIN .. "/api/l3",
+    {
+        session = SESSION,
+        token = L2_TOKEN,
+        nonce = L2_NONCE
+    }
 )
 
-if not data.ok then
+if L3.stage ~= 3 then
     error("LEXINX BLOCK")
 end
 
-print("LEXINX stage:", data.stage)
+--------------------------------------------------------
+-- L3 -> L4
+--------------------------------------------------------
+
+local L4 = postJSON(
+    DOMAIN .. "/api/l4",
+    {
+        session = L3.session,
+        token = L3.token,
+        nonce = L3.nonce
+    }
+)
+
+if L4.stage ~= 4 then
+    error("LEXINX BLOCK")
+end
+
+--------------------------------------------------------
+-- L4 -> L5
+--------------------------------------------------------
+
+local L5 = postJSON(
+    DOMAIN .. "/api/l5",
+    {
+        session = L4.session,
+        token = L4.token,
+        nonce = L4.nonce
+    }
+)
+
+if L5.stage ~= 5 then
+    error("LEXINX BLOCK")
+end
+
+--------------------------------------------------------
+-- L5 -> SOURCE
+--------------------------------------------------------
+
+local RESULT = postJSON(
+    DOMAIN .. "/api/data",
+    {
+        session = L5.session,
+        token = L5.token,
+        nonce = L5.nonce
+    }
+)
+
+if type(RESULT.code) ~= "string" then
+    error("LEXINX BLOCK: SOURCE MISSING")
+end
+
+--------------------------------------------------------
+-- EXECUTE
+--------------------------------------------------------
+
+local fn, compileError =
+    loadstring(RESULT.code)
+
+if not fn then
+    error(
+        "LEXINX COMPILE ERROR: " ..
+        tostring(compileError)
+    )
+end
+
+local success, runtimeError =
+    pcall(fn)
+
+if not success then
+    error(
+        "LEXINX RUNTIME ERROR: " ..
+        tostring(runtimeError)
+    )
+end
 `;
 
         secure(res)
@@ -583,16 +587,13 @@ print("LEXINX stage:", data.stage)
     }
 );
 
-/*
-========================================================
-L2 → L3
-========================================================
-*/
+/* =====================================================
+   L2 -> L3
+===================================================== */
 
 app.get(
     "/api/l3",
     (req, res) => {
-
         return block(res);
     }
 );
@@ -611,26 +612,21 @@ app.post(
             session,
             token,
             nonce
-        } =
-            req.body || {};
+        } = req.body || {};
 
         const s =
-            getSession(
-                session
-            );
+            getSession(session);
 
         if (!s) {
             return block(res);
         }
 
-        if (
-            s.stage !== 2
-        ) {
+        if (s.stage !== 2) {
             return block(res);
         }
 
         if (
-            !consume(
+            !consumeChallenge(
                 s.l2,
                 token,
                 nonce
@@ -640,19 +636,16 @@ app.post(
         }
 
         s.l3 =
-            newChallenge();
+            createChallenge();
 
-        s.stage =
-            3;
+        s.stage = 3;
 
         secure(res).json({
-
             ok: true,
 
             stage: 3,
 
-            session:
-                s.id,
+            session: s.id,
 
             token:
                 s.l3.token,
@@ -662,21 +655,17 @@ app.post(
 
             next:
                 `${DOMAIN}/api/l4`
-
         });
     }
 );
 
-/*
-========================================================
-L3 → L4
-========================================================
-*/
+/* =====================================================
+   L3 -> L4
+===================================================== */
 
 app.get(
     "/api/l4",
     (req, res) => {
-
         return block(res);
     }
 );
@@ -695,26 +684,21 @@ app.post(
             session,
             token,
             nonce
-        } =
-            req.body || {};
+        } = req.body || {};
 
         const s =
-            getSession(
-                session
-            );
+            getSession(session);
 
         if (!s) {
             return block(res);
         }
 
-        if (
-            s.stage !== 3
-        ) {
+        if (s.stage !== 3) {
             return block(res);
         }
 
         if (
-            !consume(
+            !consumeChallenge(
                 s.l3,
                 token,
                 nonce
@@ -724,19 +708,16 @@ app.post(
         }
 
         s.l4 =
-            newChallenge();
+            createChallenge();
 
-        s.stage =
-            4;
+        s.stage = 4;
 
         secure(res).json({
-
             ok: true,
 
             stage: 4,
 
-            session:
-                s.id,
+            session: s.id,
 
             token:
                 s.l4.token,
@@ -746,21 +727,17 @@ app.post(
 
             next:
                 `${DOMAIN}/api/l5`
-
         });
     }
 );
 
-/*
-========================================================
-L4 → L5
-========================================================
-*/
+/* =====================================================
+   L4 -> L5
+===================================================== */
 
 app.get(
     "/api/l5",
     (req, res) => {
-
         return block(res);
     }
 );
@@ -779,26 +756,21 @@ app.post(
             session,
             token,
             nonce
-        } =
-            req.body || {};
+        } = req.body || {};
 
         const s =
-            getSession(
-                session
-            );
+            getSession(session);
 
         if (!s) {
             return block(res);
         }
 
-        if (
-            s.stage !== 4
-        ) {
+        if (s.stage !== 4) {
             return block(res);
         }
 
         if (
-            !consume(
+            !consumeChallenge(
                 s.l4,
                 token,
                 nonce
@@ -808,19 +780,16 @@ app.post(
         }
 
         s.l5 =
-            newChallenge();
+            createChallenge();
 
-        s.stage =
-            5;
+        s.stage = 5;
 
         secure(res).json({
-
             ok: true,
 
             stage: 5,
 
-            session:
-                s.id,
+            session: s.id,
 
             token:
                 s.l5.token,
@@ -830,21 +799,17 @@ app.post(
 
             next:
                 `${DOMAIN}/api/data`
-
         });
     }
 );
 
-/*
-========================================================
-L5 → SOURCE
-========================================================
-*/
+/* =====================================================
+   L5 -> SOURCE
+===================================================== */
 
 app.get(
     "/api/data",
     (req, res) => {
-
         return block(res);
     }
 );
@@ -863,26 +828,21 @@ app.post(
             session,
             token,
             nonce
-        } =
-            req.body || {};
+        } = req.body || {};
 
         const s =
-            getSession(
-                session
-            );
+            getSession(session);
 
         if (!s) {
             return block(res);
         }
 
-        if (
-            s.stage !== 5
-        ) {
+        if (s.stage !== 5) {
             return block(res);
         }
 
         if (
-            !consume(
+            !consumeChallenge(
                 s.l5,
                 token,
                 nonce
@@ -895,50 +855,34 @@ app.post(
             readDB();
 
         const script =
-            db[
-                s.scriptID
-            ];
+            db[s.scriptID];
 
         if (!script) {
+            sessions.delete(s.id);
 
-            sessions.delete(
-                s.id
-            );
-
-            return res
-                .status(404)
-                .json({
-                    ok: false,
-                    error:
-                        "Script not found"
-                });
+            return res.status(404).json({
+                ok: false,
+                error: "Script not found"
+            });
         }
 
         /*
-            Source chỉ xuất hiện
-            ở bước cuối.
-        */
+         * Hủy session ngay khi challenge
+         * cuối được consume.
+         */
 
-        sessions.delete(
-            s.id
-        );
+        sessions.delete(s.id);
 
         secure(res).json({
-
             ok: true,
-
-            code:
-                script.source
-
+            code: script.source
         });
     }
 );
 
-/*
-========================================================
-LIST
-========================================================
-*/
+/* =====================================================
+   LIST SCRIPTS
+===================================================== */
 
 app.get(
     "/api/scripts",
@@ -950,44 +894,33 @@ app.get(
         const scripts =
             Object.values(db)
                 .reverse()
-                .map(
-                    script => ({
+                .map(script => ({
+                    id: script.id,
 
-                        id:
-                            script.id,
+                    name: script.name,
 
-                        name:
-                            script.name,
+                    createdAt:
+                        script.createdAt,
 
-                        createdAt:
-                            script.createdAt,
+                    updatedAt:
+                        script.updatedAt,
 
-                        updatedAt:
-                            script.updatedAt,
-
-                        loader:
-                            `loadstring(game:HttpGet(${JSON.stringify(
-                                `${DOMAIN}/api/loader/${script.id}`
-                            )}))()`
-
-                    })
-                );
+                    loader:
+                        `loadstring(game:HttpGet(${JSON.stringify(
+                            `${DOMAIN}/api/loader/${script.id}`
+                        )}))()`
+                }));
 
         secure(res).json({
-
             ok: true,
-
             scripts
-
         });
     }
 );
 
-/*
-========================================================
-DELETE
-========================================================
-*/
+/* =====================================================
+   DELETE
+===================================================== */
 
 app.delete(
     "/api/delete/:id",
@@ -997,18 +930,12 @@ app.delete(
             readDB();
 
         if (
-            !db[
-                req.params.id
-            ]
+            !db[req.params.id]
         ) {
-
-            return res
-                .status(404)
-                .json({
-                    ok: false,
-                    error:
-                        "Script not found"
-                });
+            return res.status(404).json({
+                ok: false,
+                error: "Script not found"
+            });
         }
 
         delete db[
@@ -1023,30 +950,25 @@ app.delete(
     }
 );
 
-/*
-========================================================
-UNKNOWN API
-========================================================
-*/
+/* =====================================================
+   UNKNOWN API
+===================================================== */
 
 app.use(
     "/api",
     (req, res) => {
-
         return block(res);
     }
 );
 
-/*
-========================================================
-404
-========================================================
-*/
+/* =====================================================
+   404
+===================================================== */
 
 app.use(
     (req, res) => {
 
-        res
+        secure(res)
             .status(404)
             .type("text/plain")
             .send(
@@ -1055,11 +977,9 @@ app.use(
     }
 );
 
-/*
-========================================================
-SESSION CLEANUP
-========================================================
-*/
+/* =====================================================
+   CLEANUP
+===================================================== */
 
 setInterval(
     () => {
@@ -1068,10 +988,7 @@ setInterval(
             Date.now();
 
         for (
-            const [
-                id,
-                session
-            ]
+            const [id, session]
             of sessions
         ) {
 
@@ -1079,10 +996,7 @@ setInterval(
                 now >
                 session.expiresAt
             ) {
-
-                sessions.delete(
-                    id
-                );
+                sessions.delete(id);
             }
         }
 
@@ -1090,18 +1004,16 @@ setInterval(
     30 * 1000
 );
 
-/*
-========================================================
-START
-========================================================
-*/
+/* =====================================================
+   START
+===================================================== */
 
 app.listen(
     PORT,
     () => {
 
         console.log(
-            "================================"
+            "======================================"
         );
 
         console.log(
@@ -1124,19 +1036,19 @@ app.listen(
         );
 
         console.log(
-            "TOKEN TTL:",
-            TOKEN_TTL,
-            "ms"
-        );
-
-        console.log(
             "SESSION TTL:",
             SESSION_TTL,
             "ms"
         );
 
         console.log(
-            "================================"
+            "TOKEN TTL:",
+            TOKEN_TTL,
+            "ms"
+        );
+
+        console.log(
+            "======================================"
         );
     }
 );
