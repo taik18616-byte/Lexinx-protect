@@ -19,16 +19,14 @@
 }
 
 body {
-
     margin: 0;
-
     min-height: 100vh;
 
     background:
         radial-gradient(
             circle at top,
             #181818,
-            #050505 55%
+            #050505 60%
         );
 
     color: white;
@@ -39,83 +37,136 @@ body {
 }
 
 .container {
-
     width:
-        min(900px, 94%);
+        min(950px, 94%);
 
     margin:
-        50px auto;
+        45px auto;
 }
 
 .logo {
-
     text-align: center;
 
     font-size: 44px;
 
     font-weight: 900;
 
-    letter-spacing: 2px;
+    letter-spacing: 3px;
 }
 
 .subtitle {
-
     text-align: center;
 
     color: #777;
 
     margin:
-        10px 0 40px;
+        10px 0 35px;
 }
 
 .card {
-
-    background:
-        rgba(15,15,15,.95);
+    background: #101010;
 
     border:
         1px solid #292929;
 
-    border-radius:
-        18px;
+    border-radius: 18px;
 
-    padding:
-        25px;
+    padding: 25px;
 
-    margin-bottom:
-        25px;
-
-    box-shadow:
-        0 15px 50px
-        rgba(0,0,0,.3);
+    margin-bottom: 25px;
 }
 
-h2 {
+.tabs {
+    display: flex;
 
-    margin-top: 0;
+    gap: 10px;
+
+    margin-bottom: 20px;
+}
+
+.tab {
+    flex: 1;
+
+    margin: 0;
+
+    background: #181818;
+
+    color: #aaa;
+
+    border:
+        1px solid #292929;
+}
+
+.tab.active {
+    background: white;
+
+    color: black;
 }
 
 input[type=file] {
-
     width: 100%;
 
-    padding: 15px;
+    padding: 14px;
+
+    background: #080808;
 
     border:
         1px solid #333;
 
-    border-radius:
-        10px;
+    border-radius: 10px;
 
-    background:
-        #080808;
+    color: #aaa;
+}
 
-    color:
-        #aaa;
+textarea {
+    width: 100%;
+
+    height: 330px;
+
+    resize: vertical;
+
+    background: #050505;
+
+    color: #ddd;
+
+    border:
+        1px solid #333;
+
+    border-radius: 12px;
+
+    padding: 15px;
+
+    font-family:
+        Consolas,
+        monospace;
+
+    font-size: 14px;
+
+    outline: none;
+}
+
+textarea:focus {
+    border-color: #666;
+}
+
+.name-input {
+    width: 100%;
+
+    padding: 13px;
+
+    margin-bottom: 12px;
+
+    background: #080808;
+
+    color: white;
+
+    border:
+        1px solid #333;
+
+    border-radius: 10px;
 }
 
 button {
-
     border: 0;
 
     border-radius: 9px;
@@ -135,113 +186,78 @@ button {
 }
 
 button:hover {
-
-    opacity: .8;
+    opacity: .82;
 }
 
 .status {
+    margin-top: 15px;
 
-    margin-top:
-        15px;
-
-    color:
-        #999;
+    color: #888;
 }
 
 .script {
-
-    background:
-        #080808;
+    background: #080808;
 
     border:
-        1px solid #242424;
+        1px solid #252525;
 
-    border-radius:
-        12px;
+    border-radius: 12px;
 
-    padding:
-        18px;
+    padding: 18px;
 
-    margin-top:
-        15px;
+    margin-top: 14px;
 }
 
 .script-name {
+    font-size: 18px;
 
-    font-size:
-        18px;
-
-    font-weight:
-        bold;
+    font-weight: bold;
 }
 
 .script-id {
+    color: #666;
 
-    margin-top:
-        5px;
+    font-size: 12px;
 
-    color:
-        #666;
-
-    font-size:
-        12px;
+    margin-top: 5px;
 }
 
 .loader {
+    margin-top: 12px;
 
-    margin-top:
-        12px;
+    padding: 12px;
 
-    padding:
-        12px;
+    background: #000;
 
-    background:
-        #000;
+    color: #999;
 
-    border-radius:
-        8px;
+    border-radius: 8px;
 
-    color:
-        #aaa;
+    overflow-x: auto;
 
-    font-family:
-        monospace;
+    white-space: nowrap;
 
-    font-size:
-        12px;
+    font-family: monospace;
 
-    overflow-x:
-        auto;
-
-    white-space:
-        nowrap;
+    font-size: 12px;
 }
 
 .actions {
+    display: flex;
 
-    display:
-        flex;
+    gap: 8px;
 
-    gap:
-        8px;
-
-    flex-wrap:
-        wrap;
+    flex-wrap: wrap;
 }
 
 .delete {
+    background: #222;
 
-    background:
-        #222;
-
-    color:
-        white;
+    color: white;
 }
 
 .empty {
-
-    color:
-        #666;
+    color: #666;
 }
 
 </style>
@@ -262,25 +278,64 @@ Lua / TXT Script Protection & Loader Manager
 
 <div class="card">
 
-<h2>
-Upload Script
-</h2>
+<h2>Create Protected Script</h2>
 
-<form id="uploadForm">
+<div class="tabs">
+
+<button
+    class="tab active"
+    id="fileTab"
+    onclick="switchTab('file')"
+>
+    Upload File
+</button>
+
+<button
+    class="tab"
+    id="codeTab"
+    onclick="switchTab('code')"
+>
+    Write Script
+</button>
+
+</div>
+
+<div id="fileMode">
 
 <input
     id="file"
     type="file"
-    name="script"
     accept=".lua,.txt"
-    required
 >
 
-<button type="submit">
+</div>
+
+<div
+    id="codeMode"
+    style="display:none;"
+>
+
+<input
+    id="scriptName"
+    class="name-input"
+    type="text"
+    placeholder="Script name, e.g. MyScript.lua"
+>
+
+<textarea
+    id="code"
+    placeholder="Write or paste your Lua script here..."
+    spellcheck="false"
+></textarea>
+
+</div>
+
+<button
+    id="protectButton"
+    onclick="protectScript()"
+>
 Protect Script
 </button>
-
-</form>
 
 <div
     id="status"
@@ -305,50 +360,105 @@ Loading...
 
 <script>
 
-const form =
-    document.getElementById(
-        "uploadForm"
-    );
+let mode = "file";
 
-const status =
-    document.getElementById(
-        "status"
-    );
+function switchTab(type) {
 
-form.addEventListener(
-    "submit",
-    async event => {
+    mode = type;
 
-        event.preventDefault();
-
-        const file =
-            document.getElementById(
-                "file"
-            ).files[0];
-
-        if (!file) {
-            return;
-        }
-
-        status.textContent =
-            "Uploading...";
-
-        const body =
-            new FormData();
-
-        body.append(
-            "script",
-            file
+    const fileMode =
+        document.getElementById(
+            "fileMode"
         );
 
-        try {
+    const codeMode =
+        document.getElementById(
+            "codeMode"
+        );
+
+    const fileTab =
+        document.getElementById(
+            "fileTab"
+        );
+
+    const codeTab =
+        document.getElementById(
+            "codeTab"
+        );
+
+    if (type === "file") {
+
+        fileMode.style.display =
+            "block";
+
+        codeMode.style.display =
+            "none";
+
+        fileTab.classList.add(
+            "active"
+        );
+
+        codeTab.classList.remove(
+            "active"
+        );
+
+    } else {
+
+        fileMode.style.display =
+            "none";
+
+        codeMode.style.display =
+            "block";
+
+        fileTab.classList.remove(
+            "active"
+        );
+
+        codeTab.classList.add(
+            "active"
+        );
+    }
+}
+
+async function protectScript() {
+
+    const status =
+        document.getElementById(
+            "status"
+        );
+
+    status.textContent =
+        "Processing...";
+
+    try {
+
+        if (mode === "file") {
+
+            const file =
+                document.getElementById(
+                    "file"
+                ).files[0];
+
+            if (!file) {
+                throw new Error(
+                    "Please select a .lua or .txt file."
+                );
+            }
+
+            const formData =
+                new FormData();
+
+            formData.append(
+                "script",
+                file
+            );
 
             const response =
                 await fetch(
                     "/api/upload",
                     {
                         method: "POST",
-                        body
+                        body: formData
                     }
                 );
 
@@ -356,7 +466,6 @@ form.addEventListener(
                 await response.json();
 
             if (!response.ok) {
-
                 throw new Error(
                     data.error ||
                     "Upload failed"
@@ -364,21 +473,79 @@ form.addEventListener(
             }
 
             status.textContent =
-                "Protected: " +
+                "Protected successfully: " +
                 data.id;
 
-            form.reset();
+            document.getElementById(
+                "file"
+            ).value = "";
 
-            await loadScripts();
+        } else {
 
-        } catch (error) {
+            const code =
+                document.getElementById(
+                    "code"
+                ).value;
+
+            const name =
+                document.getElementById(
+                    "scriptName"
+                ).value.trim() ||
+                "script.lua";
+
+            if (!code.trim()) {
+                throw new Error(
+                    "Please enter a script."
+                );
+            }
+
+            const response =
+                await fetch(
+                    "/api/create",
+                    {
+                        method: "POST",
+
+                        headers: {
+                            "Content-Type":
+                                "application/json"
+                        },
+
+                        body: JSON.stringify({
+                            code,
+                            name
+                        })
+                    }
+                );
+
+            const data =
+                await response.json();
+
+            if (!response.ok) {
+                throw new Error(
+                    data.error ||
+                    "Creation failed"
+                );
+            }
 
             status.textContent =
-                "ERROR: " +
-                error.message;
+                "Protected successfully: " +
+                data.id;
+
+            document.getElementById(
+                "code"
+            ).value = "";
+
         }
+
+        await loadScripts();
+
+    } catch (error) {
+
+        status.textContent =
+            "ERROR: " +
+            error.message;
     }
-);
+}
 
 async function loadScripts() {
 
@@ -404,7 +571,7 @@ async function loadScripts() {
 
             box.innerHTML =
                 `<div class="empty">
-                    No scripts uploaded.
+                    No protected scripts.
                 </div>`;
 
             return;
@@ -437,7 +604,8 @@ async function loadScripts() {
                 </div>
 
                 <div class="script-id">
-                    ID: ${escapeHTML(
+                    ID:
+                    ${escapeHTML(
                         script.id
                     )}
                 </div>
@@ -463,66 +631,57 @@ async function loadScripts() {
 
             item
                 .querySelector(".copy")
-                .addEventListener(
-                    "click",
-                    async () => {
+                .onclick = async () => {
 
-                        await navigator
-                            .clipboard
-                            .writeText(
-                                loader
-                            );
+                    await navigator
+                        .clipboard
+                        .writeText(
+                            loader
+                        );
 
-                        item
-                            .querySelector(
-                                ".copy"
-                            )
-                            .textContent =
-                            "Copied!";
-                    }
-                );
+                    item
+                        .querySelector(
+                            ".copy"
+                        )
+                        .textContent =
+                        "Copied!";
+                };
 
             item
                 .querySelector(".delete")
-                .addEventListener(
-                    "click",
-                    async () => {
+                .onclick = async () => {
 
-                        const yes =
-                            confirm(
-                                "Delete this script?"
-                            );
-
-                        if (!yes) {
-                            return;
-                        }
-
-                        const result =
-                            await fetch(
-                                "/api/scripts/" +
-                                encodeURIComponent(
-                                    script.id
-                                ),
-                                {
-                                    method:
-                                        "DELETE"
-                                }
-                            );
-
-                        if (
-                            result.ok
-                        ) {
-                            loadScripts();
-                        }
+                    if (
+                        !confirm(
+                            "Delete this script?"
+                        )
+                    ) {
+                        return;
                     }
-                );
+
+                    const result =
+                        await fetch(
+                            "/api/scripts/" +
+                            encodeURIComponent(
+                                script.id
+                            ),
+                            {
+                                method:
+                                    "DELETE"
+                            }
+                        );
+
+                    if (result.ok) {
+                        loadScripts();
+                    }
+                };
 
             box.appendChild(
                 item
             );
         }
 
-    } catch {
+    } catch (error) {
 
         box.innerHTML =
             `<div class="empty">
@@ -534,27 +693,22 @@ async function loadScripts() {
 function escapeHTML(value) {
 
     return String(value)
-
         .replaceAll(
             "&",
             "&amp;"
         )
-
         .replaceAll(
             "<",
             "&lt;"
         )
-
         .replaceAll(
             ">",
             "&gt;"
         )
-
         .replaceAll(
             '"',
             "&quot;"
         )
-
         .replaceAll(
             "'",
             "&#039;"
@@ -567,4 +721,4 @@ loadScripts();
 
 </body>
 
-</html>
+    </html>
