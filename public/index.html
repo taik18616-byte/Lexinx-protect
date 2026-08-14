@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="vi">
 
 <head>
 
@@ -7,7 +7,7 @@
 
 <meta
     name="viewport"
-    content="width=device-width, initial-scale=1.0"
+    content="width=device-width,initial-scale=1"
 >
 
 <title>LEXINX PROTECT</title>
@@ -20,301 +20,89 @@
 
 body {
     margin: 0;
-    background: #070707;
-    color: #fff;
-    font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
-}
-
-button,
-input,
-textarea {
-    font: inherit;
-}
-
-button {
-    cursor: pointer;
-}
-
-.hidden {
-    display: none !important;
-}
-
-/* AUTH */
-
-#authPage {
-    min-height: 100vh;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    padding: 20px;
-}
-
-.authBox {
-    width: 100%;
-    max-width: 430px;
-
-    background: #111;
-
-    border:
-        1px solid #292929;
-
-    border-radius: 16px;
-
-    padding: 30px;
-
-    box-shadow:
-        0 20px 70px
-        rgba(0, 0, 0, .5);
-}
-
-.logo {
-    font-size: 28px;
-    font-weight: bold;
-}
-
-.logoSub {
-    color: #777;
-    margin-top: 5px;
-    margin-bottom: 25px;
-}
-
-.authTitle {
-    font-size: 20px;
-    margin-bottom: 15px;
-}
-
-input,
-textarea {
-    width: 100%;
-
-    background: #080808;
-
-    border:
-        1px solid #303030;
-
+    background: #050505;
     color: white;
-
-    border-radius: 9px;
-
-    padding: 12px;
-
-    outline: none;
+    font-family: Arial, sans-serif;
 }
 
-input:focus,
-textarea:focus {
-    border-color: #666;
-}
-
-.authBox input {
-    margin-bottom: 10px;
-}
-
-.primary {
-    width: 100%;
-
-    background: white;
-    color: black;
-
-    border: 0;
-
-    padding: 12px;
-
-    border-radius: 9px;
-
-    font-weight: bold;
-
-    margin-top: 5px;
-}
-
-.secondary {
-    background: #1b1b1b;
-    color: white;
-
-    border:
-        1px solid #333;
-
-    padding: 10px 14px;
-
-    border-radius: 8px;
-}
-
-.message {
-    margin-top: 12px;
-    color: #999;
-    font-size: 14px;
-}
-
-.credentials {
-    margin-top: 15px;
-
-    padding: 14px;
-
-    background: #080808;
-
-    border:
-        1px solid #292929;
-
-    border-radius: 9px;
-}
-
-.credentials div {
-    margin: 5px 0;
-
-    word-break: break-all;
-}
-
-.credentials b {
-    color: #fff;
-}
-
-/* APP */
-
-#appPage {
-    min-height: 100vh;
-}
-
-.topbar {
-    height: 65px;
-
-    border-bottom:
-        1px solid #222;
-
-    display: flex;
-    align-items: center;
-
-    justify-content: space-between;
-
-    padding:
-        0 25px;
-
-    background: #0c0c0c;
-}
-
-.topLogo {
-    font-weight: bold;
-    font-size: 20px;
-}
-
-.userArea {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-
-    color: #aaa;
-}
-
-.username {
-    color: white;
-}
-
-.main {
-    width:
-        min(1100px, 94%);
-
-    margin:
-        30px auto;
+.container {
+    width: min(1000px, 94%);
+    margin: 30px auto;
 }
 
 .card {
-    background: #111;
-
-    border:
-        1px solid #252525;
-
-    border-radius: 13px;
-
+    background: #101010;
+    border: 1px solid #292929;
+    border-radius: 14px;
     padding: 20px;
-
     margin-bottom: 20px;
 }
 
-.card h2 {
-    margin-top: 0;
-}
-
-.nameInput {
-    margin-bottom: 12px;
+input,
+textarea {
+    width: 100%;
+    background: #080808;
+    color: white;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 12px;
+    margin-bottom: 10px;
+    outline: none;
 }
 
 textarea {
-    min-height: 340px;
-
+    min-height: 350px;
     resize: vertical;
-
-    font-family:
-        Consolas,
-        monospace;
-
-    line-height: 1.5;
+    font-family: Consolas, monospace;
 }
 
-.actions {
-    display: flex;
+button {
+    border: 0;
+    border-radius: 7px;
+    padding: 10px 15px;
+    margin: 3px;
+    cursor: pointer;
+    font-weight: bold;
+}
 
-    flex-wrap: wrap;
+.primary {
+    background: white;
+    color: black;
+}
 
-    gap: 8px;
-
-    margin-top: 12px;
+.danger {
+    background: #351010;
+    color: #ff7777;
 }
 
 .script {
-    border:
-        1px solid #282828;
-
+    background: #080808;
+    border: 1px solid #292929;
     border-radius: 10px;
-
     padding: 15px;
-
     margin-top: 12px;
-
-    background: #0b0b0b;
 }
 
-.scriptName {
-    font-weight: bold;
-    font-size: 17px;
-}
-
-.scriptID {
-    color: #666;
-
-    font-size: 12px;
-
-    margin-top: 5px;
-
-    word-break: break-all;
-}
-
-.loader {
-    margin-top: 12px;
-
-    background: #050505;
-
-    border:
-        1px solid #252525;
-
-    border-radius: 7px;
-
-    padding: 12px;
-
-    font-family: monospace;
-
-    font-size: 13px;
-
-    word-break: break-all;
-}
-
-.empty {
+.id {
     color: #777;
+    font-size: 12px;
+    margin: 8px 0;
+    word-break: break-all;
+}
 
-    padding: 20px 0;
+pre {
+    white-space: pre-wrap;
+    word-break: break-all;
+    background: #030303;
+    border: 1px solid #222;
+    padding: 12px;
+    border-radius: 8px;
+    max-height: 300px;
+    overflow: auto;
+}
+
+#message {
+    color: #aaa;
 }
 
 </style>
@@ -323,832 +111,280 @@ textarea {
 
 <body>
 
+<div class="container">
 
-<!-- =====================================================
-     AUTH PAGE
-====================================================== -->
+<div class="card">
 
-<div id="authPage">
+<h1>LEXINX PROTECT</h1>
 
-    <div class="authBox">
+<p>Upload / Paste Lua Source</p>
 
-        <div class="logo">
-            LEXINX PROTECT
-        </div>
-
-        <div class="logoSub">
-            Script Protection Manager
-        </div>
-
-        <div class="authTitle">
-            Login
-        </div>
-
-        <input
-            id="loginUsername"
-            placeholder="Username"
-            autocomplete="username"
-        >
-
-        <input
-            id="loginPassword"
-            placeholder="Password"
-            type="password"
-            autocomplete="current-password"
-        >
-
-        <button
-            class="primary"
-            onclick="login()"
-        >
-            LOGIN
-        </button>
-
-        <div
-            id="loginMessage"
-            class="message"
-        ></div>
-
-        <hr
-            style="
-                border:0;
-                border-top:1px solid #252525;
-                margin:25px 0;
-            "
-        >
-
-        <div class="authTitle">
-            New account
-        </div>
-
-        <div
-            style="
-                color:#777;
-                font-size:14px;
-                margin-bottom:12px;
-            "
-        >
-            Create an account and LEXINX
-            will automatically generate
-            your username and password.
-        </div>
-
-        <button
-            class="secondary"
-            style="width:100%;"
-            onclick="register()"
-        >
-            CREATE ACCOUNT
-        </button>
-
-        <div
-            id="registerMessage"
-            class="message"
-        ></div>
-
-        <div
-            id="credentials"
-            class="credentials hidden"
-        >
-            <div>
-                Username:
-                <b id="generatedUsername"></b>
-            </div>
-
-            <div>
-                Password:
-                <b id="generatedPassword"></b>
-            </div>
-
-            <button
-                class="secondary"
-                onclick="copyCredentials()"
-            >
-                COPY LOGIN
-            </button>
-        </div>
-
-    </div>
-
-</div>
-
-
-<!-- =====================================================
-     MAIN APP
-====================================================== -->
-
-<div
-    id="appPage"
-    class="hidden"
+<input
+    id="name"
+    placeholder="Script name"
 >
 
-    <div class="topbar">
+<textarea
+    id="source"
+    placeholder="Paste your Lua source here..."
+></textarea>
 
-        <div class="topLogo">
-            LEXINX PROTECT
-        </div>
+<input
+    id="editID"
+    type="hidden"
+>
 
-        <div class="userArea">
+<button
+    class="primary"
+    onclick="createScript()"
+>
+CREATE
+</button>
 
-            <span>
-                Account:
-            </span>
+<button
+    onclick="saveEdit()"
+>
+SAVE EDIT
+</button>
 
-            <span
-                id="currentUsername"
-                class="username"
-            >
-            </span>
+<button
+    onclick="clearEditor()"
+>
+CLEAR
+</button>
 
-            <button
-                class="secondary"
-                onclick="logout()"
-            >
-                LOGOUT
-            </button>
-
-        </div>
-
-    </div>
-
-
-    <div class="main">
-
-
-        <!-- EDITOR -->
-
-        <div class="card">
-
-            <h2>
-                Script Editor
-            </h2>
-
-            <input
-                id="scriptName"
-                class="nameInput"
-                placeholder="Script name"
-            >
-
-            <textarea
-                id="scriptSource"
-                placeholder="Paste your Lua source here..."
-            ></textarea>
-
-            <div class="actions">
-
-                <button
-                    class="secondary"
-                    onclick="createScript()"
-                >
-                    CREATE SCRIPT
-                </button>
-
-                <button
-                    class="secondary"
-                    onclick="updateScript()"
-                >
-                    SAVE EDIT
-                </button>
-
-                <button
-                    class="secondary"
-                    onclick="clearEditor()"
-                >
-                    CLEAR
-                </button>
-
-            </div>
-
-            <div
-                id="editorMessage"
-                class="message"
-            ></div>
-
-            <input
-                id="editingID"
-                type="hidden"
-            >
-
-        </div>
-
-
-        <!-- SCRIPTS -->
-
-        <div class="card">
-
-            <div
-                style="
-                    display:flex;
-                    align-items:center;
-                    justify-content:space-between;
-                    gap:10px;
-                    flex-wrap:wrap;
-                "
-            >
-
-                <h2
-                    style="margin:0;"
-                >
-                    My Scripts
-                </h2>
-
-                <button
-                    class="secondary"
-                    onclick="loadScripts()"
-                >
-                    REFRESH
-                </button>
-
-            </div>
-
-            <div
-                id="scripts"
-            ></div>
-
-        </div>
-
-    </div>
+<p id="message"></p>
 
 </div>
 
+<div class="card">
+
+<h2>Scripts</h2>
+
+<button onclick="loadScripts()">
+REFRESH
+</button>
+
+<div id="scripts">
+Loading...
+</div>
+
+</div>
+
+</div>
 
 <script>
 
-/* =====================================================
-   HELPERS
-====================================================== */
+function escapeHTML(value) {
 
-function setText(id, text) {
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;");
 
-    document.getElementById(id)
-        .textContent = text;
 }
 
-function escapeHTML(text) {
-
-    return String(text)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
-}
-
-
-/* =====================================================
-   CHECK LOGIN
-====================================================== */
-
-async function checkLogin() {
+async function copyText(text) {
 
     try {
 
-        const response =
-            await fetch("/api/me");
-
-        const data =
-            await response.json();
-
-        if (
-            response.ok &&
-            data.ok
-        ) {
-
-            showApp(
-                data.username
-            );
-
-        } else {
-
-            showAuth();
-        }
+        await navigator.clipboard.writeText(text);
 
     } catch {
 
-        showAuth();
-    }
-}
+        const area =
+            document.createElement("textarea");
 
+        area.value = text;
 
-/* =====================================================
-   SHOW PAGES
-====================================================== */
+        document.body.appendChild(area);
 
-function showAuth() {
+        area.select();
 
-    document
-        .getElementById("authPage")
-        .classList.remove("hidden");
+        document.execCommand("copy");
 
-    document
-        .getElementById("appPage")
-        .classList.add("hidden");
-}
+        area.remove();
 
-function showApp(username) {
-
-    document
-        .getElementById("authPage")
-        .classList.add("hidden");
-
-    document
-        .getElementById("appPage")
-        .classList.remove("hidden");
-
-    setText(
-        "currentUsername",
-        username
-    );
-
-    loadScripts();
-}
-
-
-/* =====================================================
-   REGISTER
-====================================================== */
-
-async function register() {
-
-    setText(
-        "registerMessage",
-        "Creating account..."
-    );
-
-    try {
-
-        const response =
-            await fetch(
-                "/api/register",
-                {
-                    method: "POST"
-                }
-            );
-
-        const data =
-            await response.json();
-
-        if (
-            !response.ok ||
-            !data.ok
-        ) {
-
-            setText(
-                "registerMessage",
-                data.error ||
-                "Registration failed."
-            );
-
-            return;
-        }
-
-        document
-            .getElementById(
-                "generatedUsername"
-            )
-            .textContent =
-                data.username;
-
-        document
-            .getElementById(
-                "generatedPassword"
-            )
-            .textContent =
-                data.password;
-
-        document
-            .getElementById(
-                "credentials"
-            )
-            .classList.remove(
-                "hidden"
-            );
-
-        setText(
-            "registerMessage",
-            "Account created."
-        );
-
-    } catch (error) {
-
-        setText(
-            "registerMessage",
-            error.message
-        );
-    }
-}
-
-
-/* =====================================================
-   COPY CREDENTIALS
-====================================================== */
-
-async function copyCredentials() {
-
-    const username =
-        document
-            .getElementById(
-                "generatedUsername"
-            )
-            .textContent;
-
-    const password =
-        document
-            .getElementById(
-                "generatedPassword"
-            )
-            .textContent;
-
-    await copyText(
-        "Username: " +
-        username +
-        "\nPassword: " +
-        password
-    );
-}
-
-
-/* =====================================================
-   LOGIN
-====================================================== */
-
-async function login() {
-
-    const username =
-        document
-            .getElementById(
-                "loginUsername"
-            )
-            .value
-            .trim();
-
-    const password =
-        document
-            .getElementById(
-                "loginPassword"
-            )
-            .value;
-
-    if (!username || !password) {
-
-        setText(
-            "loginMessage",
-            "Enter username and password."
-        );
-
-        return;
     }
 
-    setText(
-        "loginMessage",
-        "Logging in..."
-    );
-
-    try {
-
-        const response =
-            await fetch(
-                "/api/login",
-                {
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body:
-                        JSON.stringify({
-                            username,
-                            password
-                        })
-                }
-            );
-
-        const data =
-            await response.json();
-
-        if (
-            !response.ok ||
-            !data.ok
-        ) {
-
-            setText(
-                "loginMessage",
-                data.error ||
-                "Login failed."
-            );
-
-            return;
-        }
-
-        setText(
-            "loginMessage",
-            ""
-        );
-
-        showApp(
-            data.username
-        );
-
-    } catch (error) {
-
-        setText(
-            "loginMessage",
-            error.message
-        );
-    }
 }
-
-
-/* =====================================================
-   LOGOUT
-====================================================== */
-
-async function logout() {
-
-    await fetch(
-        "/api/logout",
-        {
-            method: "POST"
-        }
-    );
-
-    showAuth();
-}
-
-
-/* =====================================================
-   CREATE SCRIPT
-====================================================== */
 
 async function createScript() {
 
     const name =
-        document
-            .getElementById(
-                "scriptName"
-            )
-            .value
-            .trim();
+        document.getElementById("name").value;
 
     const source =
-        document
-            .getElementById(
-                "scriptSource"
-            )
-            .value;
+        document.getElementById("source").value;
 
     if (!source.trim()) {
 
-        setText(
-            "editorMessage",
-            "Script source is empty."
+        alert("Script is empty.");
+
+        return;
+
+    }
+
+    const response =
+        await fetch("/api/create", {
+
+            method: "POST",
+
+            headers: {
+                "Content-Type":
+                    "application/json"
+            },
+
+            body: JSON.stringify({
+                name,
+                source
+            })
+
+        });
+
+    const data =
+        await response.json();
+
+    if (!data.ok) {
+
+        alert(
+            data.error ||
+            "Create failed"
         );
 
         return;
+
     }
 
-    try {
+    /*
+        COPY LAYER 1
 
-        const response =
-            await fetch(
-                "/api/create",
-                {
-                    method: "POST",
+        Ví dụ:
 
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
+        loadstring(game:HttpGet(
+            "https://domain/api/loader/ID"
+        ))()
+    */
 
-                    body:
-                        JSON.stringify({
-                            name,
-                            source
-                        })
-                }
-            );
+    await copyText(
+        data.layer1
+    );
 
-        const data =
-            await response.json();
+    document.getElementById("message")
+        .textContent =
+        "Created — Layer 1 copied.";
 
-        if (
-            !response.ok ||
-            !data.ok
-        ) {
+    clearEditor();
 
-            setText(
-                "editorMessage",
-                data.error ||
-                "Create failed."
-            );
+    loadScripts();
 
-            return;
-        }
-
-        setText(
-            "editorMessage",
-            "Script created. Loader copied."
-        );
-
-        await copyText(
-            data.loader
-        );
-
-        clearEditor();
-
-        await loadScripts();
-
-    } catch (error) {
-
-        setText(
-            "editorMessage",
-            error.message
-        );
-    }
 }
 
-
-/* =====================================================
-   EDIT SCRIPT
-====================================================== */
-
-async function editScript(id) {
-
-    try {
-
-        const response =
-            await fetch(
-                "/api/source/" +
-                encodeURIComponent(id)
-            );
-
-        const data =
-            await response.json();
-
-        if (
-            !response.ok ||
-            !data.ok
-        ) {
-
-            alert(
-                data.error ||
-                "Unable to load script."
-            );
-
-            return;
-        }
-
-        document
-            .getElementById(
-                "editingID"
-            )
-            .value =
-                data.id;
-
-        document
-            .getElementById(
-                "scriptName"
-            )
-            .value =
-                data.name;
-
-        document
-            .getElementById(
-                "scriptSource"
-            )
-            .value =
-                data.source;
-
-        window.scrollTo({
-            top: 0,
-            behavior: "smooth"
-        });
-
-    } catch (error) {
-
-        alert(
-            error.message
-        );
-    }
-}
-
-
-/* =====================================================
-   SAVE EDIT
-====================================================== */
-
-async function updateScript() {
+async function saveEdit() {
 
     const id =
-        document
-            .getElementById(
-                "editingID"
-            )
-            .value
-            .trim();
+        document.getElementById("editID").value;
 
     if (!id) {
 
-        setText(
-            "editorMessage",
-            "Click EDIT on a script first."
+        alert(
+            "Choose EDIT first."
         );
 
         return;
+
     }
 
     const name =
-        document
-            .getElementById(
-                "scriptName"
-            )
-            .value
-            .trim();
+        document.getElementById("name").value;
 
     const source =
-        document
-            .getElementById(
-                "scriptSource"
-            )
-            .value;
+        document.getElementById("source").value;
 
-    if (!source.trim()) {
+    const response =
+        await fetch(
+            "/api/edit/" +
+            encodeURIComponent(id),
+            {
 
-        setText(
-            "editorMessage",
-            "Script source is empty."
+                method: "POST",
+
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
+
+                body: JSON.stringify({
+                    name,
+                    source
+                })
+
+            }
+        );
+
+    const data =
+        await response.json();
+
+    if (!data.ok) {
+
+        alert(
+            data.error ||
+            "Edit failed"
         );
 
         return;
+
     }
 
-    try {
+    await copyText(
+        data.layer1
+    );
 
-        const response =
-            await fetch(
-                "/api/edit/" +
-                encodeURIComponent(id),
-                {
-                    method: "POST",
+    document.getElementById("message")
+        .textContent =
+        "Updated — new Layer 1 copied.";
 
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
+    clearEditor();
 
-                    body:
-                        JSON.stringify({
-                            name,
-                            source
-                        })
-                }
-            );
+    loadScripts();
 
-        const data =
-            await response.json();
-
-        if (
-            !response.ok ||
-            !data.ok
-        ) {
-
-            setText(
-                "editorMessage",
-                data.error ||
-                "Update failed."
-            );
-
-            return;
-        }
-
-        setText(
-            "editorMessage",
-            "Script updated."
-        );
-
-        await copyText(
-            data.loader
-        );
-
-        clearEditor();
-
-        await loadScripts();
-
-    } catch (error) {
-
-        setText(
-            "editorMessage",
-            error.message
-        );
-    }
 }
 
+async function editScript(id) {
 
-/* =====================================================
-   DELETE
-====================================================== */
+    const response =
+        await fetch(
+            "/api/source/" +
+            encodeURIComponent(id)
+        );
+
+    const data =
+        await response.json();
+
+    if (!data.ok) {
+
+        alert(data.error);
+
+        return;
+
+    }
+
+    document.getElementById("editID")
+        .value = data.id;
+
+    document.getElementById("name")
+        .value = data.name;
+
+    document.getElementById("source")
+        .value = data.source;
+
+    window.scrollTo({
+        top: 0,
+        behavior: "smooth"
+    });
+
+}
 
 async function deleteScript(id) {
 
@@ -1160,250 +396,148 @@ async function deleteScript(id) {
         return;
     }
 
-    try {
-
-        const response =
-            await fetch(
-                "/api/delete/" +
-                encodeURIComponent(id),
-                {
-                    method: "DELETE"
-                }
-            );
-
-        const data =
-            await response.json();
-
-        if (
-            !response.ok ||
-            !data.ok
-        ) {
-
-            alert(
-                data.error ||
-                "Delete failed."
-            );
-
-            return;
+    await fetch(
+        "/api/delete/" +
+        encodeURIComponent(id),
+        {
+            method: "DELETE"
         }
+    );
 
-        await loadScripts();
+    loadScripts();
 
-    } catch (error) {
-
-        alert(
-            error.message
-        );
-    }
 }
-
-
-/* =====================================================
-   LOAD SCRIPTS
-====================================================== */
 
 async function loadScripts() {
 
-    const container =
-        document.getElementById(
-            "scripts"
-        );
+    const box =
+        document.getElementById("scripts");
 
-    container.innerHTML =
-        '<div class="empty">Loading...</div>';
+    box.innerHTML = "Loading...";
 
     try {
 
         const response =
-            await fetch(
-                "/api/scripts"
-            );
-
-        if (
-            response.status === 401
-        ) {
-
-            showAuth();
-
-            return;
-        }
+            await fetch("/api/scripts");
 
         const data =
             await response.json();
 
-        if (
-            !response.ok ||
-            !data.ok
-        ) {
+        if (!data.ok) {
 
-            container.innerHTML =
-                '<div class="empty">' +
+            box.innerHTML =
                 escapeHTML(
-                    data.error ||
-                    "Failed to load scripts."
-                ) +
-                "</div>";
-
-            return;
-        }
-
-        if (
-            !data.scripts.length
-        ) {
-
-            container.innerHTML =
-                '<div class="empty">' +
-                "You don't have any scripts yet." +
-                "</div>";
-
-            return;
-        }
-
-        container.innerHTML = "";
-
-        data.scripts.forEach(
-            script => {
-
-                const div =
-                    document.createElement(
-                        "div"
-                    );
-
-                div.className =
-                    "script";
-
-                div.innerHTML = `
-
-                    <div class="scriptName">
-                        ${escapeHTML(
-                            script.name
-                        )}
-                    </div>
-
-                    <div class="scriptID">
-                        ID:
-                        ${escapeHTML(
-                            script.id
-                        )}
-                    </div>
-
-                    <div class="loader">
-                        ${escapeHTML(
-                            script.loader
-                        )}
-                    </div>
-
-                    <div class="actions">
-
-                        <button
-                            class="secondary"
-                            onclick='copyText(${JSON.stringify(script.loader)})'
-                        >
-                            COPY LOADER
-                        </button>
-
-                        <button
-                            class="secondary"
-                            onclick='editScript(${JSON.stringify(script.id)})'
-                        >
-                            EDIT
-                        </button>
-
-                        <button
-                            class="secondary"
-                            onclick='deleteScript(${JSON.stringify(script.id)})'
-                        >
-                            DELETE
-                        </button>
-
-                    </div>
-                `;
-
-                container.appendChild(
-                    div
+                    data.error
                 );
-            }
-        );
+
+            return;
+
+        }
+
+        if (!data.scripts.length) {
+
+            box.innerHTML =
+                "No scripts.";
+
+            return;
+
+        }
+
+        box.innerHTML = "";
+
+        data.scripts.forEach(script => {
+
+            const div =
+                document.createElement("div");
+
+            div.className =
+                "script";
+
+            div.innerHTML = `
+
+<strong>
+    ${escapeHTML(script.name)}
+</strong>
+
+<div class="id">
+    ID: ${escapeHTML(script.id)}
+</div>
+
+<button
+    class="primary"
+    onclick='copyText(${JSON.stringify(script.layer1)})'
+>
+COPY LOADER
+</button>
+
+<button
+    onclick='copyText(${JSON.stringify(script.layer2)})'
+>
+COPY LAYER 2
+</button>
+
+<button
+    onclick='editScript(${JSON.stringify(script.id)})'
+>
+EDIT
+</button>
+
+<button
+    class="danger"
+    onclick='deleteScript(${JSON.stringify(script.id)})'
+>
+DELETE
+</button>
+
+<details>
+<summary>
+LAYER 1
+</summary>
+
+<pre>${escapeHTML(script.layer1)}</pre>
+
+</details>
+
+<details>
+<summary>
+LAYER 2
+</summary>
+
+<pre>${escapeHTML(script.layer2)}</pre>
+
+</details>
+
+`;
+
+            box.appendChild(div);
+
+        });
 
     } catch (error) {
 
-        container.innerHTML =
-            '<div class="empty">' +
-            escapeHTML(
-                error.message
-            ) +
-            "</div>";
+        box.innerHTML =
+            "Failed to load scripts.";
+
+        console.error(error);
+
     }
+
 }
-
-
-/* =====================================================
-   CLEAR
-====================================================== */
 
 function clearEditor() {
 
-    document
-        .getElementById(
-            "editingID"
-        )
+    document.getElementById("name")
         .value = "";
 
-    document
-        .getElementById(
-            "scriptName"
-        )
+    document.getElementById("source")
         .value = "";
 
-    document
-        .getElementById(
-            "scriptSource"
-        )
+    document.getElementById("editID")
         .value = "";
+
 }
 
-
-/* =====================================================
-   COPY
-====================================================== */
-
-async function copyText(text) {
-
-    try {
-
-        await navigator
-            .clipboard
-            .writeText(text);
-
-    } catch {
-
-        const area =
-            document.createElement(
-                "textarea"
-            );
-
-        area.value = text;
-
-        document.body.appendChild(
-            area
-        );
-
-        area.select();
-
-        document.execCommand(
-            "copy"
-        );
-
-        area.remove();
-    }
-}
-
-
-/* =====================================================
-   START
-====================================================== */
-
-checkLogin();
+loadScripts();
 
 </script>
 
