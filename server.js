@@ -10,10 +10,6 @@ const DOMAIN =
     process.env.DOMAIN ||
     "https://lexinx-protect.onrender.com";
 
-const ADMIN_TOKEN =
-    process.env.ADMIN_TOKEN ||
-    "CHANGE_THIS_ADMIN_TOKEN";
-
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "scripts.json");
 
@@ -26,17 +22,26 @@ app.use(express.static(path.join(__dirname, "public")));
 // ==================================================
 
 if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.mkdirSync(DATA_DIR, {
+        recursive: true
+    });
 }
 
 if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, "[]", "utf8");
+    fs.writeFileSync(
+        DATA_FILE,
+        "[]",
+        "utf8"
+    );
 }
 
 function readScripts() {
     try {
         return JSON.parse(
-            fs.readFileSync(DATA_FILE, "utf8")
+            fs.readFileSync(
+                DATA_FILE,
+                "utf8"
+            )
         );
     } catch {
         return [];
@@ -46,17 +51,22 @@ function readScripts() {
 function saveScripts(scripts) {
     fs.writeFileSync(
         DATA_FILE,
-        JSON.stringify(scripts, null, 2),
+        JSON.stringify(
+            scripts,
+            null,
+            2
+        ),
         "utf8"
     );
 }
 
 
 // ==================================================
-// ID GENERATOR
+// RANDOM ID
 // ==================================================
 
 function generateId() {
+
     const chars =
         "ABCDEFGHJKLMNPQRSTUVWXYZ" +
         "abcdefghijkmnopqrstuvwxyz" +
@@ -65,36 +75,26 @@ function generateId() {
     let id;
 
     do {
+
         id = "";
 
         for (let i = 0; i < 8; i++) {
+
             id += chars[
-                crypto.randomInt(0, chars.length)
+                crypto.randomInt(
+                    0,
+                    chars.length
+                )
             ];
         }
+
     } while (
-        readScripts().some(x => x.id === id)
+        readScripts().some(
+            script => script.id === id
+        )
     );
 
     return id;
-}
-
-
-// ==================================================
-// ADMIN AUTH
-// ==================================================
-
-function adminAuth(req, res, next) {
-    const token = req.get("X-Admin-Token");
-
-    if (!token || token !== ADMIN_TOKEN) {
-        return res.status(401).json({
-            ok: false,
-            error: "Unauthorized"
-        });
-    }
-
-    next();
 }
 
 
@@ -103,6 +103,7 @@ function adminAuth(req, res, next) {
 // ==================================================
 
 app.get("/", (req, res) => {
+
     res.sendFile(
         path.join(
             __dirname,
@@ -114,10 +115,11 @@ app.get("/", (req, res) => {
 
 
 // ==================================================
-// CREATE SCRIPT
+// CREATE
 // ==================================================
 
-app.post("/admin/create", adminAuth, (req, res) => {
+app.post("/admin/create", (req, res) => {
+
     const {
         name,
         payload
@@ -173,8 +175,9 @@ app.post("/admin/create", adminAuth, (req, res) => {
     const loader =
         `loadstring(game:HttpGet("${DOMAIN}/api/${id}"))()`;
 
-    res.json({
+    return res.json({
         ok: true,
+
         script: {
             id,
             name: script.name,
@@ -187,13 +190,14 @@ app.post("/admin/create", adminAuth, (req, res) => {
 
 
 // ==================================================
-// LIST SCRIPTS
+// LIST
 // ==================================================
 
-app.get("/admin/list", adminAuth, (req, res) => {
+app.get("/admin/list", (req, res) => {
+
     const scripts = readScripts();
 
-    res.json({
+    return res.json({
         ok: true,
 
         scripts: scripts.map(script => ({
@@ -210,13 +214,13 @@ app.get("/admin/list", adminAuth, (req, res) => {
 
 
 // ==================================================
-// REVOKE SCRIPT
+// REVOKE
 // ==================================================
 
 app.post(
     "/admin/revoke/:id",
-    adminAuth,
     (req, res) => {
+
         const scripts = readScripts();
 
         const script = scripts.find(
@@ -234,22 +238,21 @@ app.post(
 
         saveScripts(scripts);
 
-        res.json({
-            ok: true,
-            message: "Script revoked"
+        return res.json({
+            ok: true
         });
     }
 );
 
 
 // ==================================================
-// ENABLE SCRIPT
+// ENABLE
 // ==================================================
 
 app.post(
     "/admin/enable/:id",
-    adminAuth,
     (req, res) => {
+
         const scripts = readScripts();
 
         const script = scripts.find(
@@ -267,31 +270,33 @@ app.post(
 
         saveScripts(scripts);
 
-        res.json({
-            ok: true,
-            message: "Script enabled"
+        return res.json({
+            ok: true
         });
     }
 );
 
 
 // ==================================================
-// DELETE SCRIPT
+// DELETE
 // ==================================================
 
 app.delete(
     "/admin/delete/:id",
-    adminAuth,
     (req, res) => {
+
         let scripts = readScripts();
 
-        const oldLength = scripts.length;
+        const oldLength =
+            scripts.length;
 
         scripts = scripts.filter(
             x => x.id !== req.params.id
         );
 
-        if (scripts.length === oldLength) {
+        if (
+            scripts.length === oldLength
+        ) {
             return res.status(404).json({
                 ok: false,
                 error: "Script not found"
@@ -300,34 +305,18 @@ app.delete(
 
         saveScripts(scripts);
 
-        res.json({
-            ok: true,
-            message: "Script deleted"
+        return res.json({
+            ok: true
         });
     }
 );
 
 
 // ==================================================
-// PUBLIC PAYLOAD ENDPOINT
+// PUBLIC LOADER API
 // ==================================================
 
 app.get("/api/:id", (req, res) => {
-
-    // Browser GET vẫn là GET, nhưng loader cũng dùng GET.
-    // Vì vậy dùng header để phân biệt loader request.
-
-    const clientHeader =
-        req.get("X-Client");
-
-    if (clientHeader !== "LEXINX-LOADER") {
-        return res
-            .status(403)
-            .type("text/plain")
-            .send(
-                "Blocked by LEXINX V50 Protection"
-            );
-    }
 
     const scripts = readScripts();
 
@@ -336,20 +325,34 @@ app.get("/api/:id", (req, res) => {
     );
 
     if (!script) {
+
         return res
             .status(404)
             .type("text/plain")
-            .send("LEXINX: Invalid ID");
+            .send(
+                "LEXINX: Invalid loader"
+            );
     }
 
     if (!script.active) {
+
         return res
             .status(403)
             .type("text/plain")
-            .send("LEXINX: Script Revoked");
+            .send(
+                "Blocked by LEXINX"
+            );
     }
 
-    res
+    /*
+     * Trả trực tiếp Lua payload.
+     *
+     * Browser cũng có thể đọc endpoint này.
+     * Nếu muốn phân biệt browser/client,
+     * cần thêm cơ chế xác thực riêng.
+     */
+
+    return res
         .status(200)
         .type("text/plain")
         .send(script.payload);
@@ -361,6 +364,7 @@ app.get("/api/:id", (req, res) => {
 // ==================================================
 
 app.use((req, res) => {
+
     res.status(404).json({
         ok: false,
         error: "Not found"
@@ -372,12 +376,30 @@ app.use((req, res) => {
 // START
 // ==================================================
 
-app.listen(PORT, () => {
-    console.log("");
-    console.log("================================");
-    console.log(" LEXINX PROTECT ONLINE");
-    console.log("================================");
-    console.log("Port:", PORT);
-    console.log("Domain:", DOMAIN);
-    console.log("");
-});
+app.listen(
+    PORT,
+    () => {
+
+        console.log(
+            "================================"
+        );
+
+        console.log(
+            " LEXINX PROTECT ONLINE"
+        );
+
+        console.log(
+            "================================"
+        );
+
+        console.log(
+            "PORT:",
+            PORT
+        );
+
+        console.log(
+            "DOMAIN:",
+            DOMAIN
+        );
+    }
+);
