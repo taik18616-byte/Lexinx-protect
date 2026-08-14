@@ -22,18 +22,14 @@ body {
 
     margin: 0;
 
-    background: #09090c;
+    background: #08080b;
 
-    color: #eeeeee;
+    color: #eee;
 
-    font-family:
-        Arial,
-        sans-serif;
+    font-family: Arial, sans-serif;
 }
 
 .container {
-
-    width: 100%;
 
     max-width: 1000px;
 
@@ -42,25 +38,12 @@ body {
     padding: 25px;
 }
 
-h1 {
-
-    margin-bottom: 5px;
-}
-
-.subtitle {
-
-    color: #888;
-
-    margin-bottom: 25px;
-}
-
 .panel {
 
     background: #15151c;
 
     border:
-        1px solid
-        #292934;
+        1px solid #292936;
 
     border-radius: 12px;
 
@@ -74,28 +57,24 @@ textarea {
 
     width: 100%;
 
-    background: #0c0c11;
+    background: #09090d;
 
     color: white;
 
     border:
-        1px solid
-        #33333f;
+        1px solid #33333f;
 
     border-radius: 8px;
 
     padding: 12px;
 
-    margin-top: 8px;
-
-    margin-bottom: 15px;
-
-    outline: none;
+    margin:
+        8px 0 15px;
 }
 
 textarea {
 
-    min-height: 220px;
+    min-height: 230px;
 
     resize: vertical;
 
@@ -108,44 +87,33 @@ button {
 
     border-radius: 7px;
 
-    padding:
-        10px 15px;
+    padding: 10px 15px;
 
-    cursor: pointer;
-
-    background: #292936;
+    margin: 4px;
 
     color: white;
 
-    margin:
-        4px;
-}
+    background: #30303c;
 
-button:hover {
-
-    background: #3a3a4a;
+    cursor: pointer;
 }
 
 .primary {
-
     background: #5865f2;
 }
 
 .success {
-
     background: #287a4d;
 }
 
 .danger {
-
     background: #b83232;
 }
 
 .script {
 
     border:
-        1px solid
-        #30303b;
+        1px solid #30303c;
 
     border-radius: 10px;
 
@@ -154,44 +122,26 @@ button:hover {
     margin-top: 12px;
 }
 
-.script-name {
-
-    font-size: 18px;
-
-    font-weight: bold;
-}
-
-.id {
-
-    color: #888;
-
-    margin:
-        6px 0;
-}
-
 .loader {
 
-    background: #08080b;
+    background: #08080a;
+
+    border-radius: 7px;
 
     padding: 10px;
 
-    border-radius: 7px;
+    margin: 10px 0;
 
     font-family: monospace;
 
     word-break: break-all;
-
-    margin:
-        10px 0;
 }
 
 .active {
-
     color: #4ed68a;
 }
 
 .revoked {
-
     color: #e85b5b;
 }
 
@@ -199,26 +149,20 @@ button:hover {
 
 </head>
 
-
 <body>
 
 <div class="container">
 
-<h1>
-LEXINX Protect
-</h1>
+<h1>LEXINX PROTECT</h1>
 
-<div class="subtitle">
-Lua Script Loader Manager
-</div>
+<p>
+Remote Lua Loader Manager
+</p>
 
 
 <div class="panel">
 
-<h2>
-Create Loader
-</h2>
-
+<h2>Create Loader</h2>
 
 <label>
 Script name
@@ -252,9 +196,7 @@ Create Loader
 
 <div class="panel">
 
-<h2>
-Script List
-</h2>
+<h2>Scripts</h2>
 
 <div id="scripts">
 Loading...
@@ -267,43 +209,35 @@ Loading...
 
 <script>
 
-
-// ==================================================
-// CREATE
-// ==================================================
-
 async function createScript() {
 
     const name =
-        document.getElementById(
-            "name"
-        ).value;
+        document
+        .getElementById("name")
+        .value;
 
     const payload =
-        document.getElementById(
-            "payload"
-        ).value;
-
+        document
+        .getElementById("payload")
+        .value;
 
     if (!name.trim()) {
 
         alert(
-            "Enter script name"
+            "Script name required"
         );
 
         return;
     }
-
 
     if (!payload.trim()) {
 
         alert(
-            "Enter Lua payload"
+            "Payload required"
         );
 
         return;
     }
-
 
     try {
 
@@ -311,25 +245,27 @@ async function createScript() {
             await fetch(
                 "/admin/create",
                 {
-                    method: "POST",
+
+                    method:
+                        "POST",
 
                     headers: {
+
                         "Content-Type":
                             "application/json"
                     },
 
                     body:
                         JSON.stringify({
+
                             name,
                             payload
                         })
                 }
             );
 
-
         const data =
             await response.json();
-
 
         if (!data.ok) {
 
@@ -341,54 +277,40 @@ async function createScript() {
             return;
         }
 
-
         await navigator
             .clipboard
             .writeText(
                 data.script.loader
             );
 
-
         alert(
-            "Loader created!\n\n" +
-            data.script.loader +
-            "\n\nCopied."
+            "Loader created and copied!"
         );
-
 
         document
             .getElementById("name")
             .value = "";
 
-
         document
             .getElementById("payload")
             .value = "";
-
 
         loadScripts();
 
     } catch (error) {
 
         alert(
-            "Network error: " +
-            error
+            "Network error"
         );
     }
 }
 
 
-// ==================================================
-// LIST
-// ==================================================
-
 async function loadScripts() {
 
     const container =
-        document.getElementById(
-            "scripts"
-        );
-
+        document
+        .getElementById("scripts");
 
     try {
 
@@ -397,22 +319,16 @@ async function loadScripts() {
                 "/admin/list"
             );
 
-
         const data =
             await response.json();
-
 
         if (!data.ok) {
 
             container.innerHTML =
-                "Failed to load.";
+                "Failed.";
 
             return;
         }
-
-
-        container.innerHTML = "";
-
 
         if (
             data.scripts.length === 0
@@ -424,6 +340,7 @@ async function loadScripts() {
             return;
         }
 
+        container.innerHTML = "";
 
         for (
             const script
@@ -435,36 +352,29 @@ async function loadScripts() {
                     "div"
                 );
 
-
             div.className =
                 "script";
 
-
             const name =
-                escapeHTML(
+                escapeHtml(
                     script.name
                 );
 
-
             const id =
-                escapeHTML(
+                escapeHtml(
                     script.id
                 );
 
-
             const loader =
-                escapeHTML(
+                escapeHtml(
                     script.loader
                 );
 
-
             div.innerHTML = `
 
-                <div class="script-name">
-                    ${name}
-                </div>
+                <b>${name}</b>
 
-                <div class="id">
+                <div>
                     ID: ${id}
                 </div>
 
@@ -488,11 +398,11 @@ async function loadScripts() {
 
                 <button
                     class="success"
-                    onclick="copyLoader(
+                    onclick='copyLoader(
                         ${JSON.stringify(
                             script.loader
                         )}
-                    )"
+                    )'
                 >
                     Copy Loader
                 </button>
@@ -532,13 +442,12 @@ async function loadScripts() {
                 </button>
             `;
 
-
             container.appendChild(
                 div
             );
         }
 
-    } catch (error) {
+    } catch {
 
         container.innerHTML =
             "Network error.";
@@ -546,36 +455,19 @@ async function loadScripts() {
 }
 
 
-// ==================================================
-// COPY
-// ==================================================
-
 async function copyLoader(
     loader
 ) {
 
-    try {
+    await navigator
+        .clipboard
+        .writeText(loader);
 
-        await navigator
-            .clipboard
-            .writeText(loader);
-
-        alert(
-            "Loader copied!"
-        );
-
-    } catch {
-
-        alert(
-            "Copy failed"
-        );
-    }
+    alert(
+        "Loader copied!"
+    );
 }
 
-
-// ==================================================
-// REVOKE
-// ==================================================
 
 async function revokeScript(
     id
@@ -589,7 +481,6 @@ async function revokeScript(
         return;
     }
 
-
     await fetch(
         "/admin/revoke/" +
         encodeURIComponent(id),
@@ -598,14 +489,9 @@ async function revokeScript(
         }
     );
 
-
     loadScripts();
 }
 
-
-// ==================================================
-// ENABLE
-// ==================================================
 
 async function enableScript(
     id
@@ -619,14 +505,9 @@ async function enableScript(
         }
     );
 
-
     loadScripts();
 }
 
-
-// ==================================================
-// DELETE
-// ==================================================
 
 async function deleteScript(
     id
@@ -634,12 +515,11 @@ async function deleteScript(
 
     if (
         !confirm(
-            "Delete permanently?"
+            "Delete this script?"
         )
     ) {
         return;
     }
-
 
     await fetch(
         "/admin/delete/" +
@@ -649,18 +529,11 @@ async function deleteScript(
         }
     );
 
-
     loadScripts();
 }
 
 
-// ==================================================
-// ESCAPE HTML
-// ==================================================
-
-function escapeHTML(
-    value
-) {
+function escapeHtml(value) {
 
     return String(value)
 
@@ -691,14 +564,10 @@ function escapeHTML(
 }
 
 
-// ==================================================
-// INITIAL LOAD
-// ==================================================
-
 loadScripts();
 
 </script>
 
 </body>
 
-    </html>
+</html>
