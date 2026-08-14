@@ -2,91 +2,46 @@ const express = require("express");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
-const rateLimit = require("express-rate-limit");
-const { VM } = require("vm2"); // Sandbox để thực thi script an toàn
 
 const app = express();
 
 const PORT = process.env.PORT || 3000;
-const DOMAIN = process.env.DOMAIN || "https://Lexinx-protect-2.onrender.com";
+const DOMAIN =
+    process.env.DOMAIN ||
+    "https://Lexinx-protect-2.onrender.com";
 
 const DATA_DIR = path.join(__dirname, "data");
-const PUBLIC_DIR = path.join(__dirname, "public");
-
 const USERS_FILE = path.join(DATA_DIR, "users.json");
 const SCRIPTS_FILE = path.join(DATA_DIR, "scripts.json");
 const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
-const BLACKLIST_FILE = path.join(DATA_DIR, "blacklist.json");
-const ACCESS_LOG_FILE = path.join(DATA_DIR, "access_log.json");
-const COMPILED_SCRIPTS_FILE = path.join(DATA_DIR, "compiled_scripts.json");
+const PUBLIC_DIR = path.join(__dirname, "public");
 
 const ONE_TIME_CODES = new Set([
     "LEXINX_6725YE7726d622",
     "LEXINX_8837yYe7726722"
 ]);
 
-const PERMANENT_CODE = "LEXINX_King_2036";
-
-// Danh sách User-Agent đáng ngờ
-const SUSPICIOUS_UA = [
-    "python", "curl", "wget", "postman", "node-fetch", "axios",
-    "okhttp", "libwww", "scrapy", "bot", "spider", "crawler",
-    "java", "ruby", "perl", "go-http", "php", "powershell",
-    "cmd", "bash", "sh", "zsh", "fish", "pwsh"
-];
-
-const SECURITY_CONFIG = {
-    maxRequestsPerMinute: 30,
-    maxFailedLogins: 5,
-    blockDuration: 30 * 60 * 1000,
-    sessionTimeout: 30 * 24 * 60 * 60 * 1000,
-    maxScriptSize: 10 * 1024 * 1024,
-    honeypotEnabled: true,
-    encryptionEnabled: true,
-    serverSideExecution: true, // BẬT SERVER-SIDE EXECUTION
-    obfuscationEnabled: true, // BẬT OBFUSCATION
-    antiDebugEnabled: true, // BẬT ANTI-DEBUG
-    watermarkEnabled: true // BẬT WATERMARK
-};
+const PERMANENT_CODE =
+    "LEXINX_King_2036";
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 
-function initFile(file) {
+function ensureFile(file) {
     if (!fs.existsSync(file)) {
         fs.writeFileSync(file, "{}", "utf8");
     }
 }
 
-initFile(USERS_FILE);
-initFile(SCRIPTS_FILE);
-initFile(SESSIONS_FILE);
-initFile(BLACKLIST_FILE);
-initFile(ACCESS_LOG_FILE);
-initFile(COMPILED_SCRIPTS_FILE);
+ensureFile(USERS_FILE);
+ensureFile(SCRIPTS_FILE);
+ensureFile(SESSIONS_FILE);
 
-// Rate limiting
-const apiLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: SECURITY_CONFIG.maxRequestsPerMinute,
-    message: { ok: false, error: "Too many requests" },
-    standardHeaders: true,
-    legacyHeaders: false
-});
-
-const deliveryLimiter = rateLimit({
-    windowMs: 60 * 1000,
-    max: 10,
-    message: "Blocked by LEXINX",
-    standardHeaders: false,
-    legacyHeaders: false
-});
-
-app.use(express.json({ limit: "20mb" }));
-app.use(express.urlencoded({ extended: true, limit: "20mb" }));
+app.use(express.json({ limit: "15mb" }));
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static(PUBLIC_DIR));
 
-function readDB(file) {
+function readJSON(file) {
     try {
         return JSON.parse(fs.readFileSync(file, "utf8"));
     } catch {
@@ -94,12 +49,35 @@ function readDB(file) {
     }
 }
 
-function writeDB(file, data) {
-    fs.writeFileSync(file, JSON.stringify(data, null, 2), "utf8");
+function writeJSON(file, data) {
+    fs.writeFileSync(
+        file,
+        JSON.stringify(data, null, 2),
+        "utf8"
+    );
 }
 
 function randomID(bytes = 16) {
     return crypto.randomBytes(bytes).toString("hex");
+}
+
+function hashPassword(password, salt) {
+    return crypto
+        .scryptSync(password, salt, 64)
+        .toString("hex");
+}
+
+function verifyPassword(password, salt, storedHash) {
+    const hash = hashPassword(password, salt);
+
+    try {
+        return crypto.timingSafeEqual(
+            Buffer.from(hash, "hex"),
+            Buffer.from(storedHash, "hex")
+        );
+    } catch {
+        return false;
+    }
 }
 
 function cleanName(name) {
@@ -108,414 +86,90 @@ function cleanName(name) {
         .slice(0, 80);
 }
 
-function hashPassword(password, salt) {
-    return crypto.scryptSync(password, salt, 64).toString("hex");
-}
-
-function checkPassword(password, salt, hash) {
-    try {
-        const a = Buffer.from(hashPassword(password, salt), "hex");
-        const b = Buffer.from(hash, "hex");
-        return a.length === b.length && crypto.timingSafeEqual(a, b);
-    } catch {
-        return false;
-    }
-}
-
-// Mã hóa source code với AES-256-GCM
-function encryptSource(source, key) {
-    if (!SECURITY_CONFIG.encryptionEnabled) return source;
-    
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipheriv("aes-256-gcm", Buffer.from(key, "hex"), iv);
-    
-    let encrypted = cipher.update(source, "utf8", "hex");
-    encrypted += cipher.final("hex");
-    
-    const authTag = cipher.getAuthTag();
-    
-    return JSON.stringify({
-        iv: iv.toString("hex"),
-        data: encrypted,
-        tag: authTag.toString("hex"),
-        algorithm: "aes-256-gcm"
-    });
-}
-
-function decryptSource(encryptedData, key) {
-    if (!SECURITY_CONFIG.encryptionEnabled) return encryptedData;
-    
-    try {
-        const parsed = JSON.parse(encryptedData);
-        const decipher = crypto.createDecipheriv(
-            "aes-256-gcm",
-            Buffer.from(key, "hex"),
-            Buffer.from(parsed.iv, "hex")
-        );
-        
-        decipher.setAuthTag(Buffer.from(parsed.tag, "hex"));
-        
-        let decrypted = decipher.update(parsed.data, "hex", "utf8");
-        decrypted += decipher.final("utf8");
-        
-        return decrypted;
-    } catch {
-        return null;
-    }
-}
-
-function getEncryptionKey(userId) {
-    return crypto.createHash("sha256").update(userId).digest("hex");
-}
-
-/* =========================================================
-   OBFUSCATION ENGINE - CHỐNG LEAK SOURCE
-========================================================= */
-
-function obfuscateLua(source) {
-    if (!SECURITY_CONFIG.obfuscationEnabled) return source;
-    
-    // Thêm watermark
-    let obfuscated = source;
-    
-    if (SECURITY_CONFIG.watermarkEnabled) {
-        const watermark = `-- LEXINX PROTECT\n-- BUILD:${randomID(8)}\n-- HASH:${crypto.createHash("sha256").update(source).digest("hex")}\n`;
-        obfuscated = watermark + obfuscated;
-    }
-    
-    // Mã hóa string literals
-    obfuscated = obfuscated.replace(/"([^"]*)"/g, (match, str) => {
-        const encoded = Buffer.from(str).toString("base64");
-        return `game:GetService("HttpService"):Base64Decode("${encoded}")`;
-    });
-    
-    obfuscated = obfuscated.replace(/'([^']*)'/g, (match, str) => {
-        const encoded = Buffer.from(str).toString("base64");
-        return `game:GetService("HttpService"):Base64Decode("${encoded}")`;
-    });
-    
-    // Thêm anti-debug code
-    if (SECURITY_CONFIG.antiDebugEnabled) {
-        const antiDebug = `
--- Anti-Debug Protection
-local function checkDebug()
-    local success, result = pcall(function()
-        return debug.info(1, "s")
-    end)
-    if success and result then
-        return true
-    end
-    return false
-end
-
-if checkDebug() then
-    -- Phát hiện debug, gửi cảnh báo về server
-    game:HttpGet("${DOMAIN}/api/debug-alert")
-end
-`;
-        obfuscated = antiDebug + obfuscated;
-    }
-    
-    // Thêm self-destruct nếu bị tamper
-    const selfDestruct = `
--- Self-Destruct Protection
-local originalHash = "${crypto.createHash("sha256").update(source).digest("hex")}"
-local function verifyIntegrity()
-    local currentSource = debug.info(1, "s")
-    local currentHash = game:GetService("HttpService"):JSONEncode(currentSource)
-    return currentHash ~= originalHash
-end
-`;
-    obfuscated = selfDestruct + obfuscated;
-    
-    return obfuscated;
-}
-
-/* =========================================================
-   SERVER-SIDE EXECUTION ENGINE
-========================================================= */
-
-function executeServerSide(source, scriptId, userId) {
-    // Tạo script executor mà KHÔNG tiết lộ source
-    const executorCode = `
--- Server-Side Execution
--- Script ID: ${scriptId}
--- User ID: ${userId}
--- Timestamp: ${Date.now()}
-
-local function executeProtectedScript()
-    local success, result = pcall(function()
-        -- Thực thi script trong sandbox
-        ${source}
-    end)
-    
-    if not success then
-        return {
-            success = false,
-            error = tostring(result)
-        }
-    end
-    
-    return {
-        success = true,
-        result = result
-    }
-end
-
-return executeProtectedScript()
-`;
-    
-    // Trong môi trường production, bạn sẽ gửi executor này đến Roblox
-    return executorCode;
-}
-
-/* =========================================================
-   COMPILE SCRIPT - TẠO BYTECODE
-========================================================= */
-
-function compileScript(source, scriptId) {
-    // Tạo bytecode-like representation
-    const compiled = {
-        id: scriptId,
-        compiledAt: Date.now(),
-        bytecode: crypto.createHash("sha256").update(source).digest("hex"),
-        chunks: []
-    };
-    
-    // Chia source thành chunks để phân phối
-    const chunkSize = 100;
-    for (let i = 0; i < source.length; i += chunkSize) {
-        compiled.chunks.push(source.slice(i, i + chunkSize));
-    }
-    
-    // Lưu compiled version
-    const compiledScripts = readDB(COMPILED_SCRIPTS_FILE);
-    compiledScripts[scriptId] = compiled;
-    writeDB(COMPILED_SCRIPTS_FILE, compiledScripts);
-    
-    return compiled;
-}
-
 /* =========================================================
    COOKIE
 ========================================================= */
 
-function cookies(req) {
-    const result = {};
-    for (const item of String(req.headers.cookie || "").split(";")) {
-        const i = item.indexOf("=");
-        if (i === -1) continue;
-        result[item.slice(0, i).trim()] = decodeURIComponent(item.slice(i + 1).trim());
+function parseCookies(req) {
+    const header = req.headers.cookie || "";
+    const cookies = {};
+
+    for (const part of header.split(";")) {
+        const index = part.indexOf("=");
+
+        if (index === -1) continue;
+
+        const key = part.slice(0, index).trim();
+        const value = part.slice(index + 1).trim();
+
+        cookies[key] = decodeURIComponent(value);
     }
-    return result;
+
+    return cookies;
+}
+
+function setSessionCookie(res, token) {
+    res.setHeader(
+        "Set-Cookie",
+        `LEXINX_SESSION=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax`
+    );
+}
+
+function clearSessionCookie(res) {
+    res.setHeader(
+        "Set-Cookie",
+        "LEXINX_SESSION=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
+    );
 }
 
 /* =========================================================
-   SESSION MANAGEMENT
+   SESSION
 ========================================================= */
 
-function session(req) {
-    const token = cookies(req).LEXINX_SESSION;
+function getSession(req) {
+    const cookies = parseCookies(req);
+    const token = cookies.LEXINX_SESSION;
+
     if (!token) return null;
 
-    const sessions = readDB(SESSIONS_FILE);
-    const s = sessions[token];
-    if (!s) return null;
+    const sessions = readJSON(SESSIONS_FILE);
+    const session = sessions[token];
 
-    const clientIP = getClientIP(req);
-    if (s.ip !== clientIP) {
+    if (!session) return null;
+
+    const maxAge =
+        30 * 24 * 60 * 60 * 1000;
+
+    if (Date.now() - session.createdAt > maxAge) {
         delete sessions[token];
-        writeDB(SESSIONS_FILE, sessions);
+        writeJSON(SESSIONS_FILE, sessions);
         return null;
     }
 
-    const userAgent = req.headers["user-agent"] || "";
-    if (s.userAgent !== userAgent) {
-        delete sessions[token];
-        writeDB(SESSIONS_FILE, sessions);
-        return null;
-    }
+    const users = readJSON(USERS_FILE);
+    const user = users[session.username];
 
-    if (Date.now() - s.createdAt > SECURITY_CONFIG.sessionTimeout) {
-        delete sessions[token];
-        writeDB(SESSIONS_FILE, sessions);
-        return null;
-    }
-
-    const users = readDB(USERS_FILE);
-    if (!users[s.username]) return null;
+    if (!user) return null;
 
     return {
         token,
-        username: s.username,
-        user: users[s.username]
+        username: session.username,
+        user
     };
 }
 
-function auth(req, res, next) {
-    const s = session(req);
-    if (!s) {
-        return res.status(401).json({ ok: false, error: "Unauthorized" });
+function requireAuth(req, res, next) {
+    const session = getSession(req);
+
+    if (!session) {
+        return res.status(401).json({
+            ok: false,
+            error: "Unauthorized"
+        });
     }
-    req.auth = s;
+
+    req.auth = session;
     next();
-}
-
-/* =========================================================
-   IP MANAGEMENT
-========================================================= */
-
-function getClientIP(req) {
-    const forwarded = req.headers["x-forwarded-for"];
-    if (forwarded) {
-        return forwarded.split(",")[0].trim();
-    }
-    return req.connection.remoteAddress || req.socket.remoteAddress;
-}
-
-function isIPBlocked(ip) {
-    if (BLOCKED_IPS.has(ip)) return true;
-    
-    const blacklist = readDB(BLACKLIST_FILE);
-    const entry = blacklist[ip];
-    
-    if (entry && entry.expiresAt > Date.now()) {
-        return true;
-    }
-    
-    if (entry && entry.expiresAt <= Date.now()) {
-        delete blacklist[ip];
-        writeDB(BLACKLIST_FILE, blacklist);
-    }
-    
-    return false;
-}
-
-function blockIP(ip, duration = SECURITY_CONFIG.blockDuration) {
-    BLOCKED_IPS.add(ip);
-    
-    const blacklist = readDB(BLACKLIST_FILE);
-    blacklist[ip] = {
-        blockedAt: Date.now(),
-        expiresAt: Date.now() + duration
-    };
-    writeDB(BLACKLIST_FILE, blacklist);
-    
-    setTimeout(() => {
-        BLOCKED_IPS.delete(ip);
-    }, duration);
-}
-
-/* =========================================================
-   ACCESS LOGGING
-========================================================= */
-
-function logAccess(req, action, details = {}) {
-    const accessLog = readDB(ACCESS_LOG_FILE);
-    const today = new Date().toISOString().split("T")[0];
-    
-    if (!accessLog[today]) {
-        accessLog[today] = [];
-    }
-    
-    accessLog[today].push({
-        timestamp: Date.now(),
-        ip: getClientIP(req),
-        userAgent: req.headers["user-agent"],
-        action,
-        details,
-        path: req.path
-    });
-    
-    if (accessLog[today].length > 10000) {
-        accessLog[today] = accessLog[today].slice(-10000);
-    }
-    
-    writeDB(ACCESS_LOG_FILE, accessLog);
-}
-
-/* =========================================================
-   ROBLOX DETECTION
-========================================================= */
-
-function isRobloxRequest(req) {
-    const ua = String(req.headers["user-agent"] || "").toLowerCase();
-    
-    // Chỉ chấp nhận Roblox User-Agent
-    return ua.includes("roblox") || ua.includes("RobloxStudio");
-}
-
-function isBrowserRequest(req) {
-    const ua = String(req.headers["user-agent"] || "").toLowerCase();
-    const accept = String(req.headers["accept"] || "").toLowerCase();
-    
-    const browserIndicators = [
-        "mozilla", "chrome", "safari", "firefox", 
-        "edge", "opera", "webkit"
-    ];
-    
-    let hasBrowserIndicator = false;
-    for (const indicator of browserIndicators) {
-        if (ua.includes(indicator)) {
-            hasBrowserIndicator = true;
-            break;
-        }
-    }
-    
-    const acceptHTML = accept.includes("text/html") || accept.includes("application/xhtml");
-    const hasSecFetch = req.headers["sec-fetch-dest"] || req.headers["sec-fetch-mode"];
-    const hasBrowserHeaders = req.headers["cookie"] || req.headers["origin"] || req.headers["referer"];
-    
-    return hasBrowserIndicator && (acceptHTML || hasSecFetch || hasBrowserHeaders);
-}
-
-function isBotRequest(req) {
-    const ua = String(req.headers["user-agent"] || "").toLowerCase();
-    const clientIP = getClientIP(req);
-    
-    if (isIPBlocked(clientIP)) {
-        return true;
-    }
-    
-    for (const suspiciousUA of SUSPICIOUS_UA) {
-        if (ua.includes(suspiciousUA)) {
-            logAccess(req, "blocked_suspicious_ua", { reason: suspiciousUA });
-            return true;
-        }
-    }
-    
-    if (isBrowserRequest(req)) {
-        logAccess(req, "blocked_browser_request");
-        return true;
-    }
-    
-    if (!isRobloxRequest(req)) {
-        logAccess(req, "blocked_not_roblox");
-        return true;
-    }
-    
-    return false;
-}
-
-/* =========================================================
-   HONEYPOT SYSTEM
-========================================================= */
-
-function setupHoneypot() {
-    app.get("/api/scripts/:id/source", (req, res) => {
-        logAccess(req, "honeypot_triggered", { honeypot: "fake_source_endpoint" });
-        res.status(403).send("Blocked by LEXINX");
-    });
-    
-    app.get("/scripts/:id", (req, res) => {
-        logAccess(req, "honeypot_triggered", { honeypot: "fake_scripts_path" });
-        res.status(403).send("Blocked by LEXINX");
-    });
-    
-    app.post("/api/execute", (req, res) => {
-        logAccess(req, "honeypot_triggered", { honeypot: "fake_execute_endpoint" });
-        res.status(403).json({ ok: false, error: "Blocked by LEXINX" });
-    });
 }
 
 /* =========================================================
@@ -523,162 +177,187 @@ function setupHoneypot() {
 ========================================================= */
 
 app.get("/", (req, res) => {
-    if (isBotRequest(req) && !isBrowserRequest(req)) {
-        return res.status(403).send("Access Denied");
-    }
-    
-    res.sendFile(path.join(PUBLIC_DIR, "index.html"));
+    res.sendFile(
+        path.join(PUBLIC_DIR, "index.html")
+    );
 });
 
 /* =========================================================
    REGISTER
 ========================================================= */
 
-app.post("/api/register", apiLimiter, (req, res) => {
-    const clientIP = getClientIP(req);
-    
-    if (isIPBlocked(clientIP)) {
-        return res.status(403).json({ ok: false, error: "IP blocked" });
-    }
-    
-    const username = String(req.body?.username || "").trim();
-    const password = String(req.body?.password || "");
-    const code = String(req.body?.code || "").trim();
-    
-    if (req.body?.website || req.body?.email_confirm) {
-        logAccess(req, "honeypot_triggered", { honeypot: "register_form" });
-        return res.status(403).json({ ok: false, error: "Bot detected" });
-    }
-    
+app.post("/api/register", (req, res) => {
+    const username =
+        String(req.body?.username || "").trim();
+
+    const password =
+        String(req.body?.password || "");
+
+    const code =
+        String(req.body?.code || "").trim();
+
     if (!/^[a-zA-Z0-9_]{3,32}$/.test(username)) {
-        return res.status(400).json({ ok: false, error: "Invalid username" });
-    }
-    
-    if (password.length < 8) {
         return res.status(400).json({
             ok: false,
-            error: "Password must contain at least 8 characters"
+            error:
+                "Username must be 3-32 characters"
         });
     }
-    
-    const users = readDB(USERS_FILE);
-    
-    if (users[username]) {
-        return res.status(409).json({ ok: false, error: "Username already exists" });
+
+    if (password.length < 6) {
+        return res.status(400).json({
+            ok: false,
+            error:
+                "Password must be at least 6 characters"
+        });
     }
-    
+
+    if (!code) {
+        return res.status(400).json({
+            ok: false,
+            error: "Access code required"
+        });
+    }
+
+    const users = readJSON(USERS_FILE);
+
+    if (users[username]) {
+        return res.status(409).json({
+            ok: false,
+            error: "Username already exists"
+        });
+    }
+
     let accessType;
-    
+
     if (code === PERMANENT_CODE) {
         accessType = "permanent";
     } else if (ONE_TIME_CODES.has(code)) {
         accessType = "one-time";
     } else {
-        return res.status(403).json({ ok: false, error: "Invalid access code" });
+        return res.status(403).json({
+            ok: false,
+            error: "Invalid access code"
+        });
     }
-    
+
+    /*
+       Xóa mã one-time sau khi
+       đăng ký thành công.
+    */
+
     if (accessType === "one-time") {
         ONE_TIME_CODES.delete(code);
     }
-    
-    const salt = crypto.randomBytes(32).toString("hex");
-    
+
+    const salt =
+        crypto.randomBytes(32).toString("hex");
+
+    const passwordHash =
+        hashPassword(password, salt);
+
     users[username] = {
         username,
+        passwordHash,
         salt,
-        passwordHash: hashPassword(password, salt),
         accessType,
         createdAt: Date.now(),
-        scripts: [],
-        failedLogins: 0
+        scripts: []
     };
-    
-    writeDB(USERS_FILE, users);
-    
-    const token = randomID(48);
-    const sessions = readDB(SESSIONS_FILE);
-    
-    sessions[token] = {
+
+    writeJSON(USERS_FILE, users);
+
+    const sessions =
+        readJSON(SESSIONS_FILE);
+
+    const sessionToken =
+        randomID(48);
+
+    sessions[sessionToken] = {
         username,
-        createdAt: Date.now(),
-        ip: clientIP,
-        userAgent: req.headers["user-agent"] || ""
+        createdAt: Date.now()
     };
-    
-    writeDB(SESSIONS_FILE, sessions);
-    
-    logAccess(req, "register_success", { username });
-    
-    res.setHeader(
-        "Set-Cookie",
-        `LEXINX_SESSION=${token}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SECURITY_CONFIG.sessionTimeout / 1000}`
+
+    writeJSON(
+        SESSIONS_FILE,
+        sessions
     );
-    
-    res.json({ ok: true, username, accessType });
+
+    setSessionCookie(
+        res,
+        sessionToken
+    );
+
+    res.json({
+        ok: true,
+        username,
+        accessType
+    });
 });
 
 /* =========================================================
    LOGIN
 ========================================================= */
 
-app.post("/api/login", apiLimiter, (req, res) => {
-    const clientIP = getClientIP(req);
-    
-    if (isIPBlocked(clientIP)) {
-        return res.status(403).json({ ok: false, error: "IP blocked" });
-    }
-    
-    const username = String(req.body?.username || "").trim();
-    const password = String(req.body?.password || "");
-    
-    const users = readDB(USERS_FILE);
+app.post("/api/login", (req, res) => {
+    const username =
+        String(req.body?.username || "").trim();
+
+    const password =
+        String(req.body?.password || "");
+
+    const users = readJSON(USERS_FILE);
     const user = users[username];
-    
-    if (!user || !checkPassword(password, user.salt, user.passwordHash)) {
-        if (user) {
-            user.failedLogins = (user.failedLogins || 0) + 1;
-            users[username] = user;
-            writeDB(USERS_FILE, users);
-            
-            if (user.failedLogins >= SECURITY_CONFIG.maxFailedLogins) {
-                blockIP(clientIP);
-                user.failedLogins = 0;
-                users[username] = user;
-                writeDB(USERS_FILE, users);
-                
-                logAccess(req, "ip_blocked", { reason: "too_many_failed_logins" });
-                return res.status(403).json({ ok: false, error: "IP blocked due to too many failed attempts" });
-            }
-        }
-        
-        logAccess(req, "login_failed", { username });
-        return res.status(401).json({ ok: false, error: "Invalid username or password" });
+
+    if (!user) {
+        return res.status(401).json({
+            ok: false,
+            error:
+                "Invalid username or password"
+        });
     }
-    
-    user.failedLogins = 0;
-    users[username] = user;
-    writeDB(USERS_FILE, users);
-    
-    const token = randomID(48);
-    const sessions = readDB(SESSIONS_FILE);
-    
+
+    if (
+        !verifyPassword(
+            password,
+            user.salt,
+            user.passwordHash
+        )
+    ) {
+        return res.status(401).json({
+            ok: false,
+            error:
+                "Invalid username or password"
+        });
+    }
+
+    const sessions =
+        readJSON(SESSIONS_FILE);
+
+    const token =
+        randomID(48);
+
     sessions[token] = {
         username,
-        createdAt: Date.now(),
-        ip: clientIP,
-        userAgent: req.headers["user-agent"] || ""
+        createdAt: Date.now()
     };
-    
-    writeDB(SESSIONS_FILE, sessions);
-    
-    logAccess(req, "login_success", { username });
-    
-    res.setHeader(
-        "Set-Cookie",
-        `LEXINX_SESSION=${token}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=${SECURITY_CONFIG.sessionTimeout / 1000}`
+
+    writeJSON(
+        SESSIONS_FILE,
+        sessions
     );
-    
-    res.json({ ok: true, username, accessType: user.accessType });
+
+    setSessionCookie(
+        res,
+        token
+    );
+
+    res.json({
+        ok: true,
+        username,
+        accessType:
+            user.accessType
+    });
 });
 
 /* =========================================================
@@ -686,32 +365,41 @@ app.post("/api/login", apiLimiter, (req, res) => {
 ========================================================= */
 
 app.post("/api/logout", (req, res) => {
-    const token = cookies(req).LEXINX_SESSION;
-    
+    const cookies = parseCookies(req);
+    const token = cookies.LEXINX_SESSION;
+
     if (token) {
-        const sessions = readDB(SESSIONS_FILE);
+        const sessions =
+            readJSON(SESSIONS_FILE);
+
         delete sessions[token];
-        writeDB(SESSIONS_FILE, sessions);
+
+        writeJSON(
+            SESSIONS_FILE,
+            sessions
+        );
     }
-    
-    res.setHeader(
-        "Set-Cookie",
-        "LEXINX_SESSION=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict; Secure"
-    );
-    
-    res.json({ ok: true });
+
+    clearSessionCookie(res);
+
+    res.json({
+        ok: true
+    });
 });
 
 /* =========================================================
-   ME
+   ACCOUNT
 ========================================================= */
 
-app.get("/api/me", auth, (req, res) => {
+app.get("/api/me", requireAuth, (req, res) => {
+    const user = req.auth.user;
+
     res.json({
         ok: true,
-        username: req.auth.user.username,
-        accessType: req.auth.user.accessType,
-        scriptCount: req.auth.user.scripts.length
+        username: user.username,
+        accessType: user.accessType,
+        createdAt: user.createdAt,
+        scriptCount: user.scripts.length
     });
 });
 
@@ -719,59 +407,70 @@ app.get("/api/me", auth, (req, res) => {
    CREATE SCRIPT
 ========================================================= */
 
-app.post("/api/create", auth, apiLimiter, (req, res) => {
-    const source = typeof req.body?.source === "string" ? req.body.source : "";
-    
+app.post("/api/create", requireAuth, (req, res) => {
+    const source =
+        typeof req.body?.source === "string"
+            ? req.body.source
+            : "";
+
     if (!source.trim()) {
-        return res.status(400).json({ ok: false, error: "Script is empty" });
+        return res.status(400).json({
+            ok: false,
+            error: "Script is empty"
+        });
     }
-    
-    if (source.length > SECURITY_CONFIG.maxScriptSize) {
-        return res.status(400).json({ ok: false, error: "Script too large" });
-    }
-    
-    const name = cleanName(req.body?.name);
-    const id = randomID(16);
-    const token = randomID(32);
-    
-    // Mã hóa source
-    const encryptionKey = getEncryptionKey(req.auth.username);
-    const encryptedSource = encryptSource(source, encryptionKey);
-    
-    const scripts = readDB(SCRIPTS_FILE);
-    
-    scripts[id] = {
+
+    const name =
+        cleanName(req.body?.name);
+
+    const id =
+        randomID(16);
+
+    const scriptToken =
+        randomID(32);
+
+    const db =
+        readJSON(SCRIPTS_FILE);
+
+    db[id] = {
         id,
-        token,
         name,
-        source: encryptedSource,
-        encrypted: true,
+        source,
         owner: req.auth.username,
+        token: scriptToken,
         createdAt: Date.now(),
         updatedAt: Date.now()
     };
-    
-    writeDB(SCRIPTS_FILE, scripts);
-    
-    // Compile script để tạo bytecode
-    if (SECURITY_CONFIG.serverSideExecution) {
-        compileScript(source, id);
-    }
-    
-    const users = readDB(USERS_FILE);
-    users[req.auth.username].scripts.push(id);
-    writeDB(USERS_FILE, users);
-    
-    const endpoint = `${DOMAIN}/api/${id}/${token}`;
-    
-    logAccess(req, "script_created", { scriptId: id, scriptName: name });
-    
+
+    writeJSON(
+        SCRIPTS_FILE,
+        db
+    );
+
+    const users =
+        readJSON(USERS_FILE);
+
+    users[
+        req.auth.username
+    ].scripts.push(id);
+
+    writeJSON(
+        USERS_FILE,
+        users
+    );
+
+    const endpoint =
+        `${DOMAIN}/api/${id}/${scriptToken}`;
+
+    const loader =
+        `loadstring(game:HttpGet("${endpoint}"))()`;
+
     res.json({
         ok: true,
         id,
         name,
         endpoint,
-        loader: `loadstring(game:HttpGet("${endpoint}"))()`
+        loader
     });
 });
 
@@ -779,387 +478,377 @@ app.post("/api/create", auth, apiLimiter, (req, res) => {
    LIST SCRIPTS
 ========================================================= */
 
-app.get("/api/scripts", auth, (req, res) => {
-    const scripts = readDB(SCRIPTS_FILE);
-    
-    const list = req.auth.user.scripts
-        .map(id => scripts[id])
-        .filter(Boolean)
-        .map(s => {
-            const endpoint = `${DOMAIN}/api/${s.id}/${s.token}`;
-            
-            return {
-                id: s.id,
-                name: s.name,
-                createdAt: s.createdAt,
-                updatedAt: s.updatedAt,
-                endpoint,
-                loader: `loadstring(game:HttpGet("${endpoint}"))()`
-            };
-        })
-        .reverse();
-    
-    res.json({ ok: true, scripts: list });
+app.get("/api/scripts", requireAuth, (req, res) => {
+    const db =
+        readJSON(SCRIPTS_FILE);
+
+    const ids =
+        req.auth.user.scripts;
+
+    const scripts =
+        ids
+            .map(id => db[id])
+            .filter(Boolean)
+            .map(script => {
+
+                const endpoint =
+                    `${DOMAIN}/api/${script.id}/${script.token}`;
+
+                return {
+                    id: script.id,
+                    name: script.name,
+                    createdAt: script.createdAt,
+                    updatedAt: script.updatedAt,
+
+                    endpoint,
+
+                    loader:
+                        `loadstring(game:HttpGet("${endpoint}"))()`
+                };
+            })
+            .reverse();
+
+    res.json({
+        ok: true,
+        scripts
+    });
 });
 
 /* =========================================================
-   GET SCRIPT FOR EDIT
+   GET ONE SCRIPT FOR EDITOR
 ========================================================= */
 
-app.get("/api/scripts/:id", auth, (req, res) => {
-    const scripts = readDB(SCRIPTS_FILE);
-    const script = scripts[req.params.id];
-    
-    if (!script) {
-        return res.status(404).json({ ok: false, error: "Script not found" });
-    }
-    
-    if (script.owner !== req.auth.username) {
-        return res.status(403).json({ ok: false, error: "Forbidden" });
-    }
-    
-    let source = script.source;
-    if (script.encrypted) {
-        const encryptionKey = getEncryptionKey(req.auth.username);
-        source = decryptSource(script.source, encryptionKey);
-    }
-    
-    res.json({
-        ok: true,
-        script: {
-            id: script.id,
-            name: script.name,
-            source: source,
-            createdAt: script.createdAt,
-            updatedAt: script.updatedAt
+app.get(
+    "/api/scripts/:id",
+    requireAuth,
+    (req, res) => {
+
+        const db =
+            readJSON(SCRIPTS_FILE);
+
+        const script =
+            db[req.params.id];
+
+        if (!script) {
+            return res.status(404).json({
+                ok: false,
+                error:
+                    "Script not found"
+            });
         }
-    });
-});
+
+        if (
+            script.owner !==
+            req.auth.username
+        ) {
+            return res.status(403).json({
+                ok: false,
+                error:
+                    "Forbidden"
+            });
+        }
+
+        res.json({
+            ok: true,
+            script: {
+                id: script.id,
+                name: script.name,
+                source: script.source,
+                createdAt: script.createdAt,
+                updatedAt: script.updatedAt
+            }
+        });
+    }
+);
 
 /* =========================================================
    EDIT SCRIPT
 ========================================================= */
 
-app.put("/api/scripts/:id", auth, apiLimiter, (req, res) => {
-    const scripts = readDB(SCRIPTS_FILE);
-    const script = scripts[req.params.id];
-    
-    if (!script) {
-        return res.status(404).json({ ok: false, error: "Script not found" });
+app.put(
+    "/api/scripts/:id",
+    requireAuth,
+    (req, res) => {
+
+        const id =
+            req.params.id;
+
+        const db =
+            readJSON(SCRIPTS_FILE);
+
+        const script =
+            db[id];
+
+        if (!script) {
+            return res.status(404).json({
+                ok: false,
+                error:
+                    "Script not found"
+            });
+        }
+
+        /*
+           Chỉ owner mới được sửa.
+        */
+
+        if (
+            script.owner !==
+            req.auth.username
+        ) {
+            return res.status(403).json({
+                ok: false,
+                error:
+                    "Forbidden"
+            });
+        }
+
+        const newSource =
+            typeof req.body?.source ===
+            "string"
+                ? req.body.source
+                : script.source;
+
+        const newName =
+            req.body?.name !== undefined
+                ? cleanName(req.body.name)
+                : script.name;
+
+        if (!newSource.trim()) {
+            return res.status(400).json({
+                ok: false,
+                error:
+                    "Script cannot be empty"
+            });
+        }
+
+        /*
+           Cập nhật source.
+
+           ID + token KHÔNG đổi.
+           Loader cũ vẫn chạy source mới.
+        */
+
+        script.name =
+            newName;
+
+        script.source =
+            newSource;
+
+        script.updatedAt =
+            Date.now();
+
+        db[id] =
+            script;
+
+        writeJSON(
+            SCRIPTS_FILE,
+            db
+        );
+
+        const endpoint =
+            `${DOMAIN}/api/${script.id}/${script.token}`;
+
+        const loader =
+            `loadstring(game:HttpGet("${endpoint}"))()`;
+
+        res.json({
+            ok: true,
+
+            message:
+                "Script updated",
+
+            id:
+                script.id,
+
+            name:
+                script.name,
+
+            updatedAt:
+                script.updatedAt,
+
+            endpoint,
+
+            loader
+        });
     }
-    
-    if (script.owner !== req.auth.username) {
-        return res.status(403).json({ ok: false, error: "Forbidden" });
-    }
-    
-    const source = typeof req.body?.source === "string" ? req.body.source : "";
-    
-    if (!source.trim()) {
-        return res.status(400).json({ ok: false, error: "Script is empty" });
-    }
-    
-    if (source.length > SECURITY_CONFIG.maxScriptSize) {
-        return res.status(400).json({ ok: false, error: "Script too large" });
-    }
-    
-    script.name = cleanName(req.body?.name || script.name);
-    
-    const encryptionKey = getEncryptionKey(req.auth.username);
-    script.source = encryptSource(source, encryptionKey);
-    script.encrypted = true;
-    script.updatedAt = Date.now();
-    
-    scripts[script.id] = script;
-    writeDB(SCRIPTS_FILE, scripts);
-    
-    // Re-compile script
-    if (SECURITY_CONFIG.serverSideExecution) {
-        compileScript(source, script.id);
-    }
-    
-    const endpoint = `${DOMAIN}/api/${script.id}/${script.token}`;
-    
-    logAccess(req, "script_updated", { scriptId: script.id });
-    
-    res.json({
-        ok: true,
-        id: script.id,
-        name: script.name,
-        endpoint,
-        loader: `loadstring(game:HttpGet("${endpoint}"))()`
-    });
-});
+);
 
 /* =========================================================
    DELETE SCRIPT
 ========================================================= */
 
-app.delete("/api/scripts/:id", auth, (req, res) => {
-    const scripts = readDB(SCRIPTS_FILE);
-    const script = scripts[req.params.id];
-    
-    if (!script) {
-        return res.status(404).json({ ok: false, error: "Script not found" });
-    }
-    
-    if (script.owner !== req.auth.username) {
-        return res.status(403).json({ ok: false, error: "Forbidden" });
-    }
-    
-    delete scripts[req.params.id];
-    writeDB(SCRIPTS_FILE, scripts);
-    
-    // Xóa compiled script
-    const compiledScripts = readDB(COMPILED_SCRIPTS_FILE);
-    delete compiledScripts[req.params.id];
-    writeDB(COMPILED_SCRIPTS_FILE, compiledScripts);
-    
-    const users = readDB(USERS_FILE);
-    users[req.auth.username].scripts = users[req.auth.username].scripts.filter(
-        id => id !== req.params.id
-    );
-    writeDB(USERS_FILE, users);
-    
-    logAccess(req, "script_deleted", { scriptId: req.params.id });
-    
-    res.json({ ok: true });
-});
+app.delete(
+    "/api/scripts/:id",
+    requireAuth,
+    (req, res) => {
 
-/* =========================================================
-   LUA DELIVERY - KHÔNG BAO GIỜ GỬI SOURCE THẬT
-========================================================= */
+        const id =
+            req.params.id;
 
-app.get("/api/:id/:token", deliveryLimiter, (req, res) => {
-    const clientIP = getClientIP(req);
-    const ua = String(req.headers["user-agent"] || "").toLowerCase();
-    
-    // 1. Kiểm tra IP block
-    if (isIPBlocked(clientIP)) {
-        logAccess(req, "delivery_blocked", { reason: "ip_blocked" });
-        return res.status(403).type("text/plain").send("Blocked by LEXINX");
-    }
-    
-    // 2. Chặn browser
-    if (isBrowserRequest(req)) {
-        logAccess(req, "delivery_blocked", { reason: "browser_detected" });
-        return res.status(403).type("text/plain").send("BLOCKED BY LEXINX - BROWSER ACCESS DENIED");
-    }
-    
-    // 3. Kiểm tra Roblox UA
-    if (!ua.includes("roblox") && !ua.includes("RobloxStudio")) {
-        logAccess(req, "delivery_blocked", { reason: "not_roblox_ua" });
-        return res.status(403).type("text/plain").send("Blocked by LEXINX - Roblox Only");
-    }
-    
-    // 4. Kiểm tra script tồn tại
-    const scripts = readDB(SCRIPTS_FILE);
-    const script = scripts[req.params.id];
-    
-    if (!script) {
-        logAccess(req, "delivery_blocked", { reason: "script_not_found" });
-        return res.status(404).type("text/plain").send("Blocked by LEXINX v50 protection");
-    }
-    
-    // 5. Kiểm tra token
-    if (req.params.token !== script.token) {
-        logAccess(req, "delivery_blocked", { reason: "invalid_token" });
-        return res.status(403).type("text/plain").send("Blocked by LEXINX");
-    }
-    
-    // 6. Giải mã source
-    let source = script.source;
-    if (script.encrypted) {
-        const encryptionKey = getEncryptionKey(script.owner);
-        source = decryptSource(script.source, encryptionKey);
-        
-        if (source === null) {
-            logAccess(req, "delivery_blocked", { reason: "decryption_failed" });
-            return res.status(500).type("text/plain").send("Blocked by LEXINX");
+        const db =
+            readJSON(SCRIPTS_FILE);
+
+        const script =
+            db[id];
+
+        if (!script) {
+            return res.status(404).json({
+                ok: false,
+                error:
+                    "Script not found"
+            });
         }
+
+        if (
+            script.owner !==
+            req.auth.username
+        ) {
+            return res.status(403).json({
+                ok: false,
+                error:
+                    "Forbidden"
+            });
+        }
+
+        delete db[id];
+
+        writeJSON(
+            SCRIPTS_FILE,
+            db
+        );
+
+        const users =
+            readJSON(USERS_FILE);
+
+        users[
+            req.auth.username
+        ].scripts =
+            users[
+                req.auth.username
+            ].scripts.filter(
+                x => x !== id
+            );
+
+        writeJSON(
+            USERS_FILE,
+            users
+        );
+
+        res.json({
+            ok: true
+        });
     }
-    
-    // 7. QUAN TRỌNG: Tạo script bảo vệ thay vì gửi source thật
-    const protectedScript = `
--- LEXINX PROTECT
--- SCRIPT ID: ${script.id}
--- TIMESTAMP: ${Date.now()}
--- LICENSE: ${script.token}
-
-local HttpService = game:GetService("HttpService")
-
--- Chống decompile
-local function antiDecompile()
-    local success, result = pcall(function()
-        return debug.info(1, "s")
-    end)
-    if success and result then
-        -- Phát hiện debug/decompile, block
-        while true do end
-    end
-end
-
--- Chống copy
-local function antiCopy()
-    local scriptSource = debug.info(1, "s")
-    if scriptSource and scriptSource:find("LEXINX PROTECT") then
-        -- Script hợp lệ
-        return true
-    end
-    return false
-end
-
--- Chống tampering
-local function verifyIntegrity()
-    local expectedHash = "${crypto.createHash("sha256").update(source).digest("hex")}"
-    local currentHash = HttpService:JSONEncode(debug.info(1, "s"))
-    return currentHash == expectedHash
-end
-
--- Thực thi script bảo vệ
-antiDecompile()
-antiCopy()
-
--- ${obfuscateLua(source)}
-
--- Cleanup
-collectgarbage("collect")
-`;
-    
-    // 8. Log access thành công
-    logAccess(req, "delivery_success", { 
-        scriptId: script.id,
-        userAgent: ua
-    });
-    
-    // 9. Trả về script bảo vệ (không phải source thật)
-    res.status(200)
-        .type("text/plain")
-        .set("Cache-Control", "no-store, no-cache, must-revalidate, private, max-age=0")
-        .set("Pragma", "no-cache")
-        .set("Expires", "0")
-        .set("X-Content-Type-Options", "nosniff")
-        .set("X-Frame-Options", "DENY")
-        .set("X-XSS-Protection", "1; mode=block")
-        .set("Content-Security-Policy", "default-src 'none'")
-        .set("Referrer-Policy", "no-referrer")
-        .set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-        .set("Cross-Origin-Resource-Policy", "same-origin")
-        .set("Cross-Origin-Opener-Policy", "same-origin")
-        .set("Cross-Origin-Embedder-Policy", "require-corp")
-        .send(protectedScript);
-});
+);
 
 /* =========================================================
-   DEBUG ALERT ENDPOINT
+   LUA SOURCE ENDPOINT
 ========================================================= */
 
-app.post("/api/debug-alert", (req, res) => {
-    const clientIP = getClientIP(req);
-    logAccess(req, "debug_alert", { 
-        ip: clientIP,
-        userAgent: req.headers["user-agent"]
-    });
-    
-    // Có thể block IP này nếu phát hiện debug
-    blockIP(clientIP, 60 * 60 * 1000); // Block 1 giờ
-    
-    res.json({ ok: true });
-});
+app.get(
+    "/api/:id/:token",
+    (req, res) => {
 
-/* =========================================================
-   ADMIN ENDPOINTS
-========================================================= */
+        const {
+            id,
+            token
+        } = req.params;
 
-app.get("/api/admin/stats", auth, (req, res) => {
-    if (req.auth.user.accessType !== "permanent") {
-        return res.status(403).json({ ok: false, error: "Forbidden" });
+        const db =
+            readJSON(SCRIPTS_FILE);
+
+        const script =
+            db[id];
+
+        if (!script) {
+            return res
+                .status(404)
+                .type("text/plain")
+                .send(
+                    "Blocked by LEXINX v50 protection"
+                );
+        }
+
+        if (
+            token !==
+            script.token
+        ) {
+            return res
+                .status(403)
+                .type("text/plain")
+                .send(
+                    "Blocked by LEXINX v50 protection"
+                );
+        }
+
+        /*
+           Loader lấy source mới nhất.
+           Vì script.source đã được edit
+           nên loader cũ tự nhận source mới.
+        */
+
+        res
+            .status(200)
+            .type("text/plain")
+            .set(
+                "Cache-Control",
+                "no-store, no-cache, must-revalidate"
+            )
+            .set(
+                "Pragma",
+                "no-cache"
+            )
+            .set(
+                "X-Content-Type-Options",
+                "nosniff"
+            )
+            .send(
+                script.source
+            );
     }
-    
-    const accessLog = readDB(ACCESS_LOG_FILE);
-    const today = new Date().toISOString().split("T")[0];
-    const todayLog = accessLog[today] || [];
-    
-    const stats = {
-        totalRequests: todayLog.length,
-        blockedRequests: todayLog.filter(log => log.action.startsWith("blocked") || log.action === "delivery_blocked").length,
-        successfulDeliveries: todayLog.filter(log => log.action === "delivery_success").length,
-        browserBlocked: todayLog.filter(log => log.action === "delivery_blocked" && log.details.reason.includes("browser")).length,
-        uniqueIPs: new Set(todayLog.map(log => log.ip)).size,
-        blockedIPs: Object.keys(readDB(BLACKLIST_FILE)).length,
-        debugAlerts: todayLog.filter(log => log.action === "debug_alert").length
-    };
-    
-    res.json({ ok: true, stats });
-});
+);
 
 /* =========================================================
-   404 HANDLER
+   404
 ========================================================= */
 
 app.use((req, res) => {
-    const clientIP = getClientIP(req);
-    
-    if (isBotRequest(req) && !isBrowserRequest(req)) {
-        logAccess(req, "blocked_404", { path: req.path });
-        return res.status(403).type("text/plain").send("Blocked by LEXINX");
+    res
+        .status(404)
+        .type("text/plain")
+        .send(
+            "Blocked by LEXINX v50 protection"
+        );
+});
+
+/* =========================================================
+   START
+========================================================= */
+
+app.listen(
+    PORT,
+    "0.0.0.0",
+    () => {
+
+        console.log(
+            "================================="
+        );
+
+        console.log(
+            "LEXINX PROTECT ONLINE"
+        );
+
+        console.log(
+            "PORT:",
+            PORT
+        );
+
+        console.log(
+            "DOMAIN:",
+            DOMAIN
+        );
+
+        console.log(
+            "================================="
+        );
     }
-    
-    res.status(404).type("text/plain").send("Blocked by LEXINX v50 protection");
-});
-
-/* =========================================================
-   ERROR HANDLER
-========================================================= */
-
-app.use((err, req, res, next) => {
-    console.error("Error:", err);
-    logAccess(req, "server_error", { error: err.message });
-    
-    res.status(500).json({ ok: false, error: "Internal server error" });
-});
-
-/* =========================================================
-   INITIALIZE SECURITY
-========================================================= */
-
-if (SECURITY_CONFIG.honeypotEnabled) {
-    setupHoneypot();
-}
-
-setInterval(() => {
-    const sessions = readDB(SESSIONS_FILE);
-    const now = Date.now();
-    
-    for (const token in sessions) {
-        if (now - sessions[token].createdAt > SECURITY_CONFIG.sessionTimeout) {
-            delete sessions[token];
-        }
-    }
-    
-    writeDB(SESSIONS_FILE, sessions);
-}, 24 * 60 * 60 * 1000);
-
-/* =========================================================
-   START SERVER
-========================================================= */
-
-app.listen(PORT, "0.0.0.0", () => {
-    console.log("=".repeat(60));
-    console.log("🛡️  LEXINX PROTECT v50 - ULTIMATE SOURCE PROTECTION");
-    console.log("=".repeat(60));
-    console.log("✅ Server running on port:", PORT);
-    console.log("🌐 Domain:", DOMAIN);
-    console.log("🔒 Encryption: ENABLED");
-    console.log("🕵️  Honeypot: ENABLED");
-    console.log("🚫 Browser Blocking: ENABLED");
-    console.log("📦 Server-Side Execution: ENABLED");
-    console.log("🔐 Obfuscation: ENABLED");
-    console.log("🛡️  Anti-Debug: ENABLED");
-    console.log("💧 Watermark: ENABLED");
-    console.log("=".repeat(60));
-    console.log("");
-    console.log("📌 SOURCE CODE KHÔNG BAO GIỜ ĐƯỢC GỬI CHO CLIENT");
-    console.log("📌 Chỉ gửi script bảo vệ với anti-decompile");
-    console.log("📌 Tự động block IP nếu phát hiện debug/decompile");
-    console.log("=".repeat(60));
-});
+);
