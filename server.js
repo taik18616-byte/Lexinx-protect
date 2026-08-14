@@ -21,10 +21,7 @@ if (!fs.existsSync(DB_FILE)) {
     fs.writeFileSync(DB_FILE, "{}", "utf8");
 }
 
-app.use(express.json({
-    limit: "25mb"
-}));
-
+app.use(express.json({ limit: "25mb" }));
 app.use(express.static(PUBLIC_DIR));
 
 function readDB() {
@@ -46,9 +43,7 @@ function writeDB(db) {
 }
 
 function createID() {
-    return crypto
-        .randomBytes(12)
-        .toString("hex");
+    return crypto.randomBytes(12).toString("hex");
 }
 
 function cleanName(name) {
@@ -59,58 +54,73 @@ function cleanName(name) {
 
 /*
 ========================================================
-BROWSER CHECK
+BROWSER DETECTION
 ========================================================
 
-Đây là lớp chặn browser thông thường.
+Không dùng "android" hoặc "mozilla" để tránh chặn
+nhầm executor/client.
 
-Không thể dùng User-Agent để chứng minh tuyệt đối
-request là Roblox vì User-Agent có thể bị giả mạo.
+Đây chỉ là lớp chống mở URL trực tiếp bằng browser
+thông thường, không phải xác thực Roblox tuyệt đối.
 */
 
-function looksLikeBrowser(req) {
+function isDirectBrowser(req) {
+    const ua = String(
+        req.headers["user-agent"] || ""
+    ).toLowerCase();
 
-    const ua =
-        String(
-            req.headers["user-agent"] || ""
-        ).toLowerCase();
+    const accept = String(
+        req.headers["accept"] || ""
+    ).toLowerCase();
 
-    const browserPatterns = [
-        "mozilla/",
+    const secFetch = String(
+        req.headers["sec-fetch-site"] || ""
+    ).toLowerCase();
+
+    const browserUA = [
         "chrome/",
         "firefox/",
         "safari/",
         "edg/",
         "opr/",
-        "opera",
-        "brave",
-        "vivaldi",
-        "android"
+        "opera/",
+        "brave/",
+        "vivaldi/"
     ];
 
-    return browserPatterns.some(
-        pattern => ua.includes(pattern)
+    const hasBrowserUA =
+        browserUA.some(x => ua.includes(x));
+
+    const hasBrowserFetch =
+        Boolean(
+            req.headers["sec-fetch-mode"] ||
+            req.headers["sec-fetch-dest"] ||
+            req.headers["sec-ch-ua"]
+        );
+
+    const normalHTMLRequest =
+        accept.includes("text/html");
+
+    const browserFetch =
+        secFetch === "navigate" ||
+        secFetch === "same-origin";
+
+    return (
+        hasBrowserUA &&
+        (
+            hasBrowserFetch ||
+            normalHTMLRequest ||
+            browserFetch
+        )
     );
 }
 
-/*
-========================================================
-LEXINX BLOCK
-========================================================
-*/
-
 function blockBrowser(res) {
-
     return res
         .status(403)
         .type("text/plain")
-        .set(
-            "Cache-Control",
-            "no-store"
-        )
-        .send(
-            "LEXINX BLOCK"
-        );
+        .set("Cache-Control", "no-store")
+        .send("LEXINX BLOCK");
 }
 
 /*
@@ -118,14 +128,12 @@ function blockBrowser(res) {
 LAYER 2
 ========================================================
 
-Server tự sinh Layer 2 từ ID.
-
 Layer 2 không chứa source.
-Nó gọi /api/data/:id.
+
+Nó chỉ gọi server lấy source theo ID.
 */
 
 function createLayer2(id) {
-
     const endpoint =
         `${DOMAIN}/api/data/${id}`;
 
@@ -135,8 +143,7 @@ local URL = ${JSON.stringify(endpoint)}
 
 local response
 
-local success, result = pcall(function()
-
+local ok, result = pcall(function()
     return request({
         Url = URL,
         Method = "POST",
@@ -147,10 +154,9 @@ local success, result = pcall(function()
 
         Body = "{}"
     })
-
 end)
 
-if not success or not result then
+if not ok or not result then
     warn("[LEXINX] Request failed")
     return
 end
@@ -158,7 +164,7 @@ end
 response = result
 
 if response.StatusCode ~= 200 then
-    warn("[LEXINX] Blocked:", response.StatusCode)
+    warn("[LEXINX] HTTP:", response.StatusCode)
     return
 end
 
@@ -181,18 +187,16 @@ if type(data.code) ~= "string" then
     return
 end
 
-local fn, compileError =
-    loadstring(data.code)
+local fn, compileError = loadstring(data.code)
 
 if not fn then
     warn("[LEXINX] Compile error:", compileError)
     return
 end
 
-local executed, runtimeError =
-    pcall(fn)
+local success, runtimeError = pcall(fn)
 
-if not executed then
+if not success then
     warn("[LEXINX] Runtime error:", runtimeError)
 end
 `;
@@ -203,11 +207,11 @@ end
 LAYER 1
 ========================================================
 
-Đây là loader mà web tự tạo và copy.
+Loader ngắn:
+loadstring(game:HttpGet("..."))()
 */
 
 function createLayer1(id) {
-
     const endpoint =
         `${DOMAIN}/api/loader/${id}`;
 
@@ -221,19 +225,17 @@ HOME
 */
 
 app.get("/", (req, res) => {
-
     res.sendFile(
         path.join(
             PUBLIC_DIR,
             "index.html"
         )
     );
-
 });
 
 /*
 ========================================================
-CREATE SCRIPT
+CREATE
 ========================================================
 */
 
@@ -245,12 +247,10 @@ app.post("/api/create", (req, res) => {
             : "";
 
     if (!source.trim()) {
-
         return res.status(400).json({
             ok: false,
             error: "Script is empty"
         });
-
     }
 
     const name =
@@ -263,19 +263,11 @@ app.post("/api/create", (req, res) => {
         readDB();
 
     db[id] = {
-
         id,
-
         name,
-
         source,
-
-        createdAt:
-            Date.now(),
-
-        updatedAt:
-            Date.now()
-
+        createdAt: Date.now(),
+        updatedAt: Date.now()
     };
 
     writeDB(db);
@@ -287,30 +279,23 @@ app.post("/api/create", (req, res) => {
         createLayer2(id);
 
     res.json({
-
         ok: true,
-
         id,
-
         name,
 
-        loader:
-            layer1,
+        loader: layer1,
 
         layer1,
-
         layer2,
 
         endpoint:
             `${DOMAIN}/api/loader/${id}`
-
     });
-
 });
 
 /*
 ========================================================
-EDIT SCRIPT
+EDIT
 ========================================================
 */
 
@@ -323,12 +308,10 @@ app.post("/api/edit/:id", (req, res) => {
         readDB();
 
     if (!db[id]) {
-
         return res.status(404).json({
             ok: false,
             error: "Script not found"
         });
-
     }
 
     const source =
@@ -337,12 +320,10 @@ app.post("/api/edit/:id", (req, res) => {
             : "";
 
     if (!source.trim()) {
-
         return res.status(400).json({
             ok: false,
             error: "Script is empty"
         });
-
     }
 
     db[id].source =
@@ -352,10 +333,8 @@ app.post("/api/edit/:id", (req, res) => {
         typeof req.body?.name === "string" &&
         req.body.name.trim()
     ) {
-
         db[id].name =
             cleanName(req.body.name);
-
     }
 
     db[id].updatedAt =
@@ -370,28 +349,20 @@ app.post("/api/edit/:id", (req, res) => {
         createLayer2(id);
 
     res.json({
-
         ok: true,
-
         id,
+        name: db[id].name,
 
-        name:
-            db[id].name,
-
-        loader:
-            layer1,
+        loader: layer1,
 
         layer1,
-
         layer2
-
     });
-
 });
 
 /*
 ========================================================
-LIST SCRIPTS
+LIST
 ========================================================
 */
 
@@ -406,22 +377,14 @@ app.get("/api/scripts", (req, res) => {
             .map(script => {
 
                 const layer1 =
-                    createLayer1(
-                        script.id
-                    );
+                    createLayer1(script.id);
 
                 const layer2 =
-                    createLayer2(
-                        script.id
-                    );
+                    createLayer2(script.id);
 
                 return {
-
-                    id:
-                        script.id,
-
-                    name:
-                        script.name,
+                    id: script.id,
+                    name: script.name,
 
                     createdAt:
                         script.createdAt,
@@ -429,25 +392,17 @@ app.get("/api/scripts", (req, res) => {
                     updatedAt:
                         script.updatedAt,
 
-                    loader:
-                        layer1,
+                    loader: layer1,
 
                     layer1,
-
                     layer2
-
                 };
-
             });
 
     res.json({
-
         ok: true,
-
         scripts
-
     });
-
 });
 
 /*
@@ -465,29 +420,18 @@ app.get("/api/source/:id", (req, res) => {
         db[req.params.id];
 
     if (!script) {
-
         return res.status(404).json({
             ok: false,
             error: "Script not found"
         });
-
     }
 
     res.json({
-
         ok: true,
-
-        id:
-            script.id,
-
-        name:
-            script.name,
-
-        source:
-            script.source
-
+        id: script.id,
+        name: script.name,
+        source: script.source
     });
-
 });
 
 /*
@@ -502,12 +446,10 @@ app.delete("/api/delete/:id", (req, res) => {
         readDB();
 
     if (!db[req.params.id]) {
-
         return res.status(404).json({
             ok: false,
             error: "Script not found"
         });
-
     }
 
     delete db[req.params.id];
@@ -517,7 +459,6 @@ app.delete("/api/delete/:id", (req, res) => {
     res.json({
         ok: true
     });
-
 });
 
 /*
@@ -525,22 +466,19 @@ app.delete("/api/delete/:id", (req, res) => {
 LAYER 1 ENDPOINT
 ========================================================
 
-Browser:
-GET /api/loader/ID
-
-→ LEXINX BLOCK
+Browser trực tiếp:
+    GET /api/loader/ID
+    -> 403 LEXINX BLOCK
 
 Loader:
-game:HttpGet(...)
-→ Layer 2
+    game:HttpGet(...)
+    -> Layer 2
 */
 
 app.get("/api/loader/:id", (req, res) => {
 
-    if (looksLikeBrowser(req)) {
-
+    if (isDirectBrowser(req)) {
         return blockBrowser(res);
-
     }
 
     const db =
@@ -550,14 +488,10 @@ app.get("/api/loader/:id", (req, res) => {
         db[req.params.id];
 
     if (!script) {
-
         return res
             .status(404)
             .type("text/plain")
-            .send(
-                "LEXINX BLOCK"
-            );
-
+            .send("LEXINX BLOCK");
     }
 
     const layer2 =
@@ -581,25 +515,19 @@ app.get("/api/loader/:id", (req, res) => {
             "nosniff"
         )
         .send(layer2);
-
 });
 
 /*
 ========================================================
-DATA ENDPOINT
+SOURCE ENDPOINT
 ========================================================
 
-GET:
-browser → BLOCK
-
-POST:
-Layer 2 → source
+GET  -> BLOCK
+POST -> trả source cho Layer 2
 */
 
 app.get("/api/data/:id", (req, res) => {
-
     return blockBrowser(res);
-
 });
 
 app.post("/api/data/:id", (req, res) => {
@@ -611,16 +539,10 @@ app.post("/api/data/:id", (req, res) => {
         db[req.params.id];
 
     if (!script) {
-
         return res.status(404).json({
-
             ok: false,
-
-            error:
-                "Script not found"
-
+            error: "Script not found"
         });
-
     }
 
     res
@@ -638,17 +560,10 @@ app.post("/api/data/:id", (req, res) => {
             "nosniff"
         )
         .json({
-
             ok: true,
-
-            id:
-                script.id,
-
-            code:
-                script.source
-
+            id: script.id,
+            code: script.source
         });
-
 });
 
 /*
@@ -665,7 +580,6 @@ app.use((req, res) => {
         .send(
             "LEXINX BLOCK"
         );
-
 });
 
 /*
@@ -697,5 +611,4 @@ app.listen(PORT, () => {
     console.log(
         "=============================="
     );
-
 });
