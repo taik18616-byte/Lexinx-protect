@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>LEXINX Protect</title>
+
+<style>
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    background: #0b0b0f;
+    color: #eee;
+    font-family: Arial, sans-serif;
+}
+
+.container {
+    max-width: 1000px;
+    margin: auto;
+    padding: 25px;
+}
+
+h1 {
+    margin-bottom: 5px;
+}
+
+.subtitle {
+    color: #888;
+    margin-bottom: 25px;
+}
+
+.panel {
+    background: #15151c;
+    border: 1px solid #292934;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+input,
+textarea {
+    width: 100%;
+    background: #0c0c11;
+    color: white;
+    border: 1px solid #33333f;
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 8px;
+    margin-bottom: 15px;
+    outline: none;
+}
+
+textarea {
+    min-height: 220px;
+    resize: vertical;
+    font-family: monospace;
+}
+
+button {
+    border: 0;
+    border-radius: 7px;
+    padding: 10px 15px;
+    cursor: pointer;
+    background: #292936;
+    color: white;
+    margin-right: 5px;
+}
+
+button:hover {
+    background: #3a3a4a;
+}
+
+.primary {
+    background: #5865f2;
+}
+
+.danger {
+    background: #b83232;
+}
+
+.success {
+    background: #287a4d;
+}
+
+.script {
+    border: 1px solid #30303b;
+    border-radius: 10px;
+    padding: 15px;
+    margin-top: 12px;
+}
+
+.script-name {
+    font-size: 18px;
+    font-weight: bold;
+}
+
+.id {
+    color: #8f8fa0;
+    margin: 5px 0;
+}
+
+.loader {
+    background: #09090c;
+    padding: 10px;
+    border-radius: 7px;
+    font-family: monospace;
+    word-break: break-all;
+    margin: 10px 0;
+}
+
+.status {
+    font-size: 13px;
+    margin-bottom: 10px;
+}
+
+.active {
+    color: #4ed68a;
+}
+
+.revoked {
+    color: #e85b5b;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<h1>LEXINX Protect</h1>
+<div class="subtitle">
+    Lua Payload Manager
+</div>
+
+<div class="panel">
+
+<h2>Create Script</h2>
+
+<label>Admin Token</label>
+
+<input
+    id="token"
+    type="password"
+    placeholder="X-Admin-Token"
+>
+
+<label>Script Name</label>
+
+<input
+    id="name"
+    placeholder="My Script"
+>
+
+<label>Lua Payload</label>
+
+<textarea
+    id="payload"
+    placeholder='print("67")'
+></textarea>
+
+<button
+    class="primary"
+    onclick="createScript()"
+>
+Create Loader
+</button>
+
+</div>
+
+
+<div class="panel">
+
+<h2>Scripts</h2>
+
+<div id="scripts">
+    Loading...
+</div>
+
+</div>
+
+</div>
+
+
+<script>
+
+let adminToken = "";
+
+
+function headers() {
+
+    return {
+        "Content-Type": "application/json",
+        "X-Admin-Token": adminToken
+    };
+
+}
+
+
+// ==================================================
+// CREATE
+// ==================================================
+
+async function createScript() {
+
+    adminToken =
+        document.getElementById("token").value;
+
+    const name =
+        document.getElementById("name").value;
+
+    const payload =
+        document.getElementById("payload").value;
+
+    if (!adminToken) {
+        alert("Enter admin token");
+        return;
+    }
+
+    if (!name || !payload) {
+        alert("Enter name and payload");
+        return;
+    }
+
+    const response = await fetch(
+        "/admin/create",
+        {
+            method: "POST",
+
+            headers: headers(),
+
+            body: JSON.stringify({
+                name,
+                payload
+            })
+        }
+    );
+
+    const data = await response.json();
+
+    if (!data.ok) {
+        alert(data.error || "Create failed");
+        return;
+    }
+
+    await navigator.clipboard.writeText(
+        data.script.loader
+    );
+
+    alert(
+        "Created!\n\n" +
+        data.script.loader +
+        "\n\nLoader copied."
+    );
+
+    document.getElementById("name").value = "";
+    document.getElementById("payload").value = "";
+
+    loadScripts();
+}
+
+
+// ==================================================
+// LOAD LIST
+// ==================================================
+
+async function loadScripts() {
+
+    adminToken =
+        document.getElementById("token").value;
+
+    if (!adminToken) {
+        document.getElementById("scripts").innerHTML =
+            "Enter Admin Token.";
+        return;
+    }
+
+    const response = await fetch(
+        "/admin/list",
+        {
+            headers: headers()
+        }
+    );
+
+    const data = await response.json();
+
+    if (!data.ok) {
+        document.getElementById("scripts").innerHTML =
+            "Unauthorized.";
+        return;
+    }
+
+    const container =
+        document.getElementById("scripts");
+
+    container.innerHTML = "";
+
+    if (data.scripts.length === 0) {
+        container.innerHTML =
+            "No scripts.";
+        return;
+    }
+
+    for (const script of data.scripts) {
+
+        const div =
+            document.createElement("div");
+
+        div.className = "script";
+
+        div.innerHTML = `
+
+            <div class="script-name">
+                ${escapeHTML(script.name)}
+            </div>
+
+            <div class="id">
+                ID: ${escapeHTML(script.id)}
+            </div>
+
+            <div class="status ${
+                script.active
+                    ? "active"
+                    : "revoked"
+            }">
+                ${
+                    script.active
+                        ? "ACTIVE"
+                        : "REVOKED"
+                }
+            </div>
+
+            <div class="loader">
+                ${escapeHTML(script.loader)}
+            </div>
+
+            <button
+                class="success"
+                onclick="copyLoader(
+                    ${JSON.stringify(script.loader)}
+                )"
+            >
+                Copy Loader
+            </button>
+
+            ${
+                script.active
+                ?
+                `
+                <button
+                    class="danger"
+                    onclick="revokeScript(
+                        '${script.id}'
+                    )"
+                >
+                    Revoke
+                </button>
+                `
+                :
+                `
+                <button
+                    class="primary"
+                    onclick="enableScript(
+                        '${script.id}'
+                    )"
+                >
+                    Enable
+                </button>
+                `
+            }
+
+            <button
+                onclick="deleteScript(
+                    '${script.id}'
+                )"
+            >
+                Delete
+            </button>
+        `;
+
+        container.appendChild(div);
+    }
+}
+
+
+// ==================================================
+// COPY
+// ==================================================
+
+async function copyLoader(loader) {
+
+    await navigator.clipboard.writeText(loader);
+
+    alert("Loader copied!");
+}
+
+
+// ==================================================
+// REVOKE
+// ==================================================
+
+async function revokeScript(id) {
+
+    if (!confirm("Revoke this script?")) {
+        return;
+    }
+
+    await fetch(
+        "/admin/revoke/" +
+        encodeURIComponent(id),
+        {
+            method: "POST",
+            headers: headers()
+        }
+    );
+
+    loadScripts();
+}
+
+
+// ==================================================
+// ENABLE
+// ==================================================
+
+async function enableScript(id) {
+
+    await fetch(
+        "/admin/enable/" +
+        encodeURIComponent(id),
+        {
+            method: "POST",
+            headers: headers()
+        }
+    );
+
+    loadScripts();
+}
+
+
+// ==================================================
+// DELETE
+// ==================================================
+
+async function deleteScript(id) {
+
+    if (!confirm("Delete permanently?")) {
+        return;
+    }
+
+    await fetch(
+        "/admin/delete/" +
+        encodeURIComponent(id),
+        {
+            method: "DELETE",
+            headers: headers()
+        }
+    );
+
+    loadScripts();
+}
+
+
+// ==================================================
+// HTML ESCAPE
+// ==================================================
+
+function escapeHTML(value) {
+
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+</script>
+
+</body>
+  </html>
