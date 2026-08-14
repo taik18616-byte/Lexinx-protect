@@ -16,17 +16,22 @@ CONFIG
 ========================================================
 */
 
-const TOKEN_TTL = 30 * 1000;          // 30 giây
-const RATE_WINDOW = 60 * 1000;        // 1 phút
-const MAX_REQUESTS = 60;              // mỗi IP / phút
-const MAX_BURST = 10;                 // burst tối đa
-const BURST_WINDOW = 5 * 1000;        // 5 giây
-const MAX_BODY = "25mb";
+const TOKEN_TTL = 30 * 1000;
+
+const RATE_WINDOW = 60 * 1000;
+const MAX_REQUESTS = 60;
+
+const BURST_WINDOW = 5 * 1000;
+const MAX_BURST = 10;
 
 /*
-Secret nên đặt trong Render Environment Variables:
+Đặt biến này trên Render:
 
-LEXINX_SECRET=mot-chuoi-bi-mat-rat-dai
+LEXINX_SECRET=chuoi-bi-mat-cua-ban
+
+Không bắt buộc để chạy,
+nhưng nên đặt để secret không đổi
+sau mỗi lần restart.
 */
 
 const SECRET =
@@ -35,7 +40,7 @@ const SECRET =
 
 /*
 ========================================================
-FILES
+PATH
 ========================================================
 */
 
@@ -72,7 +77,7 @@ MIDDLEWARE
 
 app.use(
     express.json({
-        limit: MAX_BODY
+        limit: "25mb"
     })
 );
 
@@ -87,19 +92,25 @@ DATABASE
 */
 
 function readDB() {
+
     try {
+
         return JSON.parse(
             fs.readFileSync(
                 DB_FILE,
                 "utf8"
             )
         );
+
     } catch {
+
         return {};
+
     }
 }
 
 function writeDB(db) {
+
     fs.writeFileSync(
         DB_FILE,
         JSON.stringify(
@@ -109,27 +120,35 @@ function writeDB(db) {
         ),
         "utf8"
     );
+
 }
 
 /*
 ========================================================
-ID
+UTILITIES
 ========================================================
 */
 
 function createID() {
+
     return crypto
         .randomBytes(16)
         .toString("hex");
+
 }
 
-function randomString(bytes = 32) {
+function randomString(
+    bytes = 32
+) {
+
     return crypto
         .randomBytes(bytes)
         .toString("hex");
+
 }
 
 function cleanName(name) {
+
     return String(
         name || "Script"
     )
@@ -141,6 +160,7 @@ function cleanName(name) {
             0,
             80
         );
+
 }
 
 /*
@@ -150,11 +170,6 @@ IP
 */
 
 function getIP(req) {
-
-    /*
-      Không tin tuyệt đối X-Forwarded-For.
-      Render/proxy có thể thêm header này.
-    */
 
     const forwarded =
         req.headers[
@@ -175,34 +190,30 @@ function getIP(req) {
         req.socket?.remoteAddress ||
         "unknown"
     );
+
 }
 
 /*
 ========================================================
-RATE LIMITER
-========================================================
-
-Lưu tạm trong RAM.
-Restart server sẽ reset rate limit.
-
-Nếu chạy nhiều instance thì nên chuyển
-phần này sang Redis.
+RATE LIMIT
 ========================================================
 */
 
-const rateStore = new Map();
+const rateStore =
+    new Map();
 
 function cleanupRateStore() {
 
-    const now = Date.now();
+    const now =
+        Date.now();
 
     for (
-        const [ip, item]
+        const [ip, data]
         of rateStore
     ) {
 
         if (
-            now - item.windowStart >
+            now - data.windowStart >
             RATE_WINDOW
         ) {
 
@@ -211,6 +222,7 @@ function cleanupRateStore() {
         }
 
     }
+
 }
 
 setInterval(
@@ -218,7 +230,11 @@ setInterval(
     60 * 1000
 ).unref();
 
-function rateLimit(req, res, next) {
+function rateLimit(
+    req,
+    res,
+    next
+) {
 
     const ip =
         getIP(req);
@@ -226,59 +242,56 @@ function rateLimit(req, res, next) {
     const now =
         Date.now();
 
-    let item =
+    let data =
         rateStore.get(ip);
 
-    if (!item) {
+    if (!data) {
 
-        item = {
+        data = {
+
             windowStart: now,
+
             count: 0,
+
             burstStart: now,
+
             burst: 0
+
         };
 
         rateStore.set(
             ip,
-            item
+            data
         );
 
     }
 
-    /*
-    Reset minute window
-    */
-
     if (
-        now - item.windowStart >=
+        now - data.windowStart >=
         RATE_WINDOW
     ) {
 
-        item.windowStart = now;
-        item.count = 0;
+        data.windowStart = now;
+        data.count = 0;
 
     }
 
-    /*
-    Reset burst
-    */
-
     if (
-        now - item.burstStart >=
+        now - data.burstStart >=
         BURST_WINDOW
     ) {
 
-        item.burstStart = now;
-        item.burst = 0;
+        data.burstStart = now;
+        data.burst = 0;
 
     }
 
-    item.count++;
-    item.burst++;
+    data.count++;
+    data.burst++;
 
     if (
-        item.count > MAX_REQUESTS ||
-        item.burst > MAX_BURST
+        data.count > MAX_REQUESTS ||
+        data.burst > MAX_BURST
     ) {
 
         res.set(
@@ -296,11 +309,8 @@ function rateLimit(req, res, next) {
     }
 
     next();
-}
 
-/*
-Áp rate limit toàn bộ API
-*/
+}
 
 app.use(
     "/api/",
@@ -309,18 +319,18 @@ app.use(
 
 /*
 ========================================================
-REQUEST HEURISTIC
+BROWSER DETECTION
+========================================================
+
+Không kiểm tra "Mozilla" hoặc "Android"
+để tránh chặn nhầm loader.
+
+Chỉ coi request là browser khi có
+các dấu hiệu navigation/browser rõ ràng.
 ========================================================
 */
 
 function looksLikeDirectBrowser(req) {
-
-    const ua =
-        String(
-            req.headers[
-                "user-agent"
-            ] || ""
-        ).toLowerCase();
 
     const accept =
         String(
@@ -343,10 +353,10 @@ function looksLikeDirectBrowser(req) {
             ] || ""
         ).toLowerCase();
 
-    /*
-    Browser navigation thường có
-    text/html + navigate/document.
-    */
+    const secChUa =
+        req.headers[
+            "sec-ch-ua"
+        ];
 
     const htmlNavigation =
         accept.includes(
@@ -360,24 +370,14 @@ function looksLikeDirectBrowser(req) {
                 "navigate"
         );
 
-    /*
-    Các header đặc trưng browser hiện đại.
-    */
-
     const browserHeaders =
-        Boolean(
-            req.headers[
-                "sec-ch-ua"
-            ] ||
-            req.headers[
-                "sec-ch-ua-platform"
-            ]
-        );
+        Boolean(secChUa);
 
     return (
         htmlNavigation ||
         browserHeaders
     );
+
 }
 
 /*
@@ -388,11 +388,11 @@ BLOCK
 
 function lexinxBlock(
     res,
-    code = 403
+    status = 403
 ) {
 
     return res
-        .status(code)
+        .status(status)
         .type("text/plain")
         .set(
             "Cache-Control",
@@ -405,6 +405,7 @@ function lexinxBlock(
         .send(
             "LEXINX BLOCK"
         );
+
 }
 
 /*
@@ -420,10 +421,9 @@ function sign(value) {
             "sha256",
             SECRET
         )
-        .update(
-            value
-        )
+        .update(value)
         .digest("hex");
+
 }
 
 function safeEqual(
@@ -435,7 +435,9 @@ function safeEqual(
         typeof a !== "string" ||
         typeof b !== "string"
     ) {
+
         return false;
+
     }
 
     const aa =
@@ -448,28 +450,21 @@ function safeEqual(
         aa.length !==
         bb.length
     ) {
+
         return false;
+
     }
 
     return crypto.timingSafeEqual(
         aa,
         bb
     );
+
 }
 
 /*
 ========================================================
-ONE-TIME CHALLENGES
-========================================================
-
-challenge:
-    ngắn hạn
-
-token:
-    ký HMAC
-
-used:
-    chỉ dùng một lần
+SECURITY STORAGE
 ========================================================
 */
 
@@ -487,12 +482,12 @@ function cleanupSecurityStore() {
     for (
         const [
             challenge,
-            item
+            data
         ] of challenges
     ) {
 
         if (
-            item.expiresAt <= now
+            data.expiresAt <= now
         ) {
 
             challenges.delete(
@@ -521,6 +516,7 @@ function cleanupSecurityStore() {
         }
 
     }
+
 }
 
 setInterval(
@@ -530,7 +526,7 @@ setInterval(
 
 /*
 ========================================================
-CREATE SIGNED TOKEN
+TOKEN
 ========================================================
 */
 
@@ -558,17 +554,28 @@ function createSecurityToken(
     const signature =
         sign(payload);
 
+    const object = {
+
+        id,
+
+        challenge,
+
+        timestamp,
+
+        nonce,
+
+        signature
+
+    };
+
     return Buffer
         .from(
-            JSON.stringify({
-                id,
-                challenge,
-                timestamp,
-                nonce,
-                signature
-            })
+            JSON.stringify(object)
         )
-        .toString("base64url");
+        .toString(
+            "base64url"
+        );
+
 }
 
 /*
@@ -584,14 +591,15 @@ function verifySecurityToken(
 ) {
 
     if (
-        typeof token !==
-        "string" ||
+        typeof token !== "string" ||
         token.length < 20
     ) {
+
         return {
             ok: false,
             error: "INVALID_TOKEN"
         };
+
     }
 
     let decoded;
@@ -605,7 +613,9 @@ function verifySecurityToken(
                         token,
                         "base64url"
                     )
-                    .toString("utf8")
+                    .toString(
+                        "utf8"
+                    )
             );
 
     } catch {
@@ -640,8 +650,8 @@ function verifySecurityToken(
     if (
         id !== expectedID ||
         typeof challenge !== "string" ||
-        typeof nonce !== "string" ||
         typeof timestamp !== "number" ||
+        typeof nonce !== "string" ||
         typeof signature !== "string"
     ) {
 
@@ -655,10 +665,6 @@ function verifySecurityToken(
     const now =
         Date.now();
 
-    /*
-    Token hết hạn
-    */
-
     if (
         Math.abs(
             now - timestamp
@@ -671,10 +677,6 @@ function verifySecurityToken(
         };
 
     }
-
-    /*
-    Challenge phải tồn tại
-    */
 
     const challengeData =
         challenges.get(
@@ -718,10 +720,6 @@ function verifySecurityToken(
 
     }
 
-    /*
-    Kiểm tra IP.
-    */
-
     const ip =
         getIP(req);
 
@@ -736,10 +734,6 @@ function verifySecurityToken(
         };
 
     }
-
-    /*
-    Verify HMAC
-    */
 
     const payload =
         [
@@ -767,10 +761,6 @@ function verifySecurityToken(
 
     }
 
-    /*
-    One-time token
-    */
-
     if (
         usedTokens.has(token)
     ) {
@@ -786,6 +776,158 @@ function verifySecurityToken(
         ok: true,
         challenge
     };
+
+}
+
+/*
+========================================================
+LAYER 2
+========================================================
+*/
+
+function createLayer2(
+    id,
+    token
+) {
+
+    const endpoint =
+        `${DOMAIN}/api/data/${id}`;
+
+    return `
+local HttpService = game:GetService("HttpService")
+
+local URL = ${JSON.stringify(endpoint)}
+
+local TOKEN = ${JSON.stringify(token)}
+
+local response
+
+local ok, result = pcall(function()
+
+    return request({
+
+        Url = URL,
+
+        Method = "POST",
+
+        Headers = {
+
+            ["Content-Type"] =
+                "application/json",
+
+            ["X-Lexinx-Token"] =
+                TOKEN
+
+        },
+
+        Body = "{}"
+
+    })
+
+end)
+
+if not ok or not result then
+
+    warn("[LEXINX] Request failed")
+
+    return
+
+end
+
+response = result
+
+if response.StatusCode ~= 200 then
+
+    warn(
+        "[LEXINX] HTTP:",
+        response.StatusCode
+    )
+
+    return
+
+end
+
+local decoded, data = pcall(function()
+
+    return HttpService:JSONDecode(
+        response.Body
+    )
+
+end)
+
+if not decoded or
+   type(data) ~= "table" then
+
+    warn(
+        "[LEXINX] Invalid response"
+    )
+
+    return
+
+end
+
+if data.ok ~= true then
+
+    warn(
+        "[LEXINX] Server rejected request"
+    )
+
+    return
+
+end
+
+if type(data.code) ~= "string" then
+
+    warn(
+        "[LEXINX] Source missing"
+    )
+
+    return
+
+end
+
+local fn, compileError =
+    loadstring(data.code)
+
+if not fn then
+
+    warn(
+        "[LEXINX] Compile error:",
+        compileError
+    )
+
+    return
+
+end
+
+local success, runtimeError =
+    pcall(fn)
+
+if not success then
+
+    warn(
+        "[LEXINX] Runtime error:",
+        runtimeError
+    )
+
+end
+`.trim();
+
+}
+
+/*
+========================================================
+LAYER 1
+========================================================
+*/
+
+function createLayer1(id) {
+
+    const endpoint =
+        `${DOMAIN}/api/loader/${id}`;
+
+    return `loadstring(game:HttpGet(${JSON.stringify(endpoint)}))()`;
+
 }
 
 /*
@@ -794,20 +936,23 @@ HOME
 ========================================================
 */
 
-app.get("/", (req, res) => {
+app.get(
+    "/",
+    (req, res) => {
 
-    res.sendFile(
-        path.join(
-            PUBLIC_DIR,
-            "index.html"
-        )
-    );
+        res.sendFile(
+            path.join(
+                PUBLIC_DIR,
+                "index.html"
+            )
+        );
 
-});
+    }
+);
 
 /*
 ========================================================
-CREATE SCRIPT
+CREATE
 ========================================================
 */
 
@@ -815,68 +960,99 @@ app.post(
     "/api/create",
     (req, res) => {
 
-        const source =
-            typeof req.body?.source ===
-            "string"
-                ? req.body.source
-                : "";
+        try {
 
-        if (!source.trim()) {
+            const source =
+                typeof req.body?.source ===
+                "string"
+                    ? req.body.source
+                    : "";
 
-            return res
-                .status(400)
+            if (!source.trim()) {
+
+                return res
+                    .status(400)
+                    .json({
+
+                        ok: false,
+
+                        error:
+                            "Script is empty"
+
+                    });
+
+            }
+
+            const name =
+                cleanName(
+                    req.body?.name
+                );
+
+            const id =
+                createID();
+
+            const db =
+                readDB();
+
+            db[id] = {
+
+                id,
+
+                name,
+
+                source,
+
+                createdAt:
+                    Date.now(),
+
+                updatedAt:
+                    Date.now()
+
+            };
+
+            writeDB(db);
+
+            /*
+            CREATE chỉ lưu source.
+            Token được tạo khi loader
+            thực sự được request.
+            */
+
+            res.json({
+
+                ok: true,
+
+                id,
+
+                name,
+
+                loader:
+                    createLayer1(id),
+
+                endpoint:
+                    `${DOMAIN}/api/loader/${id}`
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "[CREATE ERROR]",
+                error
+            );
+
+            res
+                .status(500)
                 .json({
+
                     ok: false,
+
                     error:
-                        "Script is empty"
+                        "Internal server error"
+
                 });
 
         }
-
-        const name =
-            cleanName(
-                req.body?.name
-            );
-
-        const id =
-            createID();
-
-        const db =
-            readDB();
-
-        db[id] = {
-
-            id,
-
-            name,
-
-            source,
-
-            createdAt:
-                Date.now(),
-
-            updatedAt:
-                Date.now()
-
-        };
-
-        writeDB(db);
-
-        res.json({
-
-            ok: true,
-
-            id,
-
-            name,
-
-            loader:
-                createLayer1(id),
-
-            endpoint:
-                `${DOMAIN}/api/loader/${id}`
-
-        });
 
     }
 );
@@ -891,79 +1067,107 @@ app.post(
     "/api/edit/:id",
     (req, res) => {
 
-        const id =
-            req.params.id;
+        try {
 
-        const db =
-            readDB();
+            const id =
+                req.params.id;
 
-        if (!db[id]) {
+            const db =
+                readDB();
 
-            return res
-                .status(404)
+            if (!db[id]) {
+
+                return res
+                    .status(404)
+                    .json({
+
+                        ok: false,
+
+                        error:
+                            "Script not found"
+
+                    });
+
+            }
+
+            const source =
+                typeof req.body?.source ===
+                "string"
+                    ? req.body.source
+                    : "";
+
+            if (!source.trim()) {
+
+                return res
+                    .status(400)
+                    .json({
+
+                        ok: false,
+
+                        error:
+                            "Script is empty"
+
+                    });
+
+            }
+
+            db[id].source =
+                source;
+
+            if (
+                typeof req.body?.name ===
+                    "string" &&
+                req.body.name.trim()
+            ) {
+
+                db[id].name =
+                    cleanName(
+                        req.body.name
+                    );
+
+            }
+
+            db[id].updatedAt =
+                Date.now();
+
+            writeDB(db);
+
+            res.json({
+
+                ok: true,
+
+                id,
+
+                name:
+                    db[id].name,
+
+                loader:
+                    createLayer1(id),
+
+                endpoint:
+                    `${DOMAIN}/api/loader/${id}`
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "[EDIT ERROR]",
+                error
+            );
+
+            res
+                .status(500)
                 .json({
+
                     ok: false,
+
                     error:
-                        "Script not found"
+                        "Internal server error"
+
                 });
 
         }
-
-        const source =
-            typeof req.body?.source ===
-            "string"
-                ? req.body.source
-                : "";
-
-        if (!source.trim()) {
-
-            return res
-                .status(400)
-                .json({
-                    ok: false,
-                    error:
-                        "Script is empty"
-                });
-
-        }
-
-        db[id].source =
-            source;
-
-        if (
-            typeof req.body?.name ===
-                "string" &&
-            req.body.name.trim()
-        ) {
-
-            db[id].name =
-                cleanName(
-                    req.body.name
-                );
-
-        }
-
-        db[id].updatedAt =
-            Date.now();
-
-        writeDB(db);
-
-        res.json({
-
-            ok: true,
-
-            id,
-
-            name:
-                db[id].name,
-
-            loader:
-                createLayer1(id),
-
-            endpoint:
-                `${DOMAIN}/api/loader/${id}`
-
-        });
 
     }
 );
@@ -1024,7 +1228,7 @@ app.get(
 
 /*
 ========================================================
-GET SOURCE FOR EDIT
+SOURCE
 ========================================================
 */
 
@@ -1043,9 +1247,12 @@ app.get(
             return res
                 .status(404)
                 .json({
+
                     ok: false,
+
                     error:
                         "Script not found"
+
                 });
 
         }
@@ -1086,9 +1293,12 @@ app.delete(
             return res
                 .status(404)
                 .json({
+
                     ok: false,
+
                     error:
                         "Script not found"
+
                 });
 
         }
@@ -1111,17 +1321,21 @@ app.delete(
 LAYER 1
 ========================================================
 
-Loader gọi:
+Browser:
+    GET /api/loader/ID
 
-GET /api/loader/:id
-
-Server trả Layer 2 + challenge.
+Loader:
+    game:HttpGet(...)
 ========================================================
 */
 
 app.get(
     "/api/loader/:id",
     (req, res) => {
+
+        /*
+        Chặn browser navigation.
+        */
 
         if (
             looksLikeDirectBrowser(req)
@@ -1149,11 +1363,15 @@ app.get(
 
         }
 
-        const ip =
-            getIP(req);
+        /*
+        Tạo challenge mới.
+        */
 
         const challenge =
             randomString(24);
+
+        const ip =
+            getIP(req);
 
         const expiresAt =
             Date.now() +
@@ -1162,14 +1380,20 @@ app.get(
         challenges.set(
             challenge,
             {
+
                 id:
                     req.params.id,
 
                 ip,
 
                 expiresAt
+
             }
         );
+
+        /*
+        Tạo signed token.
+        */
 
         const token =
             createSecurityToken(
@@ -1177,6 +1401,10 @@ app.get(
                 challenge,
                 ip
             );
+
+        /*
+        Tạo Layer 2 chứa token.
+        */
 
         const layer2 =
             createLayer2(
@@ -1208,17 +1436,7 @@ app.get(
 
 /*
 ========================================================
-DATA
-========================================================
-
-GET:
-    BLOCK
-
-POST:
-    token verify
-    challenge verify
-    one-time verify
-    source
+DATA GET
 ========================================================
 */
 
@@ -1234,104 +1452,136 @@ app.get(
     }
 );
 
+/*
+========================================================
+DATA POST
+========================================================
+*/
+
 app.post(
     "/api/data/:id",
     (req, res) => {
 
-        const token =
-            req.headers[
-                "x-lexinx-token"
-            ];
+        try {
 
-        const verification =
-            verifySecurityToken(
+            const token =
+                req.headers[
+                    "x-lexinx-token"
+                ];
+
+            /*
+            Verify token.
+            */
+
+            const verification =
+                verifySecurityToken(
+                    token,
+                    req.params.id,
+                    req
+                );
+
+            if (
+                !verification.ok
+            ) {
+
+                return res
+                    .status(403)
+                    .json({
+
+                        ok: false,
+
+                        error:
+                            "LEXINX BLOCK",
+
+                        reason:
+                            verification.error
+
+                    });
+
+            }
+
+            /*
+            Token one-time.
+            */
+
+            usedTokens.set(
                 token,
-                req.params.id,
-                req
+                Date.now() +
+                    TOKEN_TTL
             );
 
-        if (
-            !verification.ok
-        ) {
+            /*
+            Challenge one-time.
+            */
 
-            return res
-                .status(403)
+            challenges.delete(
+                verification.challenge
+            );
+
+            const db =
+                readDB();
+
+            const script =
+                db[req.params.id];
+
+            if (!script) {
+
+                return lexinxBlock(
+                    res,
+                    404
+                );
+
+            }
+
+            /*
+            Trả source.
+            */
+
+            res
+                .status(200)
+                .set(
+                    "Cache-Control",
+                    "no-store, no-cache, must-revalidate"
+                )
+                .set(
+                    "Pragma",
+                    "no-cache"
+                )
+                .set(
+                    "X-Content-Type-Options",
+                    "nosniff"
+                )
+                .json({
+
+                    ok: true,
+
+                    id:
+                        script.id,
+
+                    code:
+                        script.source
+
+                });
+
+        } catch (error) {
+
+            console.error(
+                "[DATA ERROR]",
+                error
+            );
+
+            res
+                .status(500)
                 .json({
 
                     ok: false,
 
                     error:
-                        "LEXINX BLOCK",
-
-                    reason:
-                        verification.error
+                        "Internal server error"
 
                 });
 
         }
-
-        /*
-        Token được đánh dấu USED
-        trước khi trả source.
-
-        Vì vậy cùng token không thể
-        dùng lại lần thứ hai.
-        */
-
-        usedTokens.set(
-            token,
-            Date.now() +
-                TOKEN_TTL
-        );
-
-        /*
-        Challenge cũng one-time.
-        */
-
-        challenges.delete(
-            verification.challenge
-        );
-
-        const db =
-            readDB();
-
-        const script =
-            db[req.params.id];
-
-        if (!script) {
-
-            return lexinxBlock(
-                res,
-                404
-            );
-
-        }
-
-        res
-            .status(200)
-            .set(
-                "Cache-Control",
-                "no-store, no-cache, must-revalidate"
-            )
-            .set(
-                "Pragma",
-                "no-cache"
-            )
-            .set(
-                "X-Content-Type-Options",
-                "nosniff"
-            )
-            .json({
-
-                ok: true,
-
-                id:
-                    script.id,
-
-                code:
-                    script.source
-
-            });
 
     }
 );
@@ -1401,3 +1651,19 @@ app.listen(
 
     }
 );
+
+Quan trọng: bản này cần "express" thôi nên "package.json" cũ của bạn vẫn đủ:
+
+{
+  "name": "lexinx-protect",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}
+
+Sau khi deploy, nếu CREATE vẫn không hoạt động, lỗi sẽ không còn nằm ở "createLayer2"; "/api/create" đã được bọc "try/catch" và trả JSON lỗi rõ ràng.
