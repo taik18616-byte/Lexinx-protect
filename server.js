@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DOMAIN =
     process.env.DOMAIN ||
-    "https://Lexinx-protect.onrender.com";
+    "https://Lexinx-protect-2.onrender.com";
 
 const DATA_DIR = path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "scripts.json");
