@@ -5,10 +5,16 @@ const path = require("path");
 
 const app = express();
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT || 3000);
 const DOMAIN =
     process.env.DOMAIN ||
     "https://Lexinx-protect.onrender.com";
+
+/*
+========================================================
+CONFIG
+========================================================
+*/
 
 const DATA_DIR = path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "scripts.json");
@@ -17,29 +23,92 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const SESSION_TTL = 2 * 60 * 1000;
 const TOKEN_TTL = 20 * 1000;
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
-fs.mkdirSync(PUBLIC_DIR, { recursive: true });
+/*
+ * QUAN TRỌNG:
+ *
+ * Trên Render nên đặt:
+ *
+ * LEXINX_MASTER_KEY=<64 hex characters>
+ *
+ * Không hard-code key vào source.
+ */
+
+const MASTER_KEY_HEX =
+    process.env.LEXINX_MASTER_KEY || "";
+
+if (!/^[0-9a-fA-F]{64}$/.test(MASTER_KEY_HEX)) {
+    console.error(
+        "Missing/invalid LEXINX_MASTER_KEY."
+    );
+    console.error(
+        "Set a 32-byte key as 64 hexadecimal characters."
+    );
+    process.exit(1);
+}
+
+const MASTER_KEY =
+    Buffer.from(
+        MASTER_KEY_HEX,
+        "hex"
+    );
+
+/*
+========================================================
+DIRECTORIES
+========================================================
+*/
+
+fs.mkdirSync(
+    DATA_DIR,
+    { recursive: true }
+);
+
+fs.mkdirSync(
+    PUBLIC_DIR,
+    { recursive: true }
+);
 
 if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, "{}", "utf8");
+    fs.writeFileSync(
+        DB_FILE,
+        "{}",
+        "utf8"
+    );
 }
+
+/*
+========================================================
+MIDDLEWARE
+========================================================
+*/
 
 app.disable("x-powered-by");
 
-app.use(express.json({
-    limit: "25mb"
-}));
+app.use(
+    express.json({
+        limit: "25mb"
+    })
+);
 
-app.use(express.static(PUBLIC_DIR));
+app.use(
+    express.static(
+        PUBLIC_DIR
+    )
+);
 
-/* =====================================================
-   DATABASE
-===================================================== */
+/*
+========================================================
+DATABASE
+========================================================
+*/
 
 function readDB() {
     try {
         return JSON.parse(
-            fs.readFileSync(DB_FILE, "utf8")
+            fs.readFileSync(
+                DB_FILE,
+                "utf8"
+            )
         );
     } catch {
         return {};
@@ -47,16 +116,30 @@ function readDB() {
 }
 
 function writeDB(db) {
+    const temp =
+        DB_FILE + ".tmp";
+
     fs.writeFileSync(
-        DB_FILE,
-        JSON.stringify(db, null, 2),
+        temp,
+        JSON.stringify(
+            db,
+            null,
+            2
+        ),
         "utf8"
+    );
+
+    fs.renameSync(
+        temp,
+        DB_FILE
     );
 }
 
-/* =====================================================
-   RANDOM
-===================================================== */
+/*
+========================================================
+RANDOM
+========================================================
+*/
 
 function randomHex(bytes = 32) {
     return crypto
@@ -65,14 +148,138 @@ function randomHex(bytes = 32) {
 }
 
 function cleanName(name) {
-    return String(name || "Script")
-        .replace(/[^\w .-]/g, "_")
+    return String(
+        name || "Script"
+    )
+        .replace(
+            /[^\w .-]/g,
+            "_"
+        )
         .slice(0, 80);
 }
 
-/* =====================================================
-   HEADERS
-===================================================== */
+/*
+========================================================
+AES-256-GCM
+========================================================
+
+Storage format:
+
+{
+    algorithm,
+    iv,
+    tag,
+    data
+}
+
+AES-GCM cung cấp:
+- confidentiality
+- integrity/authentication
+========================================================
+*/
+
+function encryptSource(source) {
+
+    const iv =
+        crypto.randomBytes(12);
+
+    const cipher =
+        crypto.createCipheriv(
+            "aes-256-gcm",
+            MASTER_KEY,
+            iv
+        );
+
+    const encrypted =
+        Buffer.concat([
+            cipher.update(
+                Buffer.from(
+                    source,
+                    "utf8"
+                )
+            ),
+            cipher.final()
+        ]);
+
+    const tag =
+        cipher.getAuthTag();
+
+    return {
+        algorithm:
+            "aes-256-gcm",
+
+        iv:
+            iv.toString("base64"),
+
+        tag:
+            tag.toString("base64"),
+
+        data:
+            encrypted.toString(
+                "base64"
+            )
+    };
+}
+
+function decryptSource(record) {
+
+    if (
+        !record ||
+        record.algorithm !==
+            "aes-256-gcm"
+    ) {
+        throw new Error(
+            "Invalid encrypted source"
+        );
+    }
+
+    const iv =
+        Buffer.from(
+            record.iv,
+            "base64"
+        );
+
+    const tag =
+        Buffer.from(
+            record.tag,
+            "base64"
+        );
+
+    const encrypted =
+        Buffer.from(
+            record.data,
+            "base64"
+        );
+
+    const decipher =
+        crypto.createDecipheriv(
+            "aes-256-gcm",
+            MASTER_KEY,
+            iv
+        );
+
+    decipher.setAuthTag(
+        tag
+    );
+
+    const decrypted =
+        Buffer.concat([
+            decipher.update(
+                encrypted
+            ),
+            decipher.final()
+        ]);
+
+    return decrypted.toString(
+        "utf8"
+    );
+}
+
+/*
+========================================================
+SECURITY RESPONSE
+========================================================
+*/
 
 function secure(res) {
     return res
@@ -80,7 +287,10 @@ function secure(res) {
             "Cache-Control",
             "no-store, no-cache, must-revalidate"
         )
-        .set("Pragma", "no-cache")
+        .set(
+            "Pragma",
+            "no-cache"
+        )
         .set(
             "X-Content-Type-Options",
             "nosniff"
@@ -91,14 +301,19 @@ function block(res) {
     return secure(res)
         .status(403)
         .type("text/plain")
-        .send("LEXINX BLOCK");
+        .send(
+            "LEXINX BLOCK"
+        );
 }
 
-/* =====================================================
-   BROWSER CHECK
-===================================================== */
+/*
+========================================================
+BROWSER NAVIGATION CHECK
+========================================================
+*/
 
 function browserNavigation(req) {
+
     const accept =
         String(
             req.headers.accept || ""
@@ -106,60 +321,85 @@ function browserNavigation(req) {
 
     const mode =
         String(
-            req.headers["sec-fetch-mode"] || ""
+            req.headers[
+                "sec-fetch-mode"
+            ] || ""
         ).toLowerCase();
 
     const dest =
         String(
-            req.headers["sec-fetch-dest"] || ""
+            req.headers[
+                "sec-fetch-dest"
+            ] || ""
         ).toLowerCase();
 
     return (
-        accept.includes("text/html") ||
+        accept.includes(
+            "text/html"
+        ) ||
         mode === "navigate" ||
         dest === "document"
     );
 }
 
-/* =====================================================
-   SESSION
-===================================================== */
+/*
+========================================================
+SESSION
+========================================================
+*/
 
 const sessions = new Map();
 
 function createChallenge() {
-    const now = Date.now();
 
     return {
-        token: randomHex(32),
-        nonce: randomHex(16),
-        expiresAt: now + TOKEN_TTL,
-        used: false
+        token:
+            randomHex(32),
+
+        nonce:
+            randomHex(16),
+
+        expiresAt:
+            Date.now() +
+            TOKEN_TTL,
+
+        used:
+            false
     };
 }
 
-function createSession(scriptID) {
-    const now = Date.now();
+function createSession(
+    scriptID
+) {
 
     const session = {
-        id: randomHex(32),
+
+        id:
+            randomHex(32),
 
         scriptID,
 
-        createdAt: now,
+        createdAt:
+            Date.now(),
 
         expiresAt:
-            now + SESSION_TTL,
+            Date.now() +
+            SESSION_TTL,
 
-        stage: 2,
+        stage:
+            2,
 
-        l2: createChallenge(),
+        l2:
+            createChallenge(),
 
-        l3: null,
+        l3:
+            null,
 
-        l4: null,
+        l4:
+            null,
 
-        l5: null
+        l5:
+            null
     };
 
     sessions.set(
@@ -171,9 +411,10 @@ function createSession(scriptID) {
 }
 
 function getSession(id) {
+
     if (
-        typeof id !== "string" ||
-        !id
+        typeof id !==
+        "string"
     ) {
         return null;
     }
@@ -189,7 +430,11 @@ function getSession(id) {
         Date.now() >
         session.expiresAt
     ) {
-        sessions.delete(id);
+
+        sessions.delete(
+            id
+        );
+
         return null;
     }
 
@@ -201,6 +446,7 @@ function consumeChallenge(
     token,
     nonce
 ) {
+
     if (!challenge) {
         return false;
     }
@@ -217,81 +463,131 @@ function consumeChallenge(
     }
 
     if (
-        typeof token !== "string" ||
-        typeof nonce !== "string"
+        typeof token !==
+            "string" ||
+        typeof nonce !==
+            "string"
     ) {
         return false;
     }
 
     if (
-        token !== challenge.token
+        !crypto.timingSafeEqual(
+            Buffer.from(
+                token
+            ),
+            Buffer.from(
+                challenge.token
+            )
+        )
     ) {
         return false;
     }
 
     if (
-        nonce !== challenge.nonce
+        !crypto.timingSafeEqual(
+            Buffer.from(
+                nonce
+            ),
+            Buffer.from(
+                challenge.nonce
+            )
+        )
     ) {
         return false;
     }
 
-    challenge.used = true;
+    challenge.used =
+        true;
 
     return true;
 }
 
-/* =====================================================
-   HOME
-===================================================== */
+/*
+========================================================
+HOME
+========================================================
+*/
 
-app.get("/", (req, res) => {
-    res.sendFile(
-        path.join(
-            PUBLIC_DIR,
-            "index.html"
-        )
-    );
-});
+app.get(
+    "/",
+    (req, res) => {
 
-/* =====================================================
-   CREATE SCRIPT
-===================================================== */
+        res.sendFile(
+            path.join(
+                PUBLIC_DIR,
+                "index.html"
+            )
+        );
+    }
+);
+
+/*
+========================================================
+CREATE
+========================================================
+*/
 
 app.post(
     "/api/create",
     (req, res) => {
+
         const source =
-            typeof req.body?.source === "string"
+            typeof req.body?.source ===
+                "string"
                 ? req.body.source
                 : "";
 
         if (!source.trim()) {
-            return res.status(400).json({
-                ok: false,
-                error: "Script is empty"
-            });
+
+            return res
+                .status(400)
+                .json({
+                    ok: false,
+                    error:
+                        "Script is empty"
+                });
         }
 
         const name =
-            cleanName(req.body?.name);
+            cleanName(
+                req.body?.name
+            );
 
         const id =
             randomHex(12);
+
+        const encrypted =
+            encryptSource(
+                source
+            );
 
         const db =
             readDB();
 
         db[id] = {
+
             id,
+
             name,
-            source,
-            createdAt: Date.now(),
-            updatedAt: Date.now()
+
+            source:
+                encrypted,
+
+            createdAt:
+                Date.now(),
+
+            updatedAt:
+                Date.now()
         };
 
         writeDB(db);
 
+        const loaderURL =
+            `${DOMAIN}/api/loader/${id}`;
+
         secure(res).json({
+
             ok: true,
 
             id,
@@ -299,51 +595,67 @@ app.post(
             name,
 
             endpoint:
-                `${DOMAIN}/api/loader/${id}`,
+                loaderURL,
 
             loader:
                 `loadstring(game:HttpGet(${JSON.stringify(
-                    `${DOMAIN}/api/loader/${id}`
+                    loaderURL
                 )}))()`
         });
     }
 );
 
-/* =====================================================
-   EDIT SCRIPT
-===================================================== */
+/*
+========================================================
+EDIT
+========================================================
+*/
 
 app.post(
     "/api/edit/:id",
     (req, res) => {
+
         const db =
             readDB();
 
         const script =
-            db[req.params.id];
+            db[
+                req.params.id
+            ];
 
         if (!script) {
-            return res.status(404).json({
-                ok: false,
-                error: "Script not found"
-            });
+
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "Script not found"
+                });
         }
 
         if (
             typeof req.body?.source ===
-            "string"
+                "string"
         ) {
+
             if (
                 !req.body.source.trim()
             ) {
-                return res.status(400).json({
-                    ok: false,
-                    error: "Script is empty"
-                });
+
+                return res
+                    .status(400)
+                    .json({
+                        ok: false,
+                        error:
+                            "Script is empty"
+                    });
             }
 
             script.source =
-                req.body.source;
+                encryptSource(
+                    req.body.source
+                );
         }
 
         if (
@@ -351,6 +663,7 @@ app.post(
                 "string" &&
             req.body.name.trim()
         ) {
+
             script.name =
                 cleanName(
                     req.body.name
@@ -362,24 +675,36 @@ app.post(
 
         writeDB(db);
 
+        const loaderURL =
+            `${DOMAIN}/api/loader/${script.id}`;
+
         secure(res).json({
+
             ok: true,
 
-            id: script.id,
+            id:
+                script.id,
 
-            name: script.name,
+            name:
+                script.name,
 
             loader:
                 `loadstring(game:HttpGet(${JSON.stringify(
-                    `${DOMAIN}/api/loader/${script.id}`
+                    loaderURL
                 )}))()`
         });
     }
 );
 
-/* =====================================================
-   L1
-===================================================== */
+/*
+========================================================
+L1
+========================================================
+
+L1 không chứa source.
+Nó chỉ nhận challenge rồi chạy chain.
+========================================================
+*/
 
 app.get(
     "/api/loader/:id",
@@ -395,9 +720,24 @@ app.get(
             readDB();
 
         const script =
-            db[req.params.id];
+            db[
+                req.params.id
+            ];
 
         if (!script) {
+            return block(res);
+        }
+
+        /*
+         * Kiểm tra encrypted payload
+         * trước khi tạo session.
+         */
+
+        if (
+            !script.source ||
+            script.source.algorithm !==
+                "aes-256-gcm"
+        ) {
             return block(res);
         }
 
@@ -406,48 +746,51 @@ app.get(
                 script.id
             );
 
-        /*
-         * L1 được tạo động.
-         * L1 nhận challenge L2 rồi
-         * tự chạy toàn bộ chain.
-         */
-
         const lua = `
 local HttpService = game:GetService("HttpService")
 
-local DOMAIN = ${JSON.stringify(DOMAIN)}
+local DOMAIN = ${JSON.stringify(
+            DOMAIN
+        )}
 
 local SESSION = ${JSON.stringify(
             session.id
         )}
 
-local L2_TOKEN = ${JSON.stringify(
+local TOKEN = ${JSON.stringify(
             session.l2.token
         )}
 
-local L2_NONCE = ${JSON.stringify(
+local NONCE = ${JSON.stringify(
             session.l2.nonce
         )}
 
-local function postJSON(url, body)
+local function requestJSON(
+    url,
+    body
+)
 
-    local ok, response = pcall(function()
+    local ok, response =
+        pcall(function()
 
-        return request({
-            Url = url,
+            return request({
 
-            Method = "POST",
+                Url = url,
 
-            Headers = {
-                ["Content-Type"] =
-                    "application/json"
-            },
+                Method = "POST",
 
-            Body =
-                HttpService:JSONEncode(body)
-        })
+                Headers = {
+                    ["Content-Type"] =
+                        "application/json"
+                },
 
-    end)
+                Body =
+                    HttpService:JSONEncode(
+                        body
+                    )
+            })
+
+        end)
 
     if not ok then
         error("LEXINX BLOCK")
@@ -460,11 +803,13 @@ local function postJSON(url, body)
     if response.StatusCode ~= 200 then
         error(
             "LEXINX BLOCK HTTP " ..
-            tostring(response.StatusCode)
+            tostring(
+                response.StatusCode
+            )
         )
     end
 
-    local decoded, data =
+    local okJSON, data =
         pcall(function()
 
             return HttpService:JSONDecode(
@@ -473,7 +818,7 @@ local function postJSON(url, body)
 
         end)
 
-    if not decoded then
+    if not okJSON then
         error("LEXINX BLOCK")
     end
 
@@ -492,14 +837,15 @@ end
 -- L2 -> L3
 --------------------------------------------------------
 
-local L3 = postJSON(
-    DOMAIN .. "/api/l3",
-    {
-        session = SESSION,
-        token = L2_TOKEN,
-        nonce = L2_NONCE
-    }
-)
+local L3 =
+    requestJSON(
+        DOMAIN .. "/api/l3",
+        {
+            session = SESSION,
+            token = TOKEN,
+            nonce = NONCE
+        }
+    )
 
 if L3.stage ~= 3 then
     error("LEXINX BLOCK")
@@ -509,14 +855,15 @@ end
 -- L3 -> L4
 --------------------------------------------------------
 
-local L4 = postJSON(
-    DOMAIN .. "/api/l4",
-    {
-        session = L3.session,
-        token = L3.token,
-        nonce = L3.nonce
-    }
-)
+local L4 =
+    requestJSON(
+        DOMAIN .. "/api/l4",
+        {
+            session = L3.session,
+            token = L3.token,
+            nonce = L3.nonce
+        }
+    )
 
 if L4.stage ~= 4 then
     error("LEXINX BLOCK")
@@ -526,14 +873,15 @@ end
 -- L4 -> L5
 --------------------------------------------------------
 
-local L5 = postJSON(
-    DOMAIN .. "/api/l5",
-    {
-        session = L4.session,
-        token = L4.token,
-        nonce = L4.nonce
-    }
-)
+local L5 =
+    requestJSON(
+        DOMAIN .. "/api/l5",
+        {
+            session = L4.session,
+            token = L4.token,
+            nonce = L4.nonce
+        }
+    )
 
 if L5.stage ~= 5 then
     error("LEXINX BLOCK")
@@ -543,17 +891,20 @@ end
 -- L5 -> SOURCE
 --------------------------------------------------------
 
-local RESULT = postJSON(
-    DOMAIN .. "/api/data",
-    {
-        session = L5.session,
-        token = L5.token,
-        nonce = L5.nonce
-    }
-)
+local result =
+    requestJSON(
+        DOMAIN .. "/api/data",
+        {
+            session = L5.session,
+            token = L5.token,
+            nonce = L5.nonce
+        }
+    )
 
-if type(RESULT.code) ~= "string" then
-    error("LEXINX BLOCK: SOURCE MISSING")
+if type(result.code) ~= "string" then
+    error(
+        "LEXINX BLOCK: SOURCE MISSING"
+    )
 end
 
 --------------------------------------------------------
@@ -561,12 +912,14 @@ end
 --------------------------------------------------------
 
 local fn, compileError =
-    loadstring(RESULT.code)
+    loadstring(result.code)
 
 if not fn then
     error(
         "LEXINX COMPILE ERROR: " ..
-        tostring(compileError)
+        tostring(
+            compileError
+        )
     )
 end
 
@@ -576,7 +929,9 @@ local success, runtimeError =
 if not success then
     error(
         "LEXINX RUNTIME ERROR: " ..
-        tostring(runtimeError)
+        tostring(
+            runtimeError
+        )
     )
 end
 `;
@@ -587,9 +942,11 @@ end
     }
 );
 
-/* =====================================================
-   L2 -> L3
-===================================================== */
+/*
+========================================================
+L2 -> L3
+========================================================
+*/
 
 app.get(
     "/api/l3",
@@ -615,7 +972,9 @@ app.post(
         } = req.body || {};
 
         const s =
-            getSession(session);
+            getSession(
+                session
+            );
 
         if (!s) {
             return block(res);
@@ -641,27 +1000,28 @@ app.post(
         s.stage = 3;
 
         secure(res).json({
+
             ok: true,
 
             stage: 3,
 
-            session: s.id,
+            session:
+                s.id,
 
             token:
                 s.l3.token,
 
             nonce:
-                s.l3.nonce,
-
-            next:
-                `${DOMAIN}/api/l4`
+                s.l3.nonce
         });
     }
 );
 
-/* =====================================================
-   L3 -> L4
-===================================================== */
+/*
+========================================================
+L3 -> L4
+========================================================
+*/
 
 app.get(
     "/api/l4",
@@ -687,7 +1047,9 @@ app.post(
         } = req.body || {};
 
         const s =
-            getSession(session);
+            getSession(
+                session
+            );
 
         if (!s) {
             return block(res);
@@ -713,27 +1075,28 @@ app.post(
         s.stage = 4;
 
         secure(res).json({
+
             ok: true,
 
             stage: 4,
 
-            session: s.id,
+            session:
+                s.id,
 
             token:
                 s.l4.token,
 
             nonce:
-                s.l4.nonce,
-
-            next:
-                `${DOMAIN}/api/l5`
+                s.l4.nonce
         });
     }
 );
 
-/* =====================================================
-   L4 -> L5
-===================================================== */
+/*
+========================================================
+L4 -> L5
+========================================================
+*/
 
 app.get(
     "/api/l5",
@@ -759,7 +1122,9 @@ app.post(
         } = req.body || {};
 
         const s =
-            getSession(session);
+            getSession(
+                session
+            );
 
         if (!s) {
             return block(res);
@@ -785,27 +1150,28 @@ app.post(
         s.stage = 5;
 
         secure(res).json({
+
             ok: true,
 
             stage: 5,
 
-            session: s.id,
+            session:
+                s.id,
 
             token:
                 s.l5.token,
 
             nonce:
-                s.l5.nonce,
-
-            next:
-                `${DOMAIN}/api/data`
+                s.l5.nonce
         });
     }
 );
 
-/* =====================================================
-   L5 -> SOURCE
-===================================================== */
+/*
+========================================================
+L5 -> SOURCE
+========================================================
+*/
 
 app.get(
     "/api/data",
@@ -831,7 +1197,9 @@ app.post(
         } = req.body || {};
 
         const s =
-            getSession(session);
+            getSession(
+                session
+            );
 
         if (!s) {
             return block(res);
@@ -855,34 +1223,71 @@ app.post(
             readDB();
 
         const script =
-            db[s.scriptID];
+            db[
+                s.scriptID
+            ];
 
         if (!script) {
-            sessions.delete(s.id);
 
-            return res.status(404).json({
-                ok: false,
-                error: "Script not found"
-            });
+            sessions.delete(
+                s.id
+            );
+
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "Script not found"
+                });
         }
 
         /*
-         * Hủy session ngay khi challenge
-         * cuối được consume.
+         * Decrypt chỉ tại bước cuối.
          */
 
-        sessions.delete(s.id);
+        let source;
+
+        try {
+
+            source =
+                decryptSource(
+                    script.source
+                );
+
+        } catch {
+
+            sessions.delete(
+                s.id
+            );
+
+            return block(res);
+        }
+
+        /*
+         * Session bị hủy ngay sau
+         * khi lấy source.
+         */
+
+        sessions.delete(
+            s.id
+        );
 
         secure(res).json({
+
             ok: true,
-            code: script.source
+
+            code:
+                source
         });
     }
 );
 
-/* =====================================================
-   LIST SCRIPTS
-===================================================== */
+/*
+========================================================
+LIST
+========================================================
+*/
 
 app.get(
     "/api/scripts",
@@ -894,33 +1299,51 @@ app.get(
         const scripts =
             Object.values(db)
                 .reverse()
-                .map(script => ({
-                    id: script.id,
+                .map(
+                    script => {
 
-                    name: script.name,
+                        const url =
+                            `${DOMAIN}/api/loader/${script.id}`;
 
-                    createdAt:
-                        script.createdAt,
+                        return {
 
-                    updatedAt:
-                        script.updatedAt,
+                            id:
+                                script.id,
 
-                    loader:
-                        `loadstring(game:HttpGet(${JSON.stringify(
-                            `${DOMAIN}/api/loader/${script.id}`
-                        )}))()`
-                }));
+                            name:
+                                script.name,
+
+                            createdAt:
+                                script.createdAt,
+
+                            updatedAt:
+                                script.updatedAt,
+
+                            endpoint:
+                                url,
+
+                            loader:
+                                `loadstring(game:HttpGet(${JSON.stringify(
+                                    url
+                                )}))()`
+                        };
+                    }
+                );
 
         secure(res).json({
+
             ok: true,
+
             scripts
         });
     }
 );
 
-/* =====================================================
-   DELETE
-===================================================== */
+/*
+========================================================
+DELETE
+========================================================
+*/
 
 app.delete(
     "/api/delete/:id",
@@ -930,12 +1353,18 @@ app.delete(
             readDB();
 
         if (
-            !db[req.params.id]
+            !db[
+                req.params.id
+            ]
         ) {
-            return res.status(404).json({
-                ok: false,
-                error: "Script not found"
-            });
+
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "Script not found"
+                });
         }
 
         delete db[
@@ -950,9 +1379,11 @@ app.delete(
     }
 );
 
-/* =====================================================
-   UNKNOWN API
-===================================================== */
+/*
+========================================================
+UNKNOWN API
+========================================================
+*/
 
 app.use(
     "/api",
@@ -961,9 +1392,11 @@ app.use(
     }
 );
 
-/* =====================================================
-   404
-===================================================== */
+/*
+========================================================
+404
+========================================================
+*/
 
 app.use(
     (req, res) => {
@@ -977,9 +1410,11 @@ app.use(
     }
 );
 
-/* =====================================================
-   CLEANUP
-===================================================== */
+/*
+========================================================
+SESSION CLEANUP
+========================================================
+*/
 
 setInterval(
     () => {
@@ -988,7 +1423,10 @@ setInterval(
             Date.now();
 
         for (
-            const [id, session]
+            const [
+                id,
+                session
+            ]
             of sessions
         ) {
 
@@ -996,7 +1434,10 @@ setInterval(
                 now >
                 session.expiresAt
             ) {
-                sessions.delete(id);
+
+                sessions.delete(
+                    id
+                );
             }
         }
 
@@ -1004,16 +1445,18 @@ setInterval(
     30 * 1000
 );
 
-/* =====================================================
-   START
-===================================================== */
+/*
+========================================================
+START
+========================================================
+*/
 
 app.listen(
     PORT,
     () => {
 
         console.log(
-            "======================================"
+            "================================"
         );
 
         console.log(
@@ -1036,6 +1479,11 @@ app.listen(
         );
 
         console.log(
+            "AES:",
+            "AES-256-GCM"
+        );
+
+        console.log(
             "SESSION TTL:",
             SESSION_TTL,
             "ms"
@@ -1048,7 +1496,7 @@ app.listen(
         );
 
         console.log(
-            "======================================"
+            "================================"
         );
     }
 );
