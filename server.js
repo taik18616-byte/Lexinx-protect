@@ -38,21 +38,45 @@ const SUSPICIOUS_UA = [
     "scrapy",
     "bot",
     "spider",
-    "crawler"
+    "crawler",
+    "java",
+    "ruby",
+    "perl",
+    "go-http",
+    "php",
+    "powershell",
+    "windowspowershell",
+    "cmd",
+    "bash",
+    "sh",
+    "zsh",
+    "fish",
+    "powershell",
+    "pwsh"
 ];
 
-// Danh sách IP bị chặn vĩnh viễn
-const BLOCKED_IPS = new Set();
+// Headers mà Roblox thường gửi
+const ROBLOX_HEADERS = [
+    "roblox-id",
+    "roblox-browser-tracker-id",
+    "roblox-machine-id",
+    "roblox-session-id",
+    "roblox-deployment",
+    "content-type",
+    "content-length"
+];
 
 // Cấu hình bảo mật nâng cao
 const SECURITY_CONFIG = {
-    maxRequestsPerMinute: 30, // Giới hạn request/phút
-    maxFailedLogins: 5, // Số lần đăng nhập sai tối đa
-    blockDuration: 30 * 60 * 1000, // Thời gian block (30 phút)
-    sessionTimeout: 30 * 24 * 60 * 60 * 1000, // Session timeout (30 ngày)
-    maxScriptSize: 10 * 1024 * 1024, // 10MB max script size
-    honeypotEnabled: true, // Bật honeypot
-    encryptionEnabled: true // Bật mã hóa source
+    maxRequestsPerMinute: 30,
+    maxFailedLogins: 5,
+    blockDuration: 30 * 60 * 1000,
+    sessionTimeout: 30 * 24 * 60 * 60 * 1000,
+    maxScriptSize: 10 * 1024 * 1024,
+    honeypotEnabled: true,
+    encryptionEnabled: true,
+    strictRobloxCheck: true, // Bật kiểm tra Roblox nghiêm ngặt
+    allowOnlyRobloxUA: true // Chỉ cho phép Roblox User-Agent
 };
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -70,22 +94,21 @@ initFile(SESSIONS_FILE);
 initFile(BLACKLIST_FILE);
 initFile(ACCESS_LOG_FILE);
 
-// Rate limiting cho API
+// Rate limiting
 const apiLimiter = rateLimit({
-    windowMs: 60 * 1000, // 1 phút
+    windowMs: 60 * 1000,
     max: SECURITY_CONFIG.maxRequestsPerMinute,
     message: {
         ok: false,
-        error: "Too many requests, please try again later"
+        error: "Too many requests"
     },
     standardHeaders: true,
     legacyHeaders: false
 });
 
-// Rate limiting cho delivery endpoint (chống bot tải source)
 const deliveryLimiter = rateLimit({
     windowMs: 60 * 1000,
-    max: 10, // Chỉ cho phép 10 requests/phút cho delivery
+    max: 10,
     message: "Blocked by LEXINX",
     standardHeaders: false,
     legacyHeaders: false
@@ -131,7 +154,7 @@ function checkPassword(password, salt, hash) {
     }
 }
 
-// Mã hóa source code với AES-256-GCM
+// Mã hóa source code
 function encryptSource(source, key) {
     if (!SECURITY_CONFIG.encryptionEnabled) return source;
     
@@ -173,7 +196,6 @@ function decryptSource(encryptedData, key) {
     }
 }
 
-// Tạo key mã hóa từ user ID
 function getEncryptionKey(userId) {
     return crypto.createHash("sha256").update(userId).digest("hex");
 }
@@ -193,7 +215,7 @@ function cookies(req) {
 }
 
 /* =========================================================
-   SESSION MANAGEMENT NÂNG CAO
+   SESSION MANAGEMENT
 ========================================================= */
 
 function session(req) {
@@ -204,7 +226,6 @@ function session(req) {
     const s = sessions[token];
     if (!s) return null;
 
-    // Kiểm tra IP matching (chống session hijacking)
     const clientIP = getClientIP(req);
     if (s.ip !== clientIP) {
         delete sessions[token];
@@ -212,7 +233,6 @@ function session(req) {
         return null;
     }
 
-    // Kiểm tra user agent matching
     const userAgent = req.headers["user-agent"] || "";
     if (s.userAgent !== userAgent) {
         delete sessions[token];
@@ -308,10 +328,14 @@ function logAccess(req, action, details = {}) {
         userAgent: req.headers["user-agent"],
         action,
         details,
-        path: req.path
+        path: req.path,
+        headers: {
+            "roblox-id": req.headers["roblox-id"],
+            "roblox-machine-id": req.headers["roblox-machine-id"],
+            "roblox-browser-tracker-id": req.headers["roblox-browser-tracker-id"]
+        }
     });
     
-    // Giới hạn log size
     if (accessLog[today].length > 10000) {
         accessLog[today] = accessLog[today].slice(-10000);
     }
@@ -320,15 +344,111 @@ function logAccess(req, action, details = {}) {
 }
 
 /* =========================================================
-   BOT DETECTION NÂNG CAO
+   ROBLOX DETECTION - CHỐNG TRÌNH DUYỆT TRIỆT ĐỂ
 ========================================================= */
+
+function isRobloxRequest(req) {
+    const ua = String(req.headers["user-agent"] || "").toLowerCase();
+    const allHeaders = req.headers;
+    
+    // 1. Kiểm tra User-Agent có chứa "Roblox" hoặc "RobloxStudio"
+    if (!ua.includes("roblox")) {
+        return false;
+    }
+    
+    // 2. Kiểm tra các header đặc trưng của Roblox
+    const robloxSpecificHeaders = [
+        "roblox-id",
+        "roblox-browser-tracker-id",
+        "roblox-machine-id",
+        "roblox-session-id"
+    ];
+    
+    let hasRobloxHeader = false;
+    for (const header of robloxSpecificHeaders) {
+        if (allHeaders[header]) {
+            hasRobloxHeader = true;
+            break;
+        }
+    }
+    
+    if (SECURITY_CONFIG.strictRobloxCheck && !hasRobloxHeader) {
+        return false;
+    }
+    
+    // 3. Kiểm tra Accept header
+    const accept = String(req.headers["accept"] || "").toLowerCase();
+    if (accept.includes("text/html") || accept.includes("application/xhtml")) {
+        // Browser thường yêu cầu HTML, Roblox thì không
+        return false;
+    }
+    
+    // 4. Kiểm tra Accept-Encoding
+    const acceptEncoding = String(req.headers["accept-encoding"] || "").toLowerCase();
+    if (!acceptEncoding.includes("gzip") && !acceptEncoding.includes("deflate")) {
+        // Roblox thường chấp nhận gzip/deflate
+        return false;
+    }
+    
+    // 5. Kiểm tra Sec-Fetch headers (browser mới có)
+    if (req.headers["sec-fetch-dest"] || req.headers["sec-fetch-mode"] || req.headers["sec-fetch-site"]) {
+        // Browser có các header này, Roblox thì không
+        return false;
+    }
+    
+    // 6. Kiểm tra Origin/Referer
+    if (req.headers["origin"] || req.headers["referer"]) {
+        // Browser thường gửi Origin/Referer, Roblox thì không
+        return false;
+    }
+    
+    return true;
+}
+
+function isBrowserRequest(req) {
+    const ua = String(req.headers["user-agent"] || "").toLowerCase();
+    const accept = String(req.headers["accept"] || "").toLowerCase();
+    
+    // Browser indicators
+    const browserIndicators = [
+        "mozilla",
+        "chrome",
+        "safari",
+        "firefox",
+        "edge",
+        "opera",
+        "webkit"
+    ];
+    
+    let hasBrowserIndicator = false;
+    for (const indicator of browserIndicators) {
+        if (ua.includes(indicator)) {
+            hasBrowserIndicator = true;
+            break;
+        }
+    }
+    
+    // Kiểm tra Accept header
+    const acceptHTML = accept.includes("text/html") || accept.includes("application/xhtml");
+    
+    // Kiểm tra Sec-Fetch headers
+    const hasSecFetch = req.headers["sec-fetch-dest"] || req.headers["sec-fetch-mode"];
+    
+    // Kiểm tra browser-specific headers
+    const hasBrowserHeaders = req.headers["cookie"] || req.headers["origin"] || req.headers["referer"];
+    
+    if (hasBrowserIndicator && (acceptHTML || hasSecFetch || hasBrowserHeaders)) {
+        return true;
+    }
+    
+    return false;
+}
 
 function isBotRequest(req) {
     const ua = String(req.headers["user-agent"] || "").toLowerCase();
-    const accept = String(req.headers["accept"] || "").toLowerCase();
     const clientIP = getClientIP(req);
     
-    // 1. Kiểm tra IP bị block
+    // 1. Kiểm tra IP block
     if (isIPBlocked(clientIP)) {
         return true;
     }
@@ -341,39 +461,15 @@ function isBotRequest(req) {
         }
     }
     
-    // 3. Kiểm tra browser fingerprint
-    if (ua.includes("mozilla") && accept.includes("text/html")) {
-        // Có vẻ là browser thật, nhưng kiểm tra thêm
-        const secFetchSite = req.headers["sec-fetch-site"];
-        const secFetchMode = req.headers["sec-fetch-mode"];
-        
-        if (!secFetchSite || !secFetchMode) {
-            // Thiếu header bảo mật của browser hiện đại
-            logAccess(req, "blocked_missing_headers");
-            return true;
-        }
-        
-        return false;
+    // 3. Kiểm tra browser request
+    if (isBrowserRequest(req)) {
+        logAccess(req, "blocked_browser_request");
+        return true;
     }
     
-    // 4. Roblox User-Agent thường không có Mozilla
-    if (ua.includes("roblox") || ua.includes("RobloxStudio")) {
-        return false;
-    }
-    
-    // 5. Mặc định block các request không xác định
-    logAccess(req, "blocked_unknown_ua");
-    return true;
-}
-
-function browserRequest(req) {
-    const ua = String(req.headers["user-agent"] || "").toLowerCase();
-    const accept = String(req.headers["accept"] || "").toLowerCase();
-    
-    if (
-        ua.includes("mozilla") &&
-        (accept.includes("text/html") || accept.includes("application/xhtml"))
-    ) {
+    // 4. Kiểm tra Roblox request
+    if (!isRobloxRequest(req)) {
+        logAccess(req, "blocked_not_roblox");
         return true;
     }
     
@@ -385,7 +481,6 @@ function browserRequest(req) {
 ========================================================= */
 
 function setupHoneypot() {
-    // Tạo endpoint giả để bẫy bot
     app.get("/api/scripts/:id/source", (req, res) => {
         logAccess(req, "honeypot_triggered", { honeypot: "fake_source_endpoint" });
         res.status(403).send("Blocked by LEXINX");
@@ -400,14 +495,20 @@ function setupHoneypot() {
         logAccess(req, "honeypot_triggered", { honeypot: "fake_execute_endpoint" });
         res.status(403).json({ ok: false, error: "Blocked by LEXINX" });
     });
+    
+    app.get("/api/download/:id", (req, res) => {
+        logAccess(req, "honeypot_triggered", { honeypot: "fake_download_endpoint" });
+        res.status(403).send("Blocked by LEXINX");
+    });
 }
 
 /* =========================================================
-   HOME
+   HOME - CHO PHÉP TRÌNH DUYỆT
 ========================================================= */
 
 app.get("/", (req, res) => {
-    if (isBotRequest(req)) {
+    // Trang chủ cho phép browser truy cập
+    if (isBotRequest(req) && !isBrowserRequest(req)) {
         return res.status(403).send("Access Denied");
     }
     
@@ -520,7 +621,6 @@ app.post("/api/login", apiLimiter, (req, res) => {
     const user = users[username];
     
     if (!user || !checkPassword(password, user.salt, user.passwordHash)) {
-        // Tăng counter failed login
         if (user) {
             user.failedLogins = (user.failedLogins || 0) + 1;
             users[username] = user;
@@ -541,7 +641,6 @@ app.post("/api/login", apiLimiter, (req, res) => {
         return res.status(401).json({ ok: false, error: "Invalid username or password" });
     }
     
-    // Reset failed logins
     user.failedLogins = 0;
     users[username] = user;
     writeDB(USERS_FILE, users);
@@ -621,7 +720,6 @@ app.post("/api/create", auth, apiLimiter, (req, res) => {
     const id = randomID(16);
     const token = randomID(32);
     
-    // Mã hóa source
     const encryptionKey = getEncryptionKey(req.auth.username);
     const encryptedSource = encryptSource(source, encryptionKey);
     
@@ -700,7 +798,6 @@ app.get("/api/scripts/:id", auth, (req, res) => {
         return res.status(403).json({ ok: false, error: "Forbidden" });
     }
     
-    // Giải mã source để edit
     let source = script.source;
     if (script.encrypted) {
         const encryptionKey = getEncryptionKey(req.auth.username);
@@ -747,7 +844,6 @@ app.put("/api/scripts/:id", auth, apiLimiter, (req, res) => {
     
     script.name = cleanName(req.body?.name || script.name);
     
-    // Mã hóa source mới
     const encryptionKey = getEncryptionKey(req.auth.username);
     script.source = encryptSource(source, encryptionKey);
     script.encrypted = true;
@@ -800,11 +896,12 @@ app.delete("/api/scripts/:id", auth, (req, res) => {
 });
 
 /* =========================================================
-   LUA DELIVERY - BẢO VỆ TỐI ĐA
+   LUA DELIVERY - CHẶN TRÌNH DUYỆT 100%
 ========================================================= */
 
 app.get("/api/:id/:token", deliveryLimiter, (req, res) => {
     const clientIP = getClientIP(req);
+    const ua = String(req.headers["user-agent"] || "").toLowerCase();
     
     // 1. Kiểm tra IP block
     if (isIPBlocked(clientIP)) {
@@ -812,20 +909,57 @@ app.get("/api/:id/:token", deliveryLimiter, (req, res) => {
         return res.status(403).type("text/plain").send("Blocked by LEXINX");
     }
     
-    // 2. Kiểm tra bot
-    if (browserRequest(req)) {
-        logAccess(req, "delivery_blocked", { reason: "browser_request" });
-        return res.status(403).type("text/plain").send("BLOCKED BY LEXINX");
+    // 2. CHẶN TRÌNH DUYỆT - Lớp bảo vệ thứ 1
+    if (isBrowserRequest(req)) {
+        logAccess(req, "delivery_blocked", { reason: "browser_detected", userAgent: ua });
+        return res.status(403).type("text/plain").send("BLOCKED BY LEXINX - BROWSER ACCESS DENIED");
     }
     
-    // 3. Kiểm tra User-Agent
-    const ua = String(req.headers["user-agent"] || "").toLowerCase();
-    if (!ua.includes("roblox") && !ua.includes("RobloxStudio")) {
-        logAccess(req, "delivery_blocked", { reason: "invalid_ua", userAgent: ua });
-        return res.status(403).type("text/plain").send("Blocked by LEXINX");
+    // 3. CHẶN TRÌNH DUYỆT - Lớp bảo vệ thứ 2
+    if (ua.includes("mozilla") || ua.includes("chrome") || ua.includes("safari") || 
+        ua.includes("firefox") || ua.includes("edge") || ua.includes("opera") ||
+        ua.includes("webkit")) {
+        logAccess(req, "delivery_blocked", { reason: "browser_ua_detected", userAgent: ua });
+        return res.status(403).type("text/plain").send("BLOCKED BY LEXINX - BROWSER ACCESS DENIED");
     }
     
-    // 4. Kiểm tra script tồn tại
+    // 4. CHẶN TRÌNH DUYỆT - Lớp bảo vệ thứ 3 (kiểm tra Accept header)
+    const accept = String(req.headers["accept"] || "").toLowerCase();
+    if (accept.includes("text/html") || accept.includes("application/xhtml") || 
+        accept.includes("text/css") || accept.includes("image/") ||
+        accept.includes("application/javascript")) {
+        logAccess(req, "delivery_blocked", { reason: "browser_accept_detected", accept: accept });
+        return res.status(403).type("text/plain").send("BLOCKED BY LEXINX - BROWSER ACCESS DENIED");
+    }
+    
+    // 5. CHẶN TRÌNH DUYỆT - Lớp bảo vệ thứ 4 (kiểm tra Sec-Fetch headers)
+    if (req.headers["sec-fetch-dest"] || req.headers["sec-fetch-mode"] || 
+        req.headers["sec-fetch-site"] || req.headers["sec-fetch-user"]) {
+        logAccess(req, "delivery_blocked", { reason: "browser_sec_fetch_detected" });
+        return res.status(403).type("text/plain").send("BLOCKED BY LEXINX - BROWSER ACCESS DENIED");
+    }
+    
+    // 6. CHẶN TRÌNH DUYỆT - Lớp bảo vệ thứ 5 (kiểm tra Origin/Referer)
+    if (req.headers["origin"] || req.headers["referer"]) {
+        logAccess(req, "delivery_blocked", { reason: "browser_origin_detected" });
+        return res.status(403).type("text/plain").send("BLOCKED BY LEXINX - BROWSER ACCESS DENIED");
+    }
+    
+    // 7. CHẶN TRÌNH DUYỆT - Lớp bảo vệ thứ 6 (kiểm tra Cookie)
+    if (req.headers["cookie"]) {
+        logAccess(req, "delivery_blocked", { reason: "browser_cookie_detected" });
+        return res.status(403).type("text/plain").send("BLOCKED BY LEXINX - BROWSER ACCESS DENIED");
+    }
+    
+    // 8. Kiểm tra Roblox request
+    if (SECURITY_CONFIG.allowOnlyRobloxUA) {
+        if (!isRobloxRequest(req)) {
+            logAccess(req, "delivery_blocked", { reason: "not_roblox_request", userAgent: ua });
+            return res.status(403).type("text/plain").send("Blocked by LEXINX - Roblox Only");
+        }
+    }
+    
+    // 9. Kiểm tra script tồn tại
     const scripts = readDB(SCRIPTS_FILE);
     const script = scripts[req.params.id];
     
@@ -834,13 +968,13 @@ app.get("/api/:id/:token", deliveryLimiter, (req, res) => {
         return res.status(404).type("text/plain").send("Blocked by LEXINX v50 protection");
     }
     
-    // 5. Kiểm tra token
+    // 10. Kiểm tra token
     if (req.params.token !== script.token) {
         logAccess(req, "delivery_blocked", { reason: "invalid_token" });
         return res.status(403).type("text/plain").send("Blocked by LEXINX");
     }
     
-    // 6. Giải mã source
+    // 11. Giải mã source
     let source = script.source;
     if (script.encrypted) {
         const encryptionKey = getEncryptionKey(script.owner);
@@ -852,26 +986,36 @@ app.get("/api/:id/:token", deliveryLimiter, (req, res) => {
         }
     }
     
-    // 7. Log access thành công
-    logAccess(req, "delivery_success", { scriptId: script.id });
+    // 12. Log access thành công
+    logAccess(req, "delivery_success", { 
+        scriptId: script.id,
+        userAgent: ua,
+        robloxHeaders: {
+            robloxId: req.headers["roblox-id"],
+            machineId: req.headers["roblox-machine-id"]
+        }
+    });
     
-    // 8. Trả về source với security headers
+    // 13. Trả về source với security headers tối đa
     res.status(200)
         .type("text/plain")
-        .set("Cache-Control", "no-store, no-cache, must-revalidate, private")
+        .set("Cache-Control", "no-store, no-cache, must-revalidate, private, max-age=0")
         .set("Pragma", "no-cache")
         .set("Expires", "0")
         .set("X-Content-Type-Options", "nosniff")
         .set("X-Frame-Options", "DENY")
         .set("X-XSS-Protection", "1; mode=block")
-        .set("Content-Security-Policy", "default-src 'none'; script-src 'none'; style-src 'none'; img-src 'none'; font-src 'none'; object-src 'none'; media-src 'none'; frame-src 'none'; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+        .set("Content-Security-Policy", "default-src 'none'")
         .set("Referrer-Policy", "no-referrer")
-        .set("Permissions-Policy", "geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=(), gyroscope=(), speaker=(), vibrate=(), fullscreen=(), payment=()")
+        .set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        .set("Cross-Origin-Resource-Policy", "same-origin")
+        .set("Cross-Origin-Opener-Policy", "same-origin")
+        .set("Cross-Origin-Embedder-Policy", "require-corp")
         .send(source);
 });
 
 /* =========================================================
-   ADMIN ENDPOINTS (Bảo vệ source)
+   ADMIN ENDPOINTS
 ========================================================= */
 
 app.get("/api/admin/stats", auth, (req, res) => {
@@ -885,10 +1029,15 @@ app.get("/api/admin/stats", auth, (req, res) => {
     
     const stats = {
         totalRequests: todayLog.length,
-        blockedRequests: todayLog.filter(log => log.action.startsWith("blocked") || log.action === "honeypot_triggered").length,
+        blockedRequests: todayLog.filter(log => log.action.startsWith("blocked") || log.action === "honeypot_triggered" || log.action === "delivery_blocked").length,
         successfulDeliveries: todayLog.filter(log => log.action === "delivery_success").length,
+        browserBlocked: todayLog.filter(log => log.action === "delivery_blocked" && log.details.reason.includes("browser")).length,
         uniqueIPs: new Set(todayLog.map(log => log.ip)).size,
-        blockedIPs: Object.keys(readDB(BLACKLIST_FILE)).length
+        blockedIPs: Object.keys(readDB(BLACKLIST_FILE)).length,
+        recentBlocks: todayLog
+            .filter(log => log.action === "delivery_blocked" || log.action === "blocked_browser_request")
+            .slice(-10)
+            .reverse()
     };
     
     res.json({ ok: true, stats });
@@ -901,7 +1050,7 @@ app.get("/api/admin/stats", auth, (req, res) => {
 app.use((req, res) => {
     const clientIP = getClientIP(req);
     
-    if (isBotRequest(req)) {
+    if (isBotRequest(req) && !isBrowserRequest(req)) {
         logAccess(req, "blocked_404", { path: req.path });
         return res.status(403).type("text/plain").send("Blocked by LEXINX");
     }
@@ -924,12 +1073,10 @@ app.use((err, req, res, next) => {
    INITIALIZE SECURITY
 ========================================================= */
 
-// Setup honeypot system
 if (SECURITY_CONFIG.honeypotEnabled) {
     setupHoneypot();
 }
 
-// Cleanup expired sessions mỗi 24 giờ
 setInterval(() => {
     const sessions = readDB(SESSIONS_FILE);
     const now = Date.now();
@@ -948,13 +1095,24 @@ setInterval(() => {
 ========================================================= */
 
 app.listen(PORT, "0.0.0.0", () => {
-    console.log("=".repeat(50));
+    console.log("=".repeat(60));
     console.log("🛡️  LEXINX PROTECT v50 - ULTIMATE SECURITY");
-    console.log("=".repeat(50));
+    console.log("=".repeat(60));
     console.log("✅ Server running on port:", PORT);
     console.log("🌐 Domain:", DOMAIN);
     console.log("🔒 Encryption:", SECURITY_CONFIG.encryptionEnabled ? "ENABLED" : "DISABLED");
     console.log("🕵️  Honeypot:", SECURITY_CONFIG.honeypotEnabled ? "ENABLED" : "DISABLED");
+    console.log("🚫 Browser Blocking: 6 LAYERS OF PROTECTION");
+    console.log("🤖 Roblox Only:", SECURITY_CONFIG.allowOnlyRobloxUA ? "YES" : "NO");
     console.log("⚡ Rate Limit:", SECURITY_CONFIG.maxRequestsPerMinute, "requests/min");
-    console.log("=".repeat(50));
+    console.log("=".repeat(60));
+    console.log("");
+    console.log("🛡️  BROWSER BLOCKING LAYERS:");
+    console.log("   1️⃣  User-Agent Detection (Mozilla, Chrome, Safari, etc.)");
+    console.log("   2️⃣  Accept Header Detection (text/html, text/css, etc.)");
+    console.log("   3️⃣  Sec-Fetch Headers Detection");
+    console.log("   4️⃣  Origin/Referer Detection");
+    console.log("   5️⃣  Cookie Detection");
+    console.log("   6️⃣  Browser Fingerprint Detection");
+    console.log("=".repeat(60));
 });
