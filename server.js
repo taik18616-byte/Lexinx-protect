@@ -1,4 +1,5 @@
 const express = require("express");
+const nodemailer = require("nodemailer");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -8,22 +9,35 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DOMAIN =
     process.env.DOMAIN ||
-    "https://Lexinx-protect-2.onrender.com";
+    "https://Lexinx-protect.onrender.com";
 
 const DATA_DIR = path.join(__dirname, "data");
-const DB_FILE = path.join(DATA_DIR, "scripts.json");
+const DB_FILE = path.join(DATA_DIR, "database.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 
 if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, "{}", "utf8");
+    fs.writeFileSync(
+        DB_FILE,
+        JSON.stringify({
+            users: {},
+            sessions: {}
+        }, null, 2)
+    );
 }
 
 app.use(express.json({ limit: "20mb" }));
-app.use(express.urlencoded({ extended: true, limit: "20mb" }));
+app.use(express.urlencoded({
+    extended: true,
+    limit: "20mb"
+}));
 app.use(express.static(PUBLIC_DIR));
+
+/* =========================================================
+   DATABASE
+========================================================= */
 
 function readDB() {
     try {
@@ -31,7 +45,10 @@ function readDB() {
             fs.readFileSync(DB_FILE, "utf8")
         );
     } catch {
-        return {};
+        return {
+            users: {},
+            sessions: {}
+        };
     }
 }
 
@@ -43,10 +60,35 @@ function writeDB(db) {
     );
 }
 
-function createID() {
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function randomID(bytes = 12) {
     return crypto
-        .randomBytes(12)
+        .randomBytes(bytes)
         .toString("hex");
+}
+
+function verificationCode() {
+    return String(
+        crypto.randomInt(100000, 1000000)
+    );
+}
+
+function generatedPassword() {
+    const chars =
+        "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%";
+
+    let result = "";
+
+    for (let i = 0; i < 14; i++) {
+        result += chars[
+            crypto.randomInt(0, chars.length)
+        ];
+    }
+
+    return result;
 }
 
 function cleanName(name) {
@@ -55,218 +97,722 @@ function cleanName(name) {
         .slice(0, 80);
 }
 
-/*
-    Kiểm tra request có giống Roblox hay không.
+function validEmail(email) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+        .test(email);
+}
 
-    Đây chỉ là lớp chặn trình duyệt cơ bản,
-    không phải cơ chế xác thực bảo mật.
-*/
-function looksLikeRoblox(req) {
-    const ua = String(
-        req.headers["user-agent"] || ""
-    ).toLowerCase();
+function hashPassword(password, salt) {
+    return crypto
+        .scryptSync(password, salt, 64)
+        .toString("hex");
+}
 
-    return (
-        ua.includes("roblox") ||
-        ua.includes("robloxapp")
+function createPasswordHash(password) {
+    const salt = crypto
+        .randomBytes(16)
+        .toString("hex");
+
+    return {
+        salt,
+        hash: hashPassword(password, salt)
+    };
+}
+
+function verifyPassword(password, user) {
+    const hash =
+        hashPassword(password, user.salt);
+
+    return crypto.timingSafeEqual(
+        Buffer.from(hash, "hex"),
+        Buffer.from(user.passwordHash, "hex")
     );
 }
 
-/*
-    WEB
-*/
-app.get("/", (req, res) => {
-    res.sendFile(
-        path.join(PUBLIC_DIR, "index.html")
-    );
-});
+function createLoader(id) {
+    return `loadstring(game:HttpGet("${DOMAIN}/api/${id}"))()`;
+}
 
-/*
-    CREATE SCRIPT
-*/
-app.post("/api/create", (req, res) => {
-    const source =
-        typeof req.body?.source === "string"
-            ? req.body.source
-            : "";
+/* =========================================================
+   EMAIL
+========================================================= */
 
-    if (!source.trim()) {
-        return res.status(400).json({
-            ok: false,
-            error: "Script is empty"
-        });
+let transporter = null;
+
+if (
+    process.env.SMTP_HOST &&
+    process.env.SMTP_USER &&
+    process.env.SMTP_PASS
+) {
+    transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(
+            process.env.SMTP_PORT || 587
+        ),
+        secure:
+            String(
+                process.env.SMTP_SECURE || "false"
+            ) === "true",
+
+        auth: {
+            user: process.env.SMTP_USER,
+            pass: process.env.SMTP_PASS
+        }
+    });
+}
+
+async function sendVerificationMail(
+    email,
+    code,
+    password
+) {
+    if (!transporter) {
+        console.log(
+            "\n=============================="
+        );
+
+        console.log(
+            "SMTP NOT CONFIGURED"
+        );
+
+        console.log(
+            "EMAIL:",
+            email
+        );
+
+        console.log(
+            "CODE:",
+            code
+        );
+
+        console.log(
+            "PASSWORD:",
+            password
+        );
+
+        console.log(
+            "==============================\n"
+        );
+
+        return;
     }
 
-    const name = cleanName(
-        req.body?.name
-    );
+    await transporter.sendMail({
+        from:
+            process.env.MAIL_FROM ||
+            process.env.SMTP_USER,
 
-    const id = createID();
+        to: email,
+
+        subject:
+            "LEXINX PROTECT - Verification",
+
+        text:
+`LEXINX PROTECT
+
+Your verification code:
+
+${code}
+
+Your generated password:
+
+${password}
+
+The verification code expires in 10 minutes.
+
+Do not share this information with anyone.`
+    });
+}
+
+/* =========================================================
+   SESSION
+========================================================= */
+
+function getSession(req) {
+    const token =
+        req.headers["x-session-token"];
+
+    if (!token) {
+        return null;
+    }
 
     const db = readDB();
 
-    db[id] = {
-        id,
-        name,
-        source,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
+    const session =
+        db.sessions[token];
+
+    if (!session) {
+        return null;
+    }
+
+    if (
+        Date.now() >
+        session.expiresAt
+    ) {
+        delete db.sessions[token];
+        writeDB(db);
+        return null;
+    }
+
+    return {
+        token,
+        userId: session.userId
+    };
+}
+
+function requireSession(req, res, next) {
+    const session =
+        getSession(req);
+
+    if (!session) {
+        return res.status(401).json({
+            ok: false,
+            error: "Not logged in"
+        });
+    }
+
+    req.session = session;
+    next();
+}
+
+/* =========================================================
+   HOME
+========================================================= */
+
+app.get("/", (req, res) => {
+    res.sendFile(
+        path.join(
+            PUBLIC_DIR,
+            "index.html"
+        )
+    );
+});
+
+/* =========================================================
+   REGISTER
+========================================================= */
+
+app.post("/api/register", async (req, res) => {
+    try {
+        const email =
+            String(
+                req.body?.email || ""
+            )
+            .trim()
+            .toLowerCase();
+
+        if (!validEmail(email)) {
+            return res.status(400).json({
+                ok: false,
+                error: "Invalid Gmail address"
+            });
+        }
+
+        if (!email.endsWith("@gmail.com")) {
+            return res.status(400).json({
+                ok: false,
+                error:
+                    "Only Gmail addresses are allowed"
+            });
+        }
+
+        const db = readDB();
+
+        if (db.users[email]) {
+            return res.status(409).json({
+                ok: false,
+                error:
+                    "This Gmail is already registered"
+            });
+        }
+
+        const password =
+            generatedPassword();
+
+        const code =
+            verificationCode();
+
+        const passwordData =
+            createPasswordHash(password);
+
+        db.users[email] = {
+            email,
+
+            passwordHash:
+                passwordData.hash,
+
+            salt:
+                passwordData.salt,
+
+            verified: false,
+
+            verificationCode: code,
+
+            verificationExpires:
+                Date.now() +
+                10 * 60 * 1000,
+
+            createdAt:
+                Date.now(),
+
+            scripts: {}
+        };
+
+        writeDB(db);
+
+        await sendVerificationMail(
+            email,
+            code,
+            password
+        );
+
+        res.json({
+            ok: true,
+            message:
+                "Verification email sent"
+        });
+
+    } catch (error) {
+        console.error(error);
+
+        res.status(500).json({
+            ok: false,
+            error:
+                "Could not send verification email"
+        });
+    }
+});
+
+/* =========================================================
+   VERIFY
+========================================================= */
+
+app.post("/api/verify", (req, res) => {
+    const email =
+        String(
+            req.body?.email || ""
+        )
+        .trim()
+        .toLowerCase();
+
+    const code =
+        String(
+            req.body?.code || ""
+        ).trim();
+
+    const db = readDB();
+    const user = db.users[email];
+
+    if (!user) {
+        return res.status(404).json({
+            ok: false,
+            error: "Account not found"
+        });
+    }
+
+    if (user.verified) {
+        return res.json({
+            ok: true,
+            message:
+                "Account already verified"
+        });
+    }
+
+    if (
+        Date.now() >
+        user.verificationExpires
+    ) {
+        return res.status(400).json({
+            ok: false,
+            error:
+                "Verification code expired"
+        });
+    }
+
+    if (
+        code !==
+        String(user.verificationCode)
+    ) {
+        return res.status(400).json({
+            ok: false,
+            error:
+                "Invalid verification code"
+        });
+    }
+
+    user.verified = true;
+    delete user.verificationCode;
+    delete user.verificationExpires;
+
+    writeDB(db);
+
+    res.json({
+        ok: true,
+        message:
+            "Account verified"
+    });
+});
+
+/* =========================================================
+   LOGIN
+========================================================= */
+
+app.post("/api/login", (req, res) => {
+    const email =
+        String(
+            req.body?.email || ""
+        )
+        .trim()
+        .toLowerCase();
+
+    const password =
+        String(
+            req.body?.password || ""
+        );
+
+    const db = readDB();
+    const user = db.users[email];
+
+    if (!user) {
+        return res.status(401).json({
+            ok: false,
+            error:
+                "Invalid email or password"
+        });
+    }
+
+    if (!user.verified) {
+        return res.status(403).json({
+            ok: false,
+            error:
+                "Account is not verified"
+        });
+    }
+
+    if (
+        !verifyPassword(
+            password,
+            user
+        )
+    ) {
+        return res.status(401).json({
+            ok: false,
+            error:
+                "Invalid email or password"
+        });
+    }
+
+    const token =
+        randomID(32);
+
+    db.sessions[token] = {
+        userId: email,
+
+        expiresAt:
+            Date.now() +
+            7 * 24 * 60 * 60 * 1000
     };
 
     writeDB(db);
 
-    const endpoint =
-        `${DOMAIN}/api/${id}`;
-
-    const loader =
-        `loadstring(game:HttpGet("${endpoint}"))()`;
-
     res.json({
         ok: true,
-        id,
-        name,
-        endpoint,
-        loader
+        token,
+        email
     });
 });
 
-/*
-    EDIT SCRIPT
-*/
-app.post("/api/edit/:id", (req, res) => {
-    const id = req.params.id;
+/* =========================================================
+   LOGOUT
+========================================================= */
 
-    const source =
-        typeof req.body?.source === "string"
-            ? req.body.source
-            : "";
+app.post(
+    "/api/logout",
+    requireSession,
+    (req, res) => {
+        const db = readDB();
 
-    const name =
-        cleanName(req.body?.name);
+        delete db.sessions[
+            req.session.token
+        ];
 
-    if (!source.trim()) {
-        return res.status(400).json({
-            ok: false,
-            error: "Script is empty"
+        writeDB(db);
+
+        res.json({
+            ok: true
         });
     }
+);
 
-    const db = readDB();
+/* =========================================================
+   CURRENT USER
+========================================================= */
 
-    if (!db[id]) {
-        return res.status(404).json({
-            ok: false,
-            error: "Script not found"
+app.get(
+    "/api/me",
+    requireSession,
+    (req, res) => {
+        res.json({
+            ok: true,
+            email:
+                req.session.userId
         });
     }
+);
 
-    db[id].source = source;
+/* =========================================================
+   CREATE SCRIPT
+========================================================= */
 
-    if (name) {
-        db[id].name = name;
-    }
+app.post(
+    "/api/create",
+    requireSession,
+    (req, res) => {
 
-    db[id].updatedAt = Date.now();
+        const source =
+            typeof req.body?.source ===
+            "string"
+                ? req.body.source
+                : "";
 
-    writeDB(db);
+        if (!source.trim()) {
+            return res.status(400).json({
+                ok: false,
+                error:
+                    "Script is empty"
+            });
+        }
 
-    const endpoint =
-        `${DOMAIN}/api/${id}`;
+        const name =
+            cleanName(
+                req.body?.name
+            );
 
-    res.json({
-        ok: true,
-        id,
-        name: db[id].name,
-        endpoint,
-        loader:
-            `loadstring(game:HttpGet("${endpoint}"))()`
-    });
-});
+        const id =
+            randomID(12);
 
-/*
-    DELETE SCRIPT
-*/
-app.delete("/api/delete/:id", (req, res) => {
-    const id = req.params.id;
+        const db = readDB();
 
-    const db = readDB();
+        const user =
+            db.users[
+                req.session.userId
+            ];
 
-    if (!db[id]) {
-        return res.status(404).json({
-            ok: false,
-            error: "Script not found"
+        user.scripts[id] = {
+            id,
+            name,
+            source,
+            createdAt:
+                Date.now(),
+            updatedAt:
+                Date.now()
+        };
+
+        writeDB(db);
+
+        res.json({
+            ok: true,
+            id,
+            name,
+            endpoint:
+                `${DOMAIN}/api/${id}`,
+            loader:
+                createLoader(id)
         });
     }
+);
 
-    delete db[id];
+/* =========================================================
+   LIST USER SCRIPTS
+========================================================= */
 
-    writeDB(db);
+app.get(
+    "/api/scripts",
+    requireSession,
+    (req, res) => {
 
-    res.json({
-        ok: true
-    });
-});
+        const db = readDB();
 
-/*
-    LIST SCRIPTS
-*/
-app.get("/api/scripts", (req, res) => {
-    const db = readDB();
+        const user =
+            db.users[
+                req.session.userId
+            ];
 
-    const scripts = Object.values(db)
-        .map(script => {
-            const endpoint =
-                `${DOMAIN}/api/${script.id}`;
+        const scripts =
+            Object.values(
+                user.scripts || {}
+            )
+            .map(script => ({
+                id:
+                    script.id,
 
-            return {
-                id: script.id,
-                name: script.name,
-                createdAt: script.createdAt,
-                updatedAt: script.updatedAt,
-                endpoint,
+                name:
+                    script.name,
+
+                createdAt:
+                    script.createdAt,
+
+                updatedAt:
+                    script.updatedAt,
+
+                endpoint:
+                    `${DOMAIN}/api/${script.id}`,
+
                 loader:
-                    `loadstring(game:HttpGet("${endpoint}"))()`
-            };
-        })
-        .reverse();
+                    createLoader(
+                        script.id
+                    )
+            }))
+            .reverse();
 
-    res.json({
-        ok: true,
-        scripts
-    });
-});
+        res.json({
+            ok: true,
+            scripts
+        });
+    }
+);
 
-/*
-    SOURCE ENDPOINT
+/* =========================================================
+   EDIT SCRIPT
+========================================================= */
 
-    Roblox request:
-        trả Lua source
+app.post(
+    "/api/edit/:id",
+    requireSession,
+    (req, res) => {
 
-    Browser thông thường:
-        403
-*/
+        const id =
+            req.params.id;
+
+        const source =
+            typeof req.body?.source ===
+            "string"
+                ? req.body.source
+                : "";
+
+        if (!source.trim()) {
+            return res.status(400).json({
+                ok: false,
+                error:
+                    "Script is empty"
+            });
+        }
+
+        const db = readDB();
+
+        const user =
+            db.users[
+                req.session.userId
+            ];
+
+        const script =
+            user.scripts[id];
+
+        if (!script) {
+            return res.status(404).json({
+                ok: false,
+                error:
+                    "Script not found"
+            });
+        }
+
+        script.source =
+            source;
+
+        if (
+            typeof req.body?.name ===
+            "string"
+        ) {
+            script.name =
+                cleanName(
+                    req.body.name
+                );
+        }
+
+        script.updatedAt =
+            Date.now();
+
+        writeDB(db);
+
+        res.json({
+            ok: true,
+            id,
+            name:
+                script.name,
+            endpoint:
+                `${DOMAIN}/api/${id}`,
+            loader:
+                createLoader(id)
+        });
+    }
+);
+
+/* =========================================================
+   GET SOURCE
+========================================================= */
+
 app.get("/api/:id", (req, res) => {
-    const id = req.params.id;
 
-    if (!looksLikeRoblox(req)) {
+    /*
+       Browser thông thường sẽ bị chặn.
+       Đây chỉ là basic User-Agent filtering,
+       không phải bảo mật tuyệt đối.
+    */
+
+    const ua =
+        String(
+            req.headers["user-agent"] ||
+            ""
+        )
+        .toLowerCase();
+
+    const browser =
+        ua.includes("mozilla") ||
+        ua.includes("chrome") ||
+        ua.includes("safari") ||
+        ua.includes("firefox") ||
+        ua.includes("edg");
+
+    if (browser) {
         return res
             .status(403)
             .type("text/plain")
             .send(
-                "LEXINX PROTECT\n\n" +
-                "This endpoint is only available to Roblox."
+                "LEXINX PROTECT - Browser blocked"
             );
     }
 
-    const db = readDB();
-    const script = db[id];
+    const id =
+        req.params.id;
 
-    if (!script) {
+    const db = readDB();
+
+    let found = null;
+
+    for (
+        const email of Object.keys(
+            db.users
+        )
+    ) {
+        const user =
+            db.users[email];
+
+        if (
+            user.scripts &&
+            user.scripts[id]
+        ) {
+            found =
+                user.scripts[id];
+            break;
+        }
+    }
+
+    if (!found) {
         return res
             .status(404)
             .type("text/plain")
             .send(
-                "Script not found."
+                "Script not found"
             );
     }
 
@@ -285,12 +831,53 @@ app.get("/api/:id", (req, res) => {
             "X-Content-Type-Options",
             "nosniff"
         )
-        .send(script.source);
+        .send(found.source);
 });
 
-/*
-    OTHER ROUTES
-*/
+/* =========================================================
+   DELETE
+========================================================= */
+
+app.delete(
+    "/api/delete/:id",
+    requireSession,
+    (req, res) => {
+
+        const db = readDB();
+
+        const user =
+            db.users[
+                req.session.userId
+            ];
+
+        if (
+            !user.scripts[
+                req.params.id
+            ]
+        ) {
+            return res.status(404).json({
+                ok: false,
+                error:
+                    "Script not found"
+            });
+        }
+
+        delete user.scripts[
+            req.params.id
+        ];
+
+        writeDB(db);
+
+        res.json({
+            ok: true
+        });
+    }
+);
+
+/* =========================================================
+   404
+========================================================= */
+
 app.use((req, res) => {
     res
         .status(404)
@@ -300,12 +887,37 @@ app.use((req, res) => {
         );
 });
 
+/* =========================================================
+   START
+========================================================= */
+
 app.listen(PORT, () => {
     console.log(
-        `LEXINX PROTECT running on port ${PORT}`
+        "================================"
     );
 
     console.log(
-        `Domain: ${DOMAIN}`
+        "LEXINX PROTECT ONLINE"
+    );
+
+    console.log(
+        "PORT:",
+        PORT
+    );
+
+    console.log(
+        "DOMAIN:",
+        DOMAIN
+    );
+
+    console.log(
+        "SMTP:",
+        transporter
+            ? "CONFIGURED"
+            : "NOT CONFIGURED"
+    );
+
+    console.log(
+        "================================"
     );
 });
