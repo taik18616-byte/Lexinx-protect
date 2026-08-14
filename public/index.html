@@ -7,10 +7,10 @@
 
 <meta
     name="viewport"
-    content="width=device-width, initial-scale=1.0"
+    content="width=device-width,initial-scale=1"
 >
 
-<title>LEXINX Protect</title>
+<title>LEXINX PROTECT</title>
 
 <style>
 
@@ -22,127 +22,226 @@ body {
 
     margin: 0;
 
-    background: #08080b;
+    min-height: 100vh;
 
-    color: #eee;
+    background:
+        radial-gradient(
+            circle at top,
+            #181818,
+            #050505 55%
+        );
 
-    font-family: Arial, sans-serif;
+    color: white;
+
+    font-family:
+        Arial,
+        sans-serif;
 }
 
 .container {
 
-    max-width: 1000px;
+    width:
+        min(900px, 94%);
 
-    margin: auto;
-
-    padding: 25px;
+    margin:
+        50px auto;
 }
 
-.panel {
+.logo {
 
-    background: #15151c;
+    text-align: center;
+
+    font-size: 44px;
+
+    font-weight: 900;
+
+    letter-spacing: 2px;
+}
+
+.subtitle {
+
+    text-align: center;
+
+    color: #777;
+
+    margin:
+        10px 0 40px;
+}
+
+.card {
+
+    background:
+        rgba(15,15,15,.95);
 
     border:
-        1px solid #292936;
+        1px solid #292929;
 
-    border-radius: 12px;
+    border-radius:
+        18px;
 
-    padding: 20px;
+    padding:
+        25px;
 
-    margin-bottom: 20px;
+    margin-bottom:
+        25px;
+
+    box-shadow:
+        0 15px 50px
+        rgba(0,0,0,.3);
 }
 
-input,
-textarea {
+h2 {
+
+    margin-top: 0;
+}
+
+input[type=file] {
 
     width: 100%;
 
-    background: #09090d;
-
-    color: white;
+    padding: 15px;
 
     border:
-        1px solid #33333f;
+        1px solid #333;
 
-    border-radius: 8px;
+    border-radius:
+        10px;
 
-    padding: 12px;
+    background:
+        #080808;
 
-    margin:
-        8px 0 15px;
-}
-
-textarea {
-
-    min-height: 230px;
-
-    resize: vertical;
-
-    font-family: monospace;
+    color:
+        #aaa;
 }
 
 button {
 
     border: 0;
 
-    border-radius: 7px;
+    border-radius: 9px;
 
-    padding: 10px 15px;
+    padding:
+        11px 17px;
 
-    margin: 4px;
+    margin-top: 12px;
 
-    color: white;
+    background: white;
 
-    background: #30303c;
+    color: black;
+
+    font-weight: bold;
 
     cursor: pointer;
 }
 
-.primary {
-    background: #5865f2;
+button:hover {
+
+    opacity: .8;
 }
 
-.success {
-    background: #287a4d;
-}
+.status {
 
-.danger {
-    background: #b83232;
+    margin-top:
+        15px;
+
+    color:
+        #999;
 }
 
 .script {
 
+    background:
+        #080808;
+
     border:
-        1px solid #30303c;
+        1px solid #242424;
 
-    border-radius: 10px;
+    border-radius:
+        12px;
 
-    padding: 15px;
+    padding:
+        18px;
 
-    margin-top: 12px;
+    margin-top:
+        15px;
+}
+
+.script-name {
+
+    font-size:
+        18px;
+
+    font-weight:
+        bold;
+}
+
+.script-id {
+
+    margin-top:
+        5px;
+
+    color:
+        #666;
+
+    font-size:
+        12px;
 }
 
 .loader {
 
-    background: #08080a;
+    margin-top:
+        12px;
 
-    border-radius: 7px;
+    padding:
+        12px;
 
-    padding: 10px;
+    background:
+        #000;
 
-    margin: 10px 0;
+    border-radius:
+        8px;
 
-    font-family: monospace;
+    color:
+        #aaa;
 
-    word-break: break-all;
+    font-family:
+        monospace;
+
+    font-size:
+        12px;
+
+    overflow-x:
+        auto;
+
+    white-space:
+        nowrap;
 }
 
-.active {
-    color: #4ed68a;
+.actions {
+
+    display:
+        flex;
+
+    gap:
+        8px;
+
+    flex-wrap:
+        wrap;
 }
 
-.revoked {
-    color: #e85b5b;
+.delete {
+
+    background:
+        #222;
+
+    color:
+        white;
+}
+
+.empty {
+
+    color:
+        #666;
 }
 
 </style>
@@ -153,50 +252,48 @@ button {
 
 <div class="container">
 
-<h1>LEXINX PROTECT</h1>
+<div class="logo">
+LEXINX PROTECT
+</div>
 
-<p>
-Remote Lua Loader Manager
-</p>
+<div class="subtitle">
+Lua / TXT Script Protection & Loader Manager
+</div>
 
+<div class="card">
 
-<div class="panel">
+<h2>
+Upload Script
+</h2>
 
-<h2>Create Loader</h2>
-
-<label>
-Script name
-</label>
+<form id="uploadForm">
 
 <input
-    id="name"
-    placeholder="My Script"
+    id="file"
+    type="file"
+    name="script"
+    accept=".lua,.txt"
+    required
 >
 
-
-<label>
-Lua payload
-</label>
-
-<textarea
-    id="payload"
-    placeholder='print("67")'
-></textarea>
-
-
-<button
-    class="primary"
-    onclick="createScript()"
->
-Create Loader
+<button type="submit">
+Protect Script
 </button>
+
+</form>
+
+<div
+    id="status"
+    class="status"
+></div>
 
 </div>
 
+<div class="card">
 
-<div class="panel">
-
-<h2>Scripts</h2>
+<h2>
+Protected Scripts
+</h2>
 
 <div id="scripts">
 Loading...
@@ -206,334 +303,235 @@ Loading...
 
 </div>
 
-
 <script>
 
-async function createScript() {
+const form =
+    document.getElementById(
+        "uploadForm"
+    );
 
-    const name =
-        document
-        .getElementById("name")
-        .value;
+const status =
+    document.getElementById(
+        "status"
+    );
 
-    const payload =
-        document
-        .getElementById("payload")
-        .value;
+form.addEventListener(
+    "submit",
+    async event => {
 
-    if (!name.trim()) {
+        event.preventDefault();
 
-        alert(
-            "Script name required"
-        );
+        const file =
+            document.getElementById(
+                "file"
+            ).files[0];
 
-        return;
-    }
-
-    if (!payload.trim()) {
-
-        alert(
-            "Payload required"
-        );
-
-        return;
-    }
-
-    try {
-
-        const response =
-            await fetch(
-                "/admin/create",
-                {
-
-                    method:
-                        "POST",
-
-                    headers: {
-
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body:
-                        JSON.stringify({
-
-                            name,
-                            payload
-                        })
-                }
-            );
-
-        const data =
-            await response.json();
-
-        if (!data.ok) {
-
-            alert(
-                data.error ||
-                "Create failed"
-            );
-
+        if (!file) {
             return;
         }
 
-        await navigator
-            .clipboard
-            .writeText(
-                data.script.loader
-            );
+        status.textContent =
+            "Uploading...";
 
-        alert(
-            "Loader created and copied!"
+        const body =
+            new FormData();
+
+        body.append(
+            "script",
+            file
         );
 
-        document
-            .getElementById("name")
-            .value = "";
+        try {
 
-        document
-            .getElementById("payload")
-            .value = "";
+            const response =
+                await fetch(
+                    "/api/upload",
+                    {
+                        method: "POST",
+                        body
+                    }
+                );
 
-        loadScripts();
+            const data =
+                await response.json();
 
-    } catch (error) {
+            if (!response.ok) {
 
-        alert(
-            "Network error"
-        );
+                throw new Error(
+                    data.error ||
+                    "Upload failed"
+                );
+            }
+
+            status.textContent =
+                "Protected: " +
+                data.id;
+
+            form.reset();
+
+            await loadScripts();
+
+        } catch (error) {
+
+            status.textContent =
+                "ERROR: " +
+                error.message;
+        }
     }
-}
-
+);
 
 async function loadScripts() {
 
-    const container =
-        document
-        .getElementById("scripts");
+    const box =
+        document.getElementById(
+            "scripts"
+        );
 
     try {
 
         const response =
             await fetch(
-                "/admin/list"
+                "/api/scripts"
             );
 
         const data =
             await response.json();
 
-        if (!data.ok) {
-
-            container.innerHTML =
-                "Failed.";
-
-            return;
-        }
-
         if (
-            data.scripts.length === 0
+            !data.ok ||
+            !data.scripts.length
         ) {
 
-            container.innerHTML =
-                "No scripts.";
+            box.innerHTML =
+                `<div class="empty">
+                    No scripts uploaded.
+                </div>`;
 
             return;
         }
 
-        container.innerHTML = "";
+        box.innerHTML = "";
 
         for (
             const script
             of data.scripts
         ) {
 
-            const div =
+            const loader =
+                `loadstring(game:HttpGet("${location.origin}/api/${script.id}"))()`;
+
+            const item =
                 document.createElement(
                     "div"
                 );
 
-            div.className =
+            item.className =
                 "script";
 
-            const name =
-                escapeHtml(
-                    script.name
-                );
+            item.innerHTML = `
 
-            const id =
-                escapeHtml(
-                    script.id
-                );
-
-            const loader =
-                escapeHtml(
-                    script.loader
-                );
-
-            div.innerHTML = `
-
-                <b>${name}</b>
-
-                <div>
-                    ID: ${id}
+                <div class="script-name">
+                    ${escapeHTML(
+                        script.name
+                    )}
                 </div>
 
-                <div class="${
-                    script.active
-                        ? "active"
-                        : "revoked"
-                }">
-
-                    ${
-                        script.active
-                            ? "ACTIVE"
-                            : "REVOKED"
-                    }
-
+                <div class="script-id">
+                    ID: ${escapeHTML(
+                        script.id
+                    )}
                 </div>
 
                 <div class="loader">
-                    ${loader}
+                    ${escapeHTML(
+                        loader
+                    )}
                 </div>
 
-                <button
-                    class="success"
-                    onclick='copyLoader(
-                        ${JSON.stringify(
-                            script.loader
-                        )}
-                    )'
-                >
-                    Copy Loader
-                </button>
+                <div class="actions">
 
-                ${
-                    script.active
+                    <button class="copy">
+                        Copy Loader
+                    </button>
 
-                    ?
+                    <button class="delete">
+                        Delete
+                    </button>
 
-                    `<button
-                        class="danger"
-                        onclick="revokeScript(
-                            '${id}'
-                        )"
-                    >
-                        Revoke
-                    </button>`
-
-                    :
-
-                    `<button
-                        class="primary"
-                        onclick="enableScript(
-                            '${id}'
-                        )"
-                    >
-                        Enable
-                    </button>`
-                }
-
-                <button
-                    onclick="deleteScript(
-                        '${id}'
-                    )"
-                >
-                    Delete
-                </button>
+                </div>
             `;
 
-            container.appendChild(
-                div
+            item
+                .querySelector(".copy")
+                .addEventListener(
+                    "click",
+                    async () => {
+
+                        await navigator
+                            .clipboard
+                            .writeText(
+                                loader
+                            );
+
+                        item
+                            .querySelector(
+                                ".copy"
+                            )
+                            .textContent =
+                            "Copied!";
+                    }
+                );
+
+            item
+                .querySelector(".delete")
+                .addEventListener(
+                    "click",
+                    async () => {
+
+                        const yes =
+                            confirm(
+                                "Delete this script?"
+                            );
+
+                        if (!yes) {
+                            return;
+                        }
+
+                        const result =
+                            await fetch(
+                                "/api/scripts/" +
+                                encodeURIComponent(
+                                    script.id
+                                ),
+                                {
+                                    method:
+                                        "DELETE"
+                                }
+                            );
+
+                        if (
+                            result.ok
+                        ) {
+                            loadScripts();
+                        }
+                    }
+                );
+
+            box.appendChild(
+                item
             );
         }
 
     } catch {
 
-        container.innerHTML =
-            "Network error.";
+        box.innerHTML =
+            `<div class="empty">
+                Failed to load scripts.
+            </div>`;
     }
 }
 
-
-async function copyLoader(
-    loader
-) {
-
-    await navigator
-        .clipboard
-        .writeText(loader);
-
-    alert(
-        "Loader copied!"
-    );
-}
-
-
-async function revokeScript(
-    id
-) {
-
-    if (
-        !confirm(
-            "Revoke this script?"
-        )
-    ) {
-        return;
-    }
-
-    await fetch(
-        "/admin/revoke/" +
-        encodeURIComponent(id),
-        {
-            method: "POST"
-        }
-    );
-
-    loadScripts();
-}
-
-
-async function enableScript(
-    id
-) {
-
-    await fetch(
-        "/admin/enable/" +
-        encodeURIComponent(id),
-        {
-            method: "POST"
-        }
-    );
-
-    loadScripts();
-}
-
-
-async function deleteScript(
-    id
-) {
-
-    if (
-        !confirm(
-            "Delete this script?"
-        )
-    ) {
-        return;
-    }
-
-    await fetch(
-        "/admin/delete/" +
-        encodeURIComponent(id),
-        {
-            method: "DELETE"
-        }
-    );
-
-    loadScripts();
-}
-
-
-function escapeHtml(value) {
+function escapeHTML(value) {
 
     return String(value)
 
@@ -562,7 +560,6 @@ function escapeHtml(value) {
             "&#039;"
         );
 }
-
 
 loadScripts();
 
