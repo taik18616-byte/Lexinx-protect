@@ -6,19 +6,38 @@ const path = require("path");
 const app = express();
 
 const PORT = process.env.PORT || 3000;
+
 const DOMAIN =
     process.env.DOMAIN ||
     "https://lexinx-protect.onrender.com";
 
-const SECRET =
-    process.env.PROTECT_SECRET ||
-    "CHANGE_THIS_SECRET";
+const DATA_DIR =
+    path.join(__dirname, "data");
 
-const DATA_DIR = path.join(__dirname, "data");
-const DATA_FILE = path.join(DATA_DIR, "scripts.json");
+const DATA_FILE =
+    path.join(DATA_DIR, "scripts.json");
 
-app.use(express.json({ limit: "2mb" }));
-app.use(express.static(path.join(__dirname, "public")));
+const TOKEN_TTL = 60 * 1000;
+
+
+// ============================================================
+// MIDDLEWARE
+// ============================================================
+
+app.use(
+    express.json({
+        limit: "2mb"
+    })
+);
+
+app.use(
+    express.static(
+        path.join(
+            __dirname,
+            "public"
+        )
+    )
+);
 
 
 // ============================================================
@@ -40,19 +59,24 @@ if (!fs.existsSync(DATA_FILE)) {
 }
 
 function readScripts() {
+
     try {
+
         return JSON.parse(
             fs.readFileSync(
                 DATA_FILE,
                 "utf8"
             )
         );
+
     } catch {
+
         return [];
     }
 }
 
 function saveScripts(data) {
+
     fs.writeFileSync(
         DATA_FILE,
         JSON.stringify(
@@ -66,16 +90,66 @@ function saveScripts(data) {
 
 
 // ============================================================
+// RANDOM ID
+// ============================================================
+
+function randomString(length) {
+
+    const chars =
+        "ABCDEFGHJKLMNPQRSTUVWXYZ" +
+        "abcdefghijkmnopqrstuvwxyz" +
+        "23456789";
+
+    let result = "";
+
+    for (let i = 0; i < length; i++) {
+
+        result +=
+            chars[
+                crypto.randomInt(
+                    0,
+                    chars.length
+                )
+            ];
+    }
+
+    return result;
+}
+
+
+function generateScriptId() {
+
+    const scripts =
+        readScripts();
+
+    let id;
+
+    do {
+
+        id =
+            randomString(10);
+
+    } while (
+        scripts.some(
+            x => x.id === id
+        )
+    );
+
+    return id;
+}
+
+
+// ============================================================
 // BLOCK PAGE
 // ============================================================
 
-function blockPage(res, reason = "LEXINX BLOCK") {
+function blocked(res, reason = "LEXINX BLOCK") {
 
-    let text = "";
+    let output = "";
 
     for (let i = 0; i < 1000; i++) {
 
-        text +=
+        output +=
             i % 2 === 0
                 ? "LEXINX PROTECT\n"
                 : "BLOCKED BY LEXINX\n";
@@ -85,7 +159,7 @@ function blockPage(res, reason = "LEXINX BLOCK") {
         .status(403)
         .type("html")
         .send(`
-<!doctype html>
+<!DOCTYPE html>
 
 <html>
 
@@ -111,7 +185,7 @@ body {
 }
 
 h1 {
-    font-size: 32px;
+    font-size: 34px;
 }
 
 pre {
@@ -127,7 +201,7 @@ pre {
 
 <h1>BLOCKED BY LEXINX</h1>
 
-<pre>${text}</pre>
+<pre>${output}</pre>
 
 </body>
 
@@ -137,24 +211,25 @@ pre {
 
 
 // ============================================================
-// BASIC BROWSER DETECTION
+// BASIC BROWSER CHECK
 // ============================================================
 
 function isBrowser(req) {
 
     const ua =
         String(
-            req.headers["user-agent"] || ""
+            req.headers[
+                "user-agent"
+            ] || ""
         ).toLowerCase();
 
     const browserPatterns = [
         "mozilla",
         "chrome",
-        "safari",
         "firefox",
+        "safari",
         "edg",
-        "opera",
-        "android browser"
+        "opera"
     ];
 
     return browserPatterns.some(
@@ -164,138 +239,49 @@ function isBrowser(req) {
 
 
 // ============================================================
-// RANDOM ID
+// TOKEN DATABASE
 // ============================================================
 
-function generateId() {
-
-    const chars =
-        "ABCDEFGHJKLMNPQRSTUVWXYZ" +
-        "abcdefghijkmnopqrstuvwxyz" +
-        "23456789";
-
-    let id;
-
-    const scripts =
-        readScripts();
-
-    do {
-
-        id = "";
-
-        for (let i = 0; i < 10; i++) {
-
-            id += chars[
-                crypto.randomInt(
-                    0,
-                    chars.length
-                )
-            ];
-        }
-
-    } while (
-        scripts.some(
-            x => x.id === id
-        )
-    );
-
-    return id;
-}
+const sessions =
+    new Map();
 
 
 // ============================================================
-// HMAC
+// CLEAN EXPIRED TOKENS
 // ============================================================
 
-function sign(value) {
-
-    return crypto
-        .createHmac(
-            "sha256",
-            SECRET
-        )
-        .update(value)
-        .digest("hex");
-}
-
-
-function safeEqual(a, b) {
-
-    if (
-        typeof a !== "string" ||
-        typeof b !== "string"
-    ) {
-        return false;
-    }
-
-    const aa =
-        Buffer.from(a);
-
-    const bb =
-        Buffer.from(b);
-
-    if (aa.length !== bb.length) {
-        return false;
-    }
-
-    return crypto.timingSafeEqual(
-        aa,
-        bb
-    );
-}
-
-
-// ============================================================
-// NONCE STORE
-// ============================================================
-
-const usedNonces = new Map();
-
-function cleanupNonces() {
+function cleanupSessions() {
 
     const now =
         Date.now();
 
     for (
-        const [nonce, time]
-        of usedNonces
+        const [
+            token,
+            session
+        ] of sessions
     ) {
 
         if (
-            now - time >
-            2 * 60 * 1000
+            now >
+            session.expiresAt
         ) {
-            usedNonces.delete(
-                nonce
+
+            sessions.delete(
+                token
             );
         }
     }
 }
 
 setInterval(
-    cleanupNonces,
-    60 * 1000
+    cleanupSessions,
+    30 * 1000
 );
 
 
 // ============================================================
-// HOME
-// ============================================================
-
-app.get("/", (req, res) => {
-
-    res.sendFile(
-        path.join(
-            __dirname,
-            "public",
-            "index.html"
-        )
-    );
-});
-
-
-// ============================================================
-// CREATE SCRIPT
+// ADMIN CREATE
 // ============================================================
 
 app.post(
@@ -318,14 +304,19 @@ app.post(
             });
         }
 
-        if (
-            !name.trim() ||
-            !payload.trim()
-        ) {
+        if (!name.trim()) {
 
             return res.status(400).json({
                 ok: false,
-                error: "Name and payload required"
+                error: "Name required"
+            });
+        }
+
+        if (!payload.trim()) {
+
+            return res.status(400).json({
+                ok: false,
+                error: "Payload required"
             });
         }
 
@@ -344,7 +335,7 @@ app.post(
             readScripts();
 
         const id =
-            generateId();
+            generateScriptId();
 
         const script = {
 
@@ -381,10 +372,8 @@ app.post(
                 name:
                     script.name,
 
-                active: true,
-
                 loader:
-                    `loadstring(game:HttpGet("${DOMAIN}/api/${id}"))()`
+                    `loadstring(game:HttpGet("${DOMAIN}/loader/${id}"))()`
             }
         });
     }
@@ -392,7 +381,7 @@ app.post(
 
 
 // ============================================================
-// LIST
+// ADMIN LIST
 // ============================================================
 
 app.get(
@@ -423,7 +412,7 @@ app.get(
                             script.createdAt,
 
                         loader:
-                            `loadstring(game:HttpGet("${DOMAIN}/api/${script.id}"))()`
+                            `loadstring(game:HttpGet("${DOMAIN}/loader/${script.id}"))()`
                     })
                 )
         });
@@ -453,7 +442,7 @@ app.post(
 
             return res.status(404).json({
                 ok: false,
-                error: "Not found"
+                error: "Script not found"
             });
         }
 
@@ -492,7 +481,7 @@ app.post(
 
             return res.status(404).json({
                 ok: false,
-                error: "Not found"
+                error: "Script not found"
             });
         }
 
@@ -520,7 +509,7 @@ app.delete(
         let scripts =
             readScripts();
 
-        const old =
+        const oldLength =
             scripts.length;
 
         scripts =
@@ -532,12 +521,12 @@ app.delete(
 
         if (
             scripts.length ===
-            old
+            oldLength
         ) {
 
             return res.status(404).json({
                 ok: false,
-                error: "Not found"
+                error: "Script not found"
             });
         }
 
@@ -553,101 +542,23 @@ app.delete(
 
 
 // ============================================================
-// AUTH / PAYLOAD
+// LOADER ENDPOINT
+//
+// Browser -> BLOCK
+// Executor -> nhận Lua loader
 // ============================================================
 
-app.post(
-    "/api/execute/:id",
+app.get(
+    "/loader/:id",
     (req, res) => {
 
-        // Browser heuristic.
         if (isBrowser(req)) {
-            return blockPage(res);
-        }
 
-        const {
-            timestamp,
-            nonce,
-            signature
-        } = req.body || {};
-
-        if (
-            !timestamp ||
-            !nonce ||
-            !signature
-        ) {
-
-            return blockPage(
+            return blocked(
                 res,
-                "INVALID REQUEST"
+                "BROWSER"
             );
         }
-
-        const ts =
-            Number(timestamp);
-
-        if (
-            !Number.isFinite(ts)
-        ) {
-
-            return blockPage(
-                res,
-                "INVALID TIME"
-            );
-        }
-
-        // Real server time.
-        const now =
-            Math.floor(
-                Date.now() / 1000
-            );
-
-        // 60 second window.
-        if (
-            Math.abs(
-                now - ts
-            ) > 60
-        ) {
-
-            return blockPage(
-                res,
-                "TIME CHECK FAILED"
-            );
-        }
-
-        // Nonce replay protection.
-        if (
-            usedNonces.has(nonce)
-        ) {
-
-            return blockPage(
-                res,
-                "NONCE REPLAY"
-            );
-        }
-
-        const expected =
-            sign(
-                `${req.params.id}:${ts}:${nonce}`
-            );
-
-        if (
-            !safeEqual(
-                signature,
-                expected
-            )
-        ) {
-
-            return blockPage(
-                res,
-                "SIGNATURE FAILED"
-            );
-        }
-
-        usedNonces.set(
-            nonce,
-            Date.now()
-        );
 
         const scripts =
             readScripts();
@@ -661,21 +572,490 @@ app.post(
 
         if (!script) {
 
-            return blockPage(
+            return blocked(
                 res,
-                "INVALID LOADER"
+                "INVALID ID"
             );
         }
 
         if (!script.active) {
 
-            return blockPage(
+            return blocked(
                 res,
-                "SCRIPT REVOKED"
+                "REVOKED"
             );
         }
 
-        // Payload is only returned after checks.
+        const loader = `
+local HttpService = game:GetService("HttpService")
+
+local API = "${DOMAIN}"
+
+local ID = "${script.id}"
+
+local function randomNonce()
+
+    local chars =
+        "abcdefghijklmnopqrstuvwxyz" ..
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ..
+        "0123456789"
+
+    local result = {}
+
+    for i = 1, 32 do
+
+        local n =
+            math.random(
+                1,
+                #chars
+            )
+
+        result[i] =
+            chars:sub(
+                n,
+                n
+            )
+    end
+
+    return table.concat(result)
+end
+
+local nonce =
+    randomNonce()
+
+local timestamp =
+    os.time()
+
+local response =
+    request({
+
+        Url =
+            API ..
+            "/api/challenge/" ..
+            ID,
+
+        Method =
+            "POST",
+
+        Headers = {
+
+            ["Content-Type"] =
+                "application/json",
+
+            ["X-Time"] =
+                tostring(
+                    timestamp
+                ),
+
+            ["X-Nonce"] =
+                nonce
+        },
+
+        Body =
+            "{}"
+    })
+
+if not response then
+
+    warn(
+        "LEXINX BLOCK"
+    )
+
+    return
+end
+
+if response.StatusCode ~= 200 then
+
+    warn(
+        "LEXINX BLOCK:",
+        response.StatusCode
+    )
+
+    return
+end
+
+local success,
+      challenge =
+    pcall(
+        function()
+
+            return
+                HttpService:
+                JSONDecode(
+                    response.Body
+                )
+
+        end
+    )
+
+if not success or
+   not challenge.ok then
+
+    warn(
+        "LEXINX AUTH FAILED"
+    )
+
+    return
+end
+
+local payloadResponse =
+    request({
+
+        Url =
+            API ..
+            "/api/payload/" ..
+            ID,
+
+        Method =
+            "POST",
+
+        Headers = {
+
+            ["Content-Type"] =
+                "application/json",
+
+            ["X-Session"] =
+                challenge.token
+        },
+
+        Body =
+            "{}"
+    })
+
+if not payloadResponse then
+
+    warn(
+        "LEXINX BLOCK"
+    )
+
+    return
+end
+
+if payloadResponse.StatusCode ~= 200 then
+
+    warn(
+        "LEXINX BLOCK:",
+        payloadResponse.StatusCode
+    )
+
+    return
+end
+
+local payload =
+    payloadResponse.Body
+
+if type(payload) ~= "string" or
+   #payload == 0 then
+
+    warn(
+        "LEXINX EMPTY PAYLOAD"
+    )
+
+    return
+end
+
+local fn,
+      err =
+    loadstring(
+        payload
+    )
+
+if not fn then
+
+    warn(
+        "LEXINX COMPILE ERROR:",
+        err
+    )
+
+    return
+end
+
+local ok,
+      runtimeError =
+    pcall(fn)
+
+if not ok then
+
+    warn(
+        "LEXINX RUNTIME ERROR:",
+        runtimeError
+    )
+
+end
+`;
+
+        return res
+            .status(200)
+            .type("text/plain")
+            .send(loader);
+    }
+);
+
+
+// ============================================================
+// CHALLENGE
+// ============================================================
+
+app.post(
+    "/api/challenge/:id",
+    (req, res) => {
+
+        if (isBrowser(req)) {
+
+            return blocked(
+                res,
+                "BROWSER"
+            );
+        }
+
+        const {
+            id
+        } = req.params;
+
+        const {
+            timestamp,
+            nonce
+        } = req.body || {};
+
+        if (
+            !timestamp ||
+            !nonce
+        ) {
+
+            return blocked(
+                res,
+                "INVALID REQUEST"
+            );
+        }
+
+        if (
+            typeof nonce !==
+            "string" ||
+            nonce.length < 16 ||
+            nonce.length > 128
+        ) {
+
+            return blocked(
+                res,
+                "INVALID NONCE"
+            );
+        }
+
+        const ts =
+            Number(timestamp);
+
+        if (
+            !Number.isFinite(ts)
+        ) {
+
+            return blocked(
+                res,
+                "INVALID TIME"
+            );
+        }
+
+        const now =
+            Math.floor(
+                Date.now() / 1000
+            );
+
+        if (
+            Math.abs(
+                now - ts
+            ) > 60
+        ) {
+
+            return blocked(
+                res,
+                "TIME CHECK FAILED"
+            );
+        }
+
+        const scripts =
+            readScripts();
+
+        const script =
+            scripts.find(
+                x =>
+                    x.id === id
+            );
+
+        if (!script) {
+
+            return blocked(
+                res,
+                "INVALID ID"
+            );
+        }
+
+        if (!script.active) {
+
+            return blocked(
+                res,
+                "REVOKED"
+            );
+        }
+
+        const token =
+            crypto.randomBytes(
+                32
+            ).toString("hex");
+
+        sessions.set(
+            token,
+            {
+
+                id,
+
+                nonce,
+
+                createdAt:
+                    Date.now(),
+
+                expiresAt:
+                    Date.now() +
+                    TOKEN_TTL,
+
+                used: false
+            }
+        );
+
+        return res.json({
+
+            ok: true,
+
+            token,
+
+            expiresIn:
+                TOKEN_TTL
+        });
+    }
+);
+
+
+// ============================================================
+// PAYLOAD
+// ============================================================
+
+app.post(
+    "/api/payload/:id",
+    (req, res) => {
+
+        if (isBrowser(req)) {
+
+            return blocked(
+                res,
+                "BROWSER"
+            );
+        }
+
+        const token =
+            req.header(
+                "X-Session"
+            );
+
+        if (!token) {
+
+            return blocked(
+                res,
+                "NO SESSION"
+            );
+        }
+
+        const session =
+            sessions.get(
+                token
+            );
+
+        if (!session) {
+
+            return blocked(
+                res,
+                "INVALID SESSION"
+            );
+        }
+
+        if (
+            session.used
+        ) {
+
+            sessions.delete(
+                token
+            );
+
+            return blocked(
+                res,
+                "TOKEN ALREADY USED"
+            );
+        }
+
+        if (
+            Date.now() >
+            session.expiresAt
+        ) {
+
+            sessions.delete(
+                token
+            );
+
+            return blocked(
+                res,
+                "TOKEN EXPIRED"
+            );
+        }
+
+        if (
+            session.id !==
+            req.params.id
+        ) {
+
+            return blocked(
+                res,
+                "ID MISMATCH"
+            );
+        }
+
+        const scripts =
+            readScripts();
+
+        const script =
+            scripts.find(
+                x =>
+                    x.id ===
+                    req.params.id
+            );
+
+        if (!script) {
+
+            sessions.delete(
+                token
+            );
+
+            return blocked(
+                res,
+                "INVALID SCRIPT"
+            );
+        }
+
+        if (!script.active) {
+
+            sessions.delete(
+                token
+            );
+
+            return blocked(
+                res,
+                "REVOKED"
+            );
+        }
+
+        // ONE-TIME TOKEN
+        session.used = true;
+
+        sessions.delete(
+            token
+        );
+
         return res
             .status(200)
             .type("text/plain")
@@ -687,14 +1067,14 @@ app.post(
 
 
 // ============================================================
-// DIRECT API ACCESS = BLOCK
+// DIRECT API ACCESS
 // ============================================================
 
 app.get(
     "/api/:id",
     (req, res) => {
 
-        return blockPage(
+        return blocked(
             res,
             "DIRECT ACCESS"
         );
@@ -709,7 +1089,7 @@ app.get(
 app.use(
     (req, res) => {
 
-        return blockPage(
+        return blocked(
             res,
             "NOT FOUND"
         );
@@ -726,7 +1106,15 @@ app.listen(
     () => {
 
         console.log(
+            "================================"
+        );
+
+        console.log(
             "LEXINX PROTECT ONLINE"
+        );
+
+        console.log(
+            "================================"
         );
 
         console.log(
