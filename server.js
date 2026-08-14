@@ -14,53 +14,23 @@ const DATA_DIR = path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "scripts.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 
-/*
-========================================================
-CONFIG
-========================================================
-*/
-
 const SESSION_TTL = 2 * 60 * 1000;
 const TOKEN_TTL = 20 * 1000;
 
-const RATE_WINDOW = 60 * 1000;
-const RATE_LIMIT = 60;
-
-/*
-========================================================
-FILES
-========================================================
-*/
-
-fs.mkdirSync(DATA_DIR, {
-    recursive: true
-});
-
-fs.mkdirSync(PUBLIC_DIR, {
-    recursive: true
-});
+fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 
 if (!fs.existsSync(DB_FILE)) {
     fs.writeFileSync(DB_FILE, "{}", "utf8");
 }
 
-/*
-========================================================
-EXPRESS
-========================================================
-*/
-
 app.disable("x-powered-by");
 
-app.use(
-    express.json({
-        limit: "25mb"
-    })
-);
+app.use(express.json({
+    limit: "25mb"
+}));
 
-app.use(
-    express.static(PUBLIC_DIR)
-);
+app.use(express.static(PUBLIC_DIR));
 
 /*
 ========================================================
@@ -99,7 +69,7 @@ RANDOM
 ========================================================
 */
 
-function randomHex(bytes = 24) {
+function randomHex(bytes = 32) {
     return crypto
         .randomBytes(bytes)
         .toString("hex");
@@ -118,136 +88,48 @@ function cleanName(name) {
 
 /*
 ========================================================
-CONSTANT-TIME COMPARE
+SECURITY HEADERS
 ========================================================
 */
 
-function safeEqual(a, b) {
-
-    if (
-        typeof a !== "string" ||
-        typeof b !== "string"
-    ) {
-        return false;
-    }
-
-    const A = Buffer.from(a);
-    const B = Buffer.from(b);
-
-    if (A.length !== B.length) {
-        return false;
-    }
-
-    return crypto.timingSafeEqual(A, B);
-}
-
-/*
-========================================================
-IP
-========================================================
-*/
-
-function getIP(req) {
-
-    const forwarded =
-        req.headers["x-forwarded-for"];
-
-    if (forwarded) {
-        return String(
-            forwarded
+function secure(res) {
+    return res
+        .set(
+            "Cache-Control",
+            "no-store, no-cache, must-revalidate"
         )
-            .split(",")[0]
-            .trim();
-    }
-
-    return (
-        req.socket?.remoteAddress ||
-        "unknown"
-    );
-}
-
-/*
-========================================================
-RATE LIMIT
-========================================================
-*/
-
-const rateMap = new Map();
-
-function rateLimit(req, res, next) {
-
-    const ip =
-        getIP(req);
-
-    const now =
-        Date.now();
-
-    let record =
-        rateMap.get(ip);
-
-    if (!record) {
-
-        record = {
-            count: 0,
-            resetAt:
-                now + RATE_WINDOW
-        };
-
-        rateMap.set(
-            ip,
-            record
+        .set(
+            "Pragma",
+            "no-cache"
+        )
+        .set(
+            "X-Content-Type-Options",
+            "nosniff"
         );
-    }
-
-    if (
-        now >
-        record.resetAt
-    ) {
-
-        record.count = 0;
-        record.resetAt =
-            now + RATE_WINDOW;
-    }
-
-    record.count++;
-
-    if (
-        record.count >
-        RATE_LIMIT
-    ) {
-
-        return res
-            .status(429)
-            .type("text/plain")
-            .set(
-                "Retry-After",
-                "60"
-            )
-            .send(
-                "LEXINX RATE LIMIT"
-            );
-    }
-
-    next();
 }
-
-app.use(
-    "/api",
-    rateLimit
-);
 
 /*
 ========================================================
-BROWSER DIRECT ACCESS BLOCK
-========================================================
-
-Không cố xác định "Roblox".
-Chỉ từ chối navigation/browser request
-đến API.
+BLOCK
 ========================================================
 */
 
-function isBrowserNavigation(req) {
+function block(res) {
+    return secure(res)
+        .status(403)
+        .type("text/plain")
+        .send(
+            "LEXINX BLOCK"
+        );
+}
+
+/*
+========================================================
+BROWSER NAVIGATION CHECK
+========================================================
+*/
+
+function browserNavigation(req) {
 
     const accept =
         String(
@@ -268,63 +150,31 @@ function isBrowserNavigation(req) {
             ] || ""
         ).toLowerCase();
 
-    const documentRequest =
-        dest === "document" ||
-        mode === "navigate";
-
-    const html =
+    return (
         accept.includes(
             "text/html"
-        );
-
-    return (
-        documentRequest ||
-        html
+        ) ||
+        mode === "navigate" ||
+        dest === "document"
     );
 }
 
-function block(res) {
-
-    return res
-        .status(403)
-        .type("text/plain")
-        .set(
-            "Cache-Control",
-            "no-store"
-        )
-        .send(
-            "LEXINX BLOCK"
-        );
-}
-
 /*
 ========================================================
-SESSION STORE
-========================================================
-
-RAM store:
-- nhanh
-- session cũ chết khi server restart
+SESSION
 ========================================================
 */
 
-const sessions =
-    new Map();
+const sessions = new Map();
 
-/*
-========================================================
-TOKEN
-========================================================
-*/
-
-function makeToken() {
+function newChallenge() {
 
     const now =
         Date.now();
 
     return {
 
-        value:
+        token:
             randomHex(32),
 
         nonce:
@@ -338,34 +188,19 @@ function makeToken() {
     };
 }
 
-/*
-========================================================
-SESSION
-========================================================
-*/
-
 function createSession(
-    scriptID,
-    ip
+    scriptID
 ) {
 
     const now =
         Date.now();
 
-    const sessionID =
-        randomHex(32);
-
     const session = {
 
         id:
-            sessionID,
+            randomHex(32),
 
         scriptID,
-
-        ip,
-
-        stage:
-            2,
 
         createdAt:
             now,
@@ -373,53 +208,43 @@ function createSession(
         expiresAt:
             now + SESSION_TTL,
 
-        tokens: {
+        stage:
+            2,
 
-            l2:
-                makeToken(),
+        l2:
+            newChallenge(),
 
-            l3:
-                null,
+        l3:
+            null,
 
-            l4:
-                null,
+        l4:
+            null,
 
-            l5:
-                null
-        }
-
+        l5:
+            null
     };
 
     sessions.set(
-        sessionID,
+        session.id,
         session
     );
 
     return session;
 }
 
-/*
-========================================================
-SESSION VALIDATION
-========================================================
-*/
-
 function getSession(
-    sessionID,
-    req
+    id
 ) {
 
     if (
-        typeof sessionID !==
+        typeof id !==
         "string"
     ) {
         return null;
     }
 
     const session =
-        sessions.get(
-            sessionID
-        );
+        sessions.get(id);
 
     if (!session) {
         return null;
@@ -430,107 +255,53 @@ function getSession(
         session.expiresAt
     ) {
 
-        sessions.delete(
-            sessionID
-        );
+        sessions.delete(id);
 
-        return null;
-    }
-
-    /*
-        Bind session to IP.
-
-        Note:
-        Nếu bạn dùng proxy/CDN,
-        x-forwarded-for phải được
-        cấu hình đúng ở hạ tầng.
-    */
-
-    if (
-        session.ip !==
-        getIP(req)
-    ) {
         return null;
     }
 
     return session;
 }
 
-/*
-========================================================
-CONSUME TOKEN
-========================================================
-*/
-
-function consumeToken(
+function consume(
+    challenge,
     token,
-    value,
     nonce
 ) {
 
-    if (!token) {
+    if (!challenge) {
         return false;
     }
 
-    if (token.used) {
+    if (challenge.used) {
         return false;
     }
 
     if (
         Date.now() >
-        token.expiresAt
+        challenge.expiresAt
     ) {
         return false;
     }
 
     if (
-        !safeEqual(
-            token.value,
-            String(value || "")
-        )
+        token !==
+        challenge.token
     ) {
         return false;
     }
 
     if (
-        !safeEqual(
-            token.nonce,
-            String(nonce || "")
-        )
+        nonce !==
+        challenge.nonce
     ) {
         return false;
     }
 
-    token.used =
+    challenge.used =
         true;
 
     return true;
-}
-
-/*
-========================================================
-COMMON RESPONSE HEADERS
-========================================================
-*/
-
-function secureHeaders(res) {
-
-    res.set(
-        "Cache-Control",
-        "no-store, no-cache, must-revalidate"
-    );
-
-    res.set(
-        "Pragma",
-        "no-cache"
-    );
-
-    res.set(
-        "X-Content-Type-Options",
-        "nosniff"
-    );
-
-    return res;
 }
 
 /*
@@ -609,7 +380,7 @@ app.post(
                 `${DOMAIN}/api/loader/${id}`
             )}))()`;
 
-        secureHeaders(res);
+        secure(res);
 
         res.json({
 
@@ -623,13 +394,14 @@ app.post(
                 `${DOMAIN}/api/loader/${id}`,
 
             loader
+
         });
     }
 );
 
 /*
 ========================================================
-EDIT SCRIPT
+EDIT
 ========================================================
 */
 
@@ -695,7 +467,7 @@ app.post(
 
         writeDB(db);
 
-        secureHeaders(res);
+        secure(res);
 
         res.json({
 
@@ -711,13 +483,460 @@ app.post(
                 `loadstring(game:HttpGet(${JSON.stringify(
                     `${DOMAIN}/api/loader/${script.id}`
                 )}))()`
+
         });
     }
 );
 
 /*
 ========================================================
-LIST SCRIPTS
+L1
+========================================================
+
+L1 chỉ lấy challenge L2.
+
+Không có source.
+========================================================
+*/
+
+app.get(
+    "/api/loader/:id",
+    (req, res) => {
+
+        if (
+            browserNavigation(req)
+        ) {
+            return block(res);
+        }
+
+        const db =
+            readDB();
+
+        const script =
+            db[
+                req.params.id
+            ];
+
+        if (!script) {
+            return block(res);
+        }
+
+        const session =
+            createSession(
+                script.id
+            );
+
+        /*
+            L1 Lua bootstrap.
+        */
+
+        const lua = `
+local HttpService = game:GetService("HttpService")
+
+local SESSION = ${JSON.stringify(
+            session.id
+        )}
+
+local TOKEN = ${JSON.stringify(
+            session.l2.token
+        )}
+
+local NONCE = ${JSON.stringify(
+            session.l2.nonce
+        )}
+
+local URL = ${JSON.stringify(
+            `${DOMAIN}/api/l3`
+        )}
+
+local response = request({
+    Url = URL,
+    Method = "POST",
+    Headers = {
+        ["Content-Type"] = "application/json"
+    },
+    Body = HttpService:JSONEncode({
+        session = SESSION,
+        token = TOKEN,
+        nonce = NONCE
+    })
+})
+
+if response.StatusCode ~= 200 then
+    error("LEXINX BLOCK")
+end
+
+local data = HttpService:JSONDecode(
+    response.Body
+)
+
+if not data.ok then
+    error("LEXINX BLOCK")
+end
+
+print("LEXINX stage:", data.stage)
+`;
+
+        secure(res)
+            .type("text/plain")
+            .send(lua);
+    }
+);
+
+/*
+========================================================
+L2 → L3
+========================================================
+*/
+
+app.get(
+    "/api/l3",
+    (req, res) => {
+
+        return block(res);
+    }
+);
+
+app.post(
+    "/api/l3",
+    (req, res) => {
+
+        if (
+            browserNavigation(req)
+        ) {
+            return block(res);
+        }
+
+        const {
+            session,
+            token,
+            nonce
+        } =
+            req.body || {};
+
+        const s =
+            getSession(
+                session
+            );
+
+        if (!s) {
+            return block(res);
+        }
+
+        if (
+            s.stage !== 2
+        ) {
+            return block(res);
+        }
+
+        if (
+            !consume(
+                s.l2,
+                token,
+                nonce
+            )
+        ) {
+            return block(res);
+        }
+
+        s.l3 =
+            newChallenge();
+
+        s.stage =
+            3;
+
+        secure(res).json({
+
+            ok: true,
+
+            stage: 3,
+
+            session:
+                s.id,
+
+            token:
+                s.l3.token,
+
+            nonce:
+                s.l3.nonce,
+
+            next:
+                `${DOMAIN}/api/l4`
+
+        });
+    }
+);
+
+/*
+========================================================
+L3 → L4
+========================================================
+*/
+
+app.get(
+    "/api/l4",
+    (req, res) => {
+
+        return block(res);
+    }
+);
+
+app.post(
+    "/api/l4",
+    (req, res) => {
+
+        if (
+            browserNavigation(req)
+        ) {
+            return block(res);
+        }
+
+        const {
+            session,
+            token,
+            nonce
+        } =
+            req.body || {};
+
+        const s =
+            getSession(
+                session
+            );
+
+        if (!s) {
+            return block(res);
+        }
+
+        if (
+            s.stage !== 3
+        ) {
+            return block(res);
+        }
+
+        if (
+            !consume(
+                s.l3,
+                token,
+                nonce
+            )
+        ) {
+            return block(res);
+        }
+
+        s.l4 =
+            newChallenge();
+
+        s.stage =
+            4;
+
+        secure(res).json({
+
+            ok: true,
+
+            stage: 4,
+
+            session:
+                s.id,
+
+            token:
+                s.l4.token,
+
+            nonce:
+                s.l4.nonce,
+
+            next:
+                `${DOMAIN}/api/l5`
+
+        });
+    }
+);
+
+/*
+========================================================
+L4 → L5
+========================================================
+*/
+
+app.get(
+    "/api/l5",
+    (req, res) => {
+
+        return block(res);
+    }
+);
+
+app.post(
+    "/api/l5",
+    (req, res) => {
+
+        if (
+            browserNavigation(req)
+        ) {
+            return block(res);
+        }
+
+        const {
+            session,
+            token,
+            nonce
+        } =
+            req.body || {};
+
+        const s =
+            getSession(
+                session
+            );
+
+        if (!s) {
+            return block(res);
+        }
+
+        if (
+            s.stage !== 4
+        ) {
+            return block(res);
+        }
+
+        if (
+            !consume(
+                s.l4,
+                token,
+                nonce
+            )
+        ) {
+            return block(res);
+        }
+
+        s.l5 =
+            newChallenge();
+
+        s.stage =
+            5;
+
+        secure(res).json({
+
+            ok: true,
+
+            stage: 5,
+
+            session:
+                s.id,
+
+            token:
+                s.l5.token,
+
+            nonce:
+                s.l5.nonce,
+
+            next:
+                `${DOMAIN}/api/data`
+
+        });
+    }
+);
+
+/*
+========================================================
+L5 → SOURCE
+========================================================
+*/
+
+app.get(
+    "/api/data",
+    (req, res) => {
+
+        return block(res);
+    }
+);
+
+app.post(
+    "/api/data",
+    (req, res) => {
+
+        if (
+            browserNavigation(req)
+        ) {
+            return block(res);
+        }
+
+        const {
+            session,
+            token,
+            nonce
+        } =
+            req.body || {};
+
+        const s =
+            getSession(
+                session
+            );
+
+        if (!s) {
+            return block(res);
+        }
+
+        if (
+            s.stage !== 5
+        ) {
+            return block(res);
+        }
+
+        if (
+            !consume(
+                s.l5,
+                token,
+                nonce
+            )
+        ) {
+            return block(res);
+        }
+
+        const db =
+            readDB();
+
+        const script =
+            db[
+                s.scriptID
+            ];
+
+        if (!script) {
+
+            sessions.delete(
+                s.id
+            );
+
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "Script not found"
+                });
+        }
+
+        /*
+            Source chỉ xuất hiện
+            ở bước cuối.
+        */
+
+        sessions.delete(
+            s.id
+        );
+
+        secure(res).json({
+
+            ok: true,
+
+            code:
+                script.source
+
+        });
+    }
+);
+
+/*
+========================================================
+LIST
 ========================================================
 */
 
@@ -754,460 +973,12 @@ app.get(
                     })
                 );
 
-        secureHeaders(res);
+        secure(res).json({
 
-        res.json({
             ok: true,
+
             scripts
-        });
-    }
-);
 
-/*
-========================================================
-L1 → L2
-========================================================
-
-GET /api/loader/:id
-
-Browser navigation → 403.
-
-Không trả source.
-Chỉ tạo session.
-========================================================
-*/
-
-app.get(
-    "/api/loader/:id",
-    (req, res) => {
-
-        if (
-            isBrowserNavigation(req)
-        ) {
-            return block(res);
-        }
-
-        const db =
-            readDB();
-
-        const script =
-            db[
-                req.params.id
-            ];
-
-        if (!script) {
-
-            return res
-                .status(404)
-                .type("text/plain")
-                .send(
-                    "LEXINX BLOCK"
-                );
-        }
-
-        const session =
-            createSession(
-                script.id,
-                getIP(req)
-            );
-
-        secureHeaders(res);
-
-        res.json({
-
-            ok: true,
-
-            stage: 2,
-
-            session:
-                session.id,
-
-            token:
-                session.tokens.l2.value,
-
-            nonce:
-                session.tokens.l2.nonce,
-
-            next:
-                `${DOMAIN}/api/l3`
-
-        });
-    }
-);
-
-/*
-========================================================
-L2 → L3
-========================================================
-*/
-
-app.get(
-    "/api/l3",
-    (req, res) => {
-
-        return block(res);
-    }
-);
-
-app.post(
-    "/api/l3",
-    (req, res) => {
-
-        if (
-            isBrowserNavigation(req)
-        ) {
-            return block(res);
-        }
-
-        const {
-            session:
-                sessionID,
-
-            token,
-
-            nonce
-        } =
-            req.body || {};
-
-        const session =
-            getSession(
-                sessionID,
-                req
-            );
-
-        if (!session) {
-            return block(res);
-        }
-
-        if (
-            session.stage !== 2
-        ) {
-
-            return block(res);
-        }
-
-        if (
-            !consumeToken(
-                session.tokens.l2,
-                token,
-                nonce
-            )
-        ) {
-
-            return block(res);
-        }
-
-        session.tokens.l3 =
-            makeToken();
-
-        session.stage =
-            3;
-
-        secureHeaders(res);
-
-        res.json({
-
-            ok: true,
-
-            stage: 3,
-
-            session:
-                session.id,
-
-            token:
-                session.tokens.l3.value,
-
-            nonce:
-                session.tokens.l3.nonce,
-
-            next:
-                `${DOMAIN}/api/l4`
-        });
-    }
-);
-
-/*
-========================================================
-L3 → L4
-========================================================
-*/
-
-app.get(
-    "/api/l4",
-    (req, res) => {
-
-        return block(res);
-    }
-);
-
-app.post(
-    "/api/l4",
-    (req, res) => {
-
-        if (
-            isBrowserNavigation(req)
-        ) {
-            return block(res);
-        }
-
-        const {
-            session:
-                sessionID,
-
-            token,
-
-            nonce
-        } =
-            req.body || {};
-
-        const session =
-            getSession(
-                sessionID,
-                req
-            );
-
-        if (!session) {
-            return block(res);
-        }
-
-        if (
-            session.stage !== 3
-        ) {
-            return block(res);
-        }
-
-        if (
-            !consumeToken(
-                session.tokens.l3,
-                token,
-                nonce
-            )
-        ) {
-            return block(res);
-        }
-
-        session.tokens.l4 =
-            makeToken();
-
-        session.stage =
-            4;
-
-        secureHeaders(res);
-
-        res.json({
-
-            ok: true,
-
-            stage: 4,
-
-            session:
-                session.id,
-
-            token:
-                session.tokens.l4.value,
-
-            nonce:
-                session.tokens.l4.nonce,
-
-            next:
-                `${DOMAIN}/api/l5`
-        });
-    }
-);
-
-/*
-========================================================
-L4 → L5
-========================================================
-*/
-
-app.get(
-    "/api/l5",
-    (req, res) => {
-
-        return block(res);
-    }
-);
-
-app.post(
-    "/api/l5",
-    (req, res) => {
-
-        if (
-            isBrowserNavigation(req)
-        ) {
-            return block(res);
-        }
-
-        const {
-            session:
-                sessionID,
-
-            token,
-
-            nonce
-        } =
-            req.body || {};
-
-        const session =
-            getSession(
-                sessionID,
-                req
-            );
-
-        if (!session) {
-            return block(res);
-        }
-
-        if (
-            session.stage !== 4
-        ) {
-            return block(res);
-        }
-
-        if (
-            !consumeToken(
-                session.tokens.l4,
-                token,
-                nonce
-            )
-        ) {
-            return block(res);
-        }
-
-        session.tokens.l5 =
-            makeToken();
-
-        session.stage =
-            5;
-
-        secureHeaders(res);
-
-        res.json({
-
-            ok: true,
-
-            stage: 5,
-
-            session:
-                session.id,
-
-            token:
-                session.tokens.l5.value,
-
-            nonce:
-                session.tokens.l5.nonce,
-
-            next:
-                `${DOMAIN}/api/data`
-        });
-    }
-);
-
-/*
-========================================================
-L5 → SOURCE
-========================================================
-
-SOURCE CHỈ XUẤT HIỆN Ở ĐÂY.
-========================================================
-*/
-
-app.get(
-    "/api/data",
-    (req, res) => {
-
-        return block(res);
-    }
-);
-
-app.post(
-    "/api/data",
-    (req, res) => {
-
-        if (
-            isBrowserNavigation(req)
-        ) {
-            return block(res);
-        }
-
-        const {
-            session:
-                sessionID,
-
-            token,
-
-            nonce
-        } =
-            req.body || {};
-
-        const session =
-            getSession(
-                sessionID,
-                req
-            );
-
-        if (!session) {
-            return block(res);
-        }
-
-        if (
-            session.stage !== 5
-        ) {
-            return block(res);
-        }
-
-        if (
-            !consumeToken(
-                session.tokens.l5,
-                token,
-                nonce
-            )
-        ) {
-            return block(res);
-        }
-
-        const db =
-            readDB();
-
-        const script =
-            db[
-                session.scriptID
-            ];
-
-        if (!script) {
-
-            sessions.delete(
-                sessionID
-            );
-
-            return res
-                .status(404)
-                .json({
-                    ok: false,
-                    error:
-                        "SCRIPT NOT FOUND"
-                });
-        }
-
-        /*
-            Xóa session ngay trước khi
-            trả source để token không
-            thể replay.
-        */
-
-        sessions.delete(
-            sessionID
-        );
-
-        secureHeaders(res);
-
-        res.json({
-
-            ok: true,
-
-            code:
-                script.source
         });
     }
 );
@@ -1246,9 +1017,7 @@ app.delete(
 
         writeDB(db);
 
-        secureHeaders(res);
-
-        res.json({
+        secure(res).json({
             ok: true
         });
     }
@@ -1288,7 +1057,7 @@ app.use(
 
 /*
 ========================================================
-CLEANUP
+SESSION CLEANUP
 ========================================================
 */
 
@@ -1317,30 +1086,6 @@ setInterval(
             }
         }
 
-        /*
-            Dọn rate-limit records.
-        */
-
-        for (
-            const [
-                ip,
-                record
-            ]
-            of rateMap
-        ) {
-
-            if (
-                now >
-                record.resetAt +
-                RATE_WINDOW
-            ) {
-
-                rateMap.delete(
-                    ip
-                );
-            }
-        }
-
     },
     30 * 1000
 );
@@ -1356,7 +1101,7 @@ app.listen(
     () => {
 
         console.log(
-            "======================================"
+            "================================"
         );
 
         console.log(
@@ -1374,8 +1119,8 @@ app.listen(
         );
 
         console.log(
-            "CHAIN:",
-            "L1 -> L2 -> L3 -> L4 -> L5 -> DATA"
+            "FLOW:",
+            "L1 -> L2 -> L3 -> L4 -> L5 -> SOURCE"
         );
 
         console.log(
@@ -1391,15 +1136,7 @@ app.listen(
         );
 
         console.log(
-            "RATE LIMIT:",
-            RATE_LIMIT,
-            "/",
-            RATE_WINDOW,
-            "ms"
-        );
-
-        console.log(
-            "======================================"
+            "================================"
         );
     }
 );
