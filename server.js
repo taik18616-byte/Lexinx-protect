@@ -1,854 +1,1055 @@
-const express = require("express");
-const crypto = require("crypto");
-const fs = require("fs");
-const path = require("path");
+<body>
 
-const app = express();
+<div class="container">
 
-const PORT = process.env.PORT || 3000;
-const DOMAIN =
-    process.env.DOMAIN ||
-    "https://Lexinx-protect-2.onrender.com";
+    <!-- REGISTER -->
+    <div id="registerPage" class="card">
 
-const DATA_DIR = path.join(__dirname, "data");
-const USERS_FILE = path.join(DATA_DIR, "users.json");
-const SCRIPTS_FILE = path.join(DATA_DIR, "scripts.json");
-const SESSIONS_FILE = path.join(DATA_DIR, "sessions.json");
-const PUBLIC_DIR = path.join(__dirname, "public");
+        <h1>LEXINX PROTECT</h1>
+        <h2>Create Account</h2>
 
-const ONE_TIME_CODES = new Set([
-    "LEXINX_6725YE7726d622",
-    "LEXINX_8837yYe7726722"
-]);
+        <input
+            id="registerUsername"
+            placeholder="Username"
+            autocomplete="username">
 
-const PERMANENT_CODE =
-    "LEXINX_King_2036";
+        <input
+            id="registerPassword"
+            type="password"
+            placeholder="Password"
+            autocomplete="new-password">
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
-fs.mkdirSync(PUBLIC_DIR, { recursive: true });
+        <input
+            id="registerCode"
+            placeholder="Access Code">
 
-function ensureFile(file) {
-    if (!fs.existsSync(file)) {
-        fs.writeFileSync(file, "{}", "utf8");
-    }
+        <button onclick="register()">
+            Create Account
+        </button>
+
+        <p id="registerStatus" class="status"></p>
+
+        <button
+            class="gray"
+            onclick="showLogin()">
+            Already have an account? Login
+        </button>
+
+    </div>
+
+
+    <!-- LOGIN -->
+    <div id="loginPage" class="card hidden">
+
+        <h1>LEXINX PROTECT</h1>
+        <h2>Login</h2>
+
+        <input
+            id="loginUsername"
+            placeholder="Username"
+            autocomplete="username">
+
+        <input
+            id="loginPassword"
+            type="password"
+            placeholder="Password"
+            autocomplete="current-password">
+
+        <button onclick="login()">
+            Login
+        </button>
+
+        <p id="loginStatus" class="status"></p>
+
+        <button
+            class="gray"
+            onclick="showRegister()">
+            Create new account
+        </button>
+
+    </div>
+
+
+    <!-- DASHBOARD -->
+    <div id="dashboardPage" class="hidden">
+
+        <div class="card">
+
+            <div class="top">
+
+                <div>
+                    <h1>LEXINX PROTECT</h1>
+
+                    <span class="badge">
+                        SCRIPT PANEL
+                    </span>
+                </div>
+
+                <button
+                    class="gray"
+                    onclick="logout()">
+                    Logout
+                </button>
+
+            </div>
+
+        </div>
+
+
+        <!-- ACCOUNT -->
+        <div class="card">
+
+            <h2>Account</h2>
+
+            <div id="accountInfo">
+                Loading...
+            </div>
+
+        </div>
+
+
+        <!-- SCRIPT EDITOR -->
+        <div class="card">
+
+            <h2 id="editorTitle">
+                Create Script
+            </h2>
+
+            <input
+                id="scriptName"
+                placeholder="Script name">
+
+            <textarea
+                id="scriptSource"
+                placeholder="Paste Lua source here..."></textarea>
+
+            <button
+                id="createBtn"
+                onclick="createScript()">
+                Create Script
+            </button>
+
+            <button
+                id="saveBtn"
+                class="hidden"
+                onclick="saveScript()">
+                Save Changes
+            </button>
+
+            <button
+                id="cancelBtn"
+                class="gray hidden"
+                onclick="cancelEdit()">
+                Cancel
+            </button>
+
+            <div
+                id="editorStatus"
+                class="status">
+            </div>
+
+        </div>
+
+
+        <!-- SCRIPT LIST -->
+        <div class="card">
+
+            <div class="top">
+
+                <h2>
+                    My Scripts
+                </h2>
+
+                <button
+                    class="gray"
+                    onclick="loadScripts()">
+                    Refresh
+                </button>
+
+            </div>
+
+            <div id="scriptList">
+                Loading...
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<script>
+
+let editingID = null;
+
+
+/* =========================================================
+   PAGE SWITCH
+========================================================= */
+
+function hideAllPages(){
+
+    document
+        .getElementById("registerPage")
+        .classList.add("hidden");
+
+    document
+        .getElementById("loginPage")
+        .classList.add("hidden");
+
+    document
+        .getElementById("dashboardPage")
+        .classList.add("hidden");
 }
 
-ensureFile(USERS_FILE);
-ensureFile(SCRIPTS_FILE);
-ensureFile(SESSIONS_FILE);
 
-app.use(express.json({ limit: "15mb" }));
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(PUBLIC_DIR));
+function showRegister(){
 
-function readJSON(file) {
-    try {
-        return JSON.parse(fs.readFileSync(file, "utf8"));
-    } catch {
-        return {};
-    }
+    hideAllPages();
+
+    document
+        .getElementById("registerPage")
+        .classList.remove("hidden");
 }
 
-function writeJSON(file, data) {
-    fs.writeFileSync(
-        file,
-        JSON.stringify(data, null, 2),
-        "utf8"
-    );
+
+function showLogin(){
+
+    hideAllPages();
+
+    document
+        .getElementById("loginPage")
+        .classList.remove("hidden");
 }
 
-function randomID(bytes = 16) {
-    return crypto.randomBytes(bytes).toString("hex");
+
+function showDashboard(){
+
+    hideAllPages();
+
+    document
+        .getElementById("dashboardPage")
+        .classList.remove("hidden");
+
+    loadAccount();
+    loadScripts();
 }
 
-function hashPassword(password, salt) {
-    return crypto
-        .scryptSync(password, salt, 64)
-        .toString("hex");
-}
 
-function verifyPassword(password, salt, storedHash) {
-    const hash = hashPassword(password, salt);
+/* =========================================================
+   API
+========================================================= */
 
-    try {
-        return crypto.timingSafeEqual(
-            Buffer.from(hash, "hex"),
-            Buffer.from(storedHash, "hex")
+async function api(url, options = {}){
+
+    const response =
+        await fetch(
+            url,
+            {
+                credentials:"same-origin",
+                ...options,
+
+                headers:{
+                    "Content-Type":
+                        "application/json",
+
+                    ...(options.headers || {})
+                }
+            }
         );
-    } catch {
-        return false;
+
+    let data;
+
+    try{
+
+        data =
+            await response.json();
+
+    }catch{
+
+        data = {
+            ok:false,
+            error:
+                await response.text()
+        };
     }
-}
-
-function cleanName(name) {
-    return String(name || "Script")
-        .replace(/[^\w .-]/g, "_")
-        .slice(0, 80);
-}
-
-/* =========================================================
-   COOKIE
-========================================================= */
-
-function parseCookies(req) {
-    const header = req.headers.cookie || "";
-    const cookies = {};
-
-    for (const part of header.split(";")) {
-        const index = part.indexOf("=");
-
-        if (index === -1) continue;
-
-        const key = part.slice(0, index).trim();
-        const value = part.slice(index + 1).trim();
-
-        cookies[key] = decodeURIComponent(value);
-    }
-
-    return cookies;
-}
-
-function setSessionCookie(res, token) {
-    res.setHeader(
-        "Set-Cookie",
-        `LEXINX_SESSION=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Lax`
-    );
-}
-
-function clearSessionCookie(res) {
-    res.setHeader(
-        "Set-Cookie",
-        "LEXINX_SESSION=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax"
-    );
-}
-
-/* =========================================================
-   SESSION
-========================================================= */
-
-function getSession(req) {
-    const cookies = parseCookies(req);
-    const token = cookies.LEXINX_SESSION;
-
-    if (!token) return null;
-
-    const sessions = readJSON(SESSIONS_FILE);
-    const session = sessions[token];
-
-    if (!session) return null;
-
-    const maxAge =
-        30 * 24 * 60 * 60 * 1000;
-
-    if (Date.now() - session.createdAt > maxAge) {
-        delete sessions[token];
-        writeJSON(SESSIONS_FILE, sessions);
-        return null;
-    }
-
-    const users = readJSON(USERS_FILE);
-    const user = users[session.username];
-
-    if (!user) return null;
 
     return {
-        token,
-        username: session.username,
-        user
+        response,
+        data
     };
 }
 
-function requireAuth(req, res, next) {
-    const session = getSession(req);
-
-    if (!session) {
-        return res.status(401).json({
-            ok: false,
-            error: "Unauthorized"
-        });
-    }
-
-    req.auth = session;
-    next();
-}
-
-/* =========================================================
-   HOME
-========================================================= */
-
-app.get("/", (req, res) => {
-    res.sendFile(
-        path.join(PUBLIC_DIR, "index.html")
-    );
-});
 
 /* =========================================================
    REGISTER
 ========================================================= */
 
-app.post("/api/register", (req, res) => {
+async function register(){
+
     const username =
-        String(req.body?.username || "").trim();
+        document
+            .getElementById(
+                "registerUsername"
+            )
+            .value
+            .trim();
 
     const password =
-        String(req.body?.password || "");
+        document
+            .getElementById(
+                "registerPassword"
+            )
+            .value;
 
     const code =
-        String(req.body?.code || "").trim();
+        document
+            .getElementById(
+                "registerCode"
+            )
+            .value
+            .trim();
 
-    if (!/^[a-zA-Z0-9_]{3,32}$/.test(username)) {
-        return res.status(400).json({
-            ok: false,
-            error:
-                "Username must be 3-32 characters"
-        });
+    const status =
+        document
+            .getElementById(
+                "registerStatus"
+            );
+
+    if(!username ||
+       !password ||
+       !code){
+
+        status.textContent =
+            "Please fill in all fields.";
+
+        return;
     }
 
-    if (password.length < 6) {
-        return res.status(400).json({
-            ok: false,
-            error:
-                "Password must be at least 6 characters"
-        });
-    }
+    status.textContent =
+        "Creating account...";
 
-    if (!code) {
-        return res.status(400).json({
-            ok: false,
-            error: "Access code required"
-        });
-    }
+    const result =
+        await api(
+            "/api/register",
+            {
+                method:"POST",
 
-    const users = readJSON(USERS_FILE);
+                body:
+                    JSON.stringify({
+                        username,
+                        password,
+                        code
+                    })
+            }
+        );
 
-    if (users[username]) {
-        return res.status(409).json({
-            ok: false,
-            error: "Username already exists"
-        });
-    }
+    if(
+        !result.response.ok ||
+        !result.data.ok
+    ){
 
-    let accessType;
+        status.textContent =
+            result.data.error ||
+            "Registration failed.";
 
-    if (code === PERMANENT_CODE) {
-        accessType = "permanent";
-    } else if (ONE_TIME_CODES.has(code)) {
-        accessType = "one-time";
-    } else {
-        return res.status(403).json({
-            ok: false,
-            error: "Invalid access code"
-        });
+        return;
     }
 
     /*
-       Xóa mã one-time sau khi
-       đăng ký thành công.
+       QUAN TRỌNG:
+
+       Không vào dashboard.
+       Không đăng nhập tự động.
+
+       Chuyển thẳng sang LOGIN.
     */
 
-    if (accessType === "one-time") {
-        ONE_TIME_CODES.delete(code);
-    }
+    document
+        .getElementById(
+            "loginUsername"
+        )
+        .value =
+        username;
 
-    const salt =
-        crypto.randomBytes(32).toString("hex");
+    document
+        .getElementById(
+            "loginPassword"
+        )
+        .value = "";
 
-    const passwordHash =
-        hashPassword(password, salt);
+    document
+        .getElementById(
+            "loginStatus"
+        )
+        .textContent =
+        "Account created. Please login.";
 
-    users[username] = {
-        username,
-        passwordHash,
-        salt,
-        accessType,
-        createdAt: Date.now(),
-        scripts: []
-    };
+    showLogin();
+}
 
-    writeJSON(USERS_FILE, users);
-
-    const sessions =
-        readJSON(SESSIONS_FILE);
-
-    const sessionToken =
-        randomID(48);
-
-    sessions[sessionToken] = {
-        username,
-        createdAt: Date.now()
-    };
-
-    writeJSON(
-        SESSIONS_FILE,
-        sessions
-    );
-
-    setSessionCookie(
-        res,
-        sessionToken
-    );
-
-    res.json({
-        ok: true,
-        username,
-        accessType
-    });
-});
 
 /* =========================================================
    LOGIN
 ========================================================= */
 
-app.post("/api/login", (req, res) => {
+async function login(){
+
     const username =
-        String(req.body?.username || "").trim();
+        document
+            .getElementById(
+                "loginUsername"
+            )
+            .value
+            .trim();
 
     const password =
-        String(req.body?.password || "");
+        document
+            .getElementById(
+                "loginPassword"
+            )
+            .value;
 
-    const users = readJSON(USERS_FILE);
-    const user = users[username];
+    const status =
+        document
+            .getElementById(
+                "loginStatus"
+            );
 
-    if (!user) {
-        return res.status(401).json({
-            ok: false,
-            error:
-                "Invalid username or password"
-        });
+    if(!username || !password){
+
+        status.textContent =
+            "Enter username and password.";
+
+        return;
     }
 
-    if (
-        !verifyPassword(
-            password,
-            user.salt,
-            user.passwordHash
-        )
-    ) {
-        return res.status(401).json({
-            ok: false,
-            error:
-                "Invalid username or password"
-        });
+    status.textContent =
+        "Logging in...";
+
+    const result =
+        await api(
+            "/api/login",
+            {
+                method:"POST",
+
+                body:
+                    JSON.stringify({
+                        username,
+                        password
+                    })
+            }
+        );
+
+    if(
+        !result.response.ok ||
+        !result.data.ok
+    ){
+
+        status.textContent =
+            result.data.error ||
+            "Login failed.";
+
+        return;
     }
 
-    const sessions =
-        readJSON(SESSIONS_FILE);
+    /*
+       Login thành công
+       → Dashboard
+    */
 
-    const token =
-        randomID(48);
+    showDashboard();
+}
 
-    sessions[token] = {
-        username,
-        createdAt: Date.now()
-    };
-
-    writeJSON(
-        SESSIONS_FILE,
-        sessions
-    );
-
-    setSessionCookie(
-        res,
-        token
-    );
-
-    res.json({
-        ok: true,
-        username,
-        accessType:
-            user.accessType
-    });
-});
 
 /* =========================================================
-   LOGOUT
+   CHECK SESSION
 ========================================================= */
 
-app.post("/api/logout", (req, res) => {
-    const cookies = parseCookies(req);
-    const token = cookies.LEXINX_SESSION;
+async function checkSession(){
 
-    if (token) {
-        const sessions =
-            readJSON(SESSIONS_FILE);
+    const result =
+        await api("/api/me");
 
-        delete sessions[token];
+    if(
+        result.response.ok &&
+        result.data.ok
+    ){
 
-        writeJSON(
-            SESSIONS_FILE,
-            sessions
-        );
+        showDashboard();
+
+    }else{
+
+        showRegister();
     }
+}
 
-    clearSessionCookie(res);
-
-    res.json({
-        ok: true
-    });
-});
 
 /* =========================================================
    ACCOUNT
 ========================================================= */
 
-app.get("/api/me", requireAuth, (req, res) => {
-    const user = req.auth.user;
+async function loadAccount(){
 
-    res.json({
-        ok: true,
-        username: user.username,
-        accessType: user.accessType,
-        createdAt: user.createdAt,
-        scriptCount: user.scripts.length
-    });
-});
+    const result =
+        await api("/api/me");
+
+    if(
+        !result.response.ok ||
+        !result.data.ok
+    ){
+
+        showLogin();
+        return;
+    }
+
+    const account =
+        result.data;
+
+    document
+        .getElementById(
+            "accountInfo"
+        )
+        .innerHTML =
+
+        `
+        <b>Username:</b>
+        ${escapeHTML(account.username)}
+        <br>
+
+        <b>Access:</b>
+        ${escapeHTML(account.accessType)}
+        <br>
+
+        <b>Scripts:</b>
+        ${account.scriptCount}
+        `;
+}
+
+
+/* =========================================================
+   LOGOUT
+========================================================= */
+
+async function logout(){
+
+    await api(
+        "/api/logout",
+        {
+            method:"POST"
+        }
+    );
+
+    editingID = null;
+
+    cancelEdit();
+
+    /*
+       Logout → Login
+       Không về Register.
+    */
+
+    showLogin();
+}
+
 
 /* =========================================================
    CREATE SCRIPT
 ========================================================= */
 
-app.post("/api/create", requireAuth, (req, res) => {
-    const source =
-        typeof req.body?.source === "string"
-            ? req.body.source
-            : "";
-
-    if (!source.trim()) {
-        return res.status(400).json({
-            ok: false,
-            error: "Script is empty"
-        });
-    }
+async function createScript(){
 
     const name =
-        cleanName(req.body?.name);
+        document
+            .getElementById(
+                "scriptName"
+            )
+            .value
+            .trim();
 
-    const id =
-        randomID(16);
+    const source =
+        document
+            .getElementById(
+                "scriptSource"
+            )
+            .value;
 
-    const scriptToken =
-        randomID(32);
+    const status =
+        document
+            .getElementById(
+                "editorStatus"
+            );
 
-    const db =
-        readJSON(SCRIPTS_FILE);
+    if(!source.trim()){
 
-    db[id] = {
-        id,
-        name,
-        source,
-        owner: req.auth.username,
-        token: scriptToken,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-    };
+        status.textContent =
+            "Script is empty.";
 
-    writeJSON(
-        SCRIPTS_FILE,
-        db
-    );
+        return;
+    }
 
-    const users =
-        readJSON(USERS_FILE);
+    status.textContent =
+        "Creating...";
 
-    users[
-        req.auth.username
-    ].scripts.push(id);
+    const result =
+        await api(
+            "/api/create",
+            {
+                method:"POST",
 
-    writeJSON(
-        USERS_FILE,
-        users
-    );
+                body:
+                    JSON.stringify({
+                        name,
+                        source
+                    })
+            }
+        );
 
-    const endpoint =
-        `${DOMAIN}/api/${id}/${scriptToken}`;
+    if(
+        !result.response.ok ||
+        !result.data.ok
+    ){
 
-    const loader =
-        `loadstring(game:HttpGet("${endpoint}"))()`;
+        status.textContent =
+            result.data.error ||
+            "Create failed.";
 
-    res.json({
-        ok: true,
-        id,
-        name,
-        endpoint,
-        loader
-    });
-});
+        return;
+    }
+
+    status.textContent =
+        "Script created successfully.";
+
+    document
+        .getElementById(
+            "scriptName"
+        )
+        .value = "";
+
+    document
+        .getElementById(
+            "scriptSource"
+        )
+        .value = "";
+
+    loadAccount();
+    loadScripts();
+}
+
 
 /* =========================================================
-   LIST SCRIPTS
+   LOAD SCRIPTS
 ========================================================= */
 
-app.get("/api/scripts", requireAuth, (req, res) => {
-    const db =
-        readJSON(SCRIPTS_FILE);
+async function loadScripts(){
 
-    const ids =
-        req.auth.user.scripts;
+    const list =
+        document
+            .getElementById(
+                "scriptList"
+            );
+
+    list.textContent =
+        "Loading...";
+
+    const result =
+        await api(
+            "/api/scripts"
+        );
+
+    if(
+        !result.response.ok ||
+        !result.data.ok
+    ){
+
+        list.textContent =
+            result.data.error ||
+            "Unable to load scripts.";
+
+        return;
+    }
 
     const scripts =
-        ids
-            .map(id => db[id])
-            .filter(Boolean)
+        result.data.scripts;
+
+    if(!scripts.length){
+
+        list.innerHTML =
+            "<p>No scripts yet.</p>";
+
+        return;
+    }
+
+    list.innerHTML =
+        scripts
             .map(script => {
 
-                const endpoint =
-                    `${DOMAIN}/api/${script.id}/${script.token}`;
+                return `
+                <div class="script">
 
-                return {
-                    id: script.id,
-                    name: script.name,
-                    createdAt: script.createdAt,
-                    updatedAt: script.updatedAt,
+                    <div class="script-name">
+                        ${escapeHTML(
+                            script.name
+                        )}
+                    </div>
 
-                    endpoint,
+                    <div class="small">
+                        ID:
+                        ${escapeHTML(
+                            script.id
+                        )}
+                    </div>
 
-                    loader:
-                        `loadstring(game:HttpGet("${endpoint}"))()`
-                };
+                    <div class="loader">
+                        ${escapeHTML(
+                            script.loader
+                        )}
+                    </div>
+
+                    <br>
+
+                    <button
+                        onclick='copyText(${JSON.stringify(script.loader)})'>
+                        Copy Loader
+                    </button>
+
+                    <button
+                        class="gray"
+                        onclick='editScript(${JSON.stringify(script.id)})'>
+                        Edit
+                    </button>
+
+                    <button
+                        class="red"
+                        onclick='deleteScript(${JSON.stringify(script.id)})'>
+                        Delete
+                    </button>
+
+                </div>
+                `;
+
             })
-            .reverse();
+            .join("");
+}
 
-    res.json({
-        ok: true,
-        scripts
+
+/* =========================================================
+   EDIT
+========================================================= */
+
+async function editScript(id){
+
+    const result =
+        await api(
+            "/api/scripts/" +
+            encodeURIComponent(id)
+        );
+
+    if(
+        !result.response.ok ||
+        !result.data.ok
+    ){
+
+        alert(
+            result.data.error ||
+            "Unable to load script."
+        );
+
+        return;
+    }
+
+    const script =
+        result.data.script;
+
+    editingID =
+        script.id;
+
+    document
+        .getElementById(
+            "scriptName"
+        )
+        .value =
+        script.name;
+
+    document
+        .getElementById(
+            "scriptSource"
+        )
+        .value =
+        script.source;
+
+    document
+        .getElementById(
+            "editorTitle"
+        )
+        .textContent =
+        "Edit Script";
+
+    document
+        .getElementById(
+            "createBtn"
+        )
+        .classList
+        .add("hidden");
+
+    document
+        .getElementById(
+            "saveBtn"
+        )
+        .classList
+        .remove("hidden");
+
+    document
+        .getElementById(
+            "cancelBtn"
+        )
+        .classList
+        .remove("hidden");
+
+    window.scrollTo({
+        top:0,
+        behavior:"smooth"
     });
-});
+}
+
 
 /* =========================================================
-   GET ONE SCRIPT FOR EDITOR
+   SAVE
 ========================================================= */
 
-app.get(
-    "/api/scripts/:id",
-    requireAuth,
-    (req, res) => {
+async function saveScript(){
 
-        const db =
-            readJSON(SCRIPTS_FILE);
+    if(!editingID)
+        return;
 
-        const script =
-            db[req.params.id];
+    const name =
+        document
+            .getElementById(
+                "scriptName"
+            )
+            .value
+            .trim();
 
-        if (!script) {
-            return res.status(404).json({
-                ok: false,
-                error:
-                    "Script not found"
-            });
-        }
+    const source =
+        document
+            .getElementById(
+                "scriptSource"
+            )
+            .value;
 
-        if (
-            script.owner !==
-            req.auth.username
-        ) {
-            return res.status(403).json({
-                ok: false,
-                error:
-                    "Forbidden"
-            });
-        }
+    const result =
+        await api(
+            "/api/scripts/" +
+            encodeURIComponent(
+                editingID
+            ),
+            {
+                method:"PUT",
 
-        res.json({
-            ok: true,
-            script: {
-                id: script.id,
-                name: script.name,
-                source: script.source,
-                createdAt: script.createdAt,
-                updatedAt: script.updatedAt
+                body:
+                    JSON.stringify({
+                        name,
+                        source
+                    })
             }
-        });
-    }
-);
-
-/* =========================================================
-   EDIT SCRIPT
-========================================================= */
-
-app.put(
-    "/api/scripts/:id",
-    requireAuth,
-    (req, res) => {
-
-        const id =
-            req.params.id;
-
-        const db =
-            readJSON(SCRIPTS_FILE);
-
-        const script =
-            db[id];
-
-        if (!script) {
-            return res.status(404).json({
-                ok: false,
-                error:
-                    "Script not found"
-            });
-        }
-
-        /*
-           Chỉ owner mới được sửa.
-        */
-
-        if (
-            script.owner !==
-            req.auth.username
-        ) {
-            return res.status(403).json({
-                ok: false,
-                error:
-                    "Forbidden"
-            });
-        }
-
-        const newSource =
-            typeof req.body?.source ===
-            "string"
-                ? req.body.source
-                : script.source;
-
-        const newName =
-            req.body?.name !== undefined
-                ? cleanName(req.body.name)
-                : script.name;
-
-        if (!newSource.trim()) {
-            return res.status(400).json({
-                ok: false,
-                error:
-                    "Script cannot be empty"
-            });
-        }
-
-        /*
-           Cập nhật source.
-
-           ID + token KHÔNG đổi.
-           Loader cũ vẫn chạy source mới.
-        */
-
-        script.name =
-            newName;
-
-        script.source =
-            newSource;
-
-        script.updatedAt =
-            Date.now();
-
-        db[id] =
-            script;
-
-        writeJSON(
-            SCRIPTS_FILE,
-            db
         );
 
-        const endpoint =
-            `${DOMAIN}/api/${script.id}/${script.token}`;
+    if(
+        !result.response.ok ||
+        !result.data.ok
+    ){
 
-        const loader =
-            `loadstring(game:HttpGet("${endpoint}"))()`;
+        document
+            .getElementById(
+                "editorStatus"
+            )
+            .textContent =
+            result.data.error ||
+            "Save failed.";
 
-        res.json({
-            ok: true,
-
-            message:
-                "Script updated",
-
-            id:
-                script.id,
-
-            name:
-                script.name,
-
-            updatedAt:
-                script.updatedAt,
-
-            endpoint,
-
-            loader
-        });
+        return;
     }
-);
+
+    document
+        .getElementById(
+            "editorStatus"
+        )
+        .textContent =
+        "Saved successfully.";
+
+    loadAccount();
+    loadScripts();
+}
+
 
 /* =========================================================
-   DELETE SCRIPT
+   CANCEL EDIT
 ========================================================= */
 
-app.delete(
-    "/api/scripts/:id",
-    requireAuth,
-    (req, res) => {
+function cancelEdit(){
 
-        const id =
-            req.params.id;
+    editingID = null;
 
-        const db =
-            readJSON(SCRIPTS_FILE);
+    document
+        .getElementById(
+            "editorTitle"
+        )
+        .textContent =
+        "Create Script";
 
-        const script =
-            db[id];
+    document
+        .getElementById(
+            "createBtn"
+        )
+        .classList
+        .remove("hidden");
 
-        if (!script) {
-            return res.status(404).json({
-                ok: false,
-                error:
-                    "Script not found"
-            });
-        }
+    document
+        .getElementById(
+            "saveBtn"
+        )
+        .classList
+        .add("hidden");
 
-        if (
-            script.owner !==
-            req.auth.username
-        ) {
-            return res.status(403).json({
-                ok: false,
-                error:
-                    "Forbidden"
-            });
-        }
+    document
+        .getElementById(
+            "cancelBtn"
+        )
+        .classList
+        .add("hidden");
 
-        delete db[id];
+    document
+        .getElementById(
+            "scriptName"
+        )
+        .value = "";
 
-        writeJSON(
-            SCRIPTS_FILE,
-            db
+    document
+        .getElementById(
+            "scriptSource"
+        )
+        .value = "";
+
+    document
+        .getElementById(
+            "editorStatus"
+        )
+        .textContent = "";
+}
+
+
+/* =========================================================
+   DELETE
+========================================================= */
+
+async function deleteScript(id){
+
+    if(
+        !confirm(
+            "Delete this script?"
+        )
+    ){
+        return;
+    }
+
+    const result =
+        await api(
+            "/api/scripts/" +
+            encodeURIComponent(id),
+            {
+                method:"DELETE"
+            }
         );
 
-        const users =
-            readJSON(USERS_FILE);
+    if(
+        !result.response.ok ||
+        !result.data.ok
+    ){
 
-        users[
-            req.auth.username
-        ].scripts =
-            users[
-                req.auth.username
-            ].scripts.filter(
-                x => x !== id
+        alert(
+            result.data.error ||
+            "Delete failed."
+        );
+
+        return;
+    }
+
+    if(editingID === id){
+
+        cancelEdit();
+    }
+
+    loadAccount();
+    loadScripts();
+}
+
+
+/* =========================================================
+   COPY LOADER
+========================================================= */
+
+async function copyText(text){
+
+    try{
+
+        await navigator
+            .clipboard
+            .writeText(text);
+
+        alert(
+            "Loader copied!"
+        );
+
+    }catch{
+
+        const textarea =
+            document.createElement(
+                "textarea"
             );
 
-        writeJSON(
-            USERS_FILE,
-            users
+        textarea.value = text;
+
+        document
+            .body
+            .appendChild(textarea);
+
+        textarea.select();
+
+        document.execCommand(
+            "copy"
         );
 
-        res.json({
-            ok: true
-        });
-    }
-);
+        textarea.remove();
 
-/* =========================================================
-   LUA SOURCE ENDPOINT
-========================================================= */
-
-app.get(
-    "/api/:id/:token",
-    (req, res) => {
-
-        const {
-            id,
-            token
-        } = req.params;
-
-        const db =
-            readJSON(SCRIPTS_FILE);
-
-        const script =
-            db[id];
-
-        if (!script) {
-            return res
-                .status(404)
-                .type("text/plain")
-                .send(
-                    "Blocked by LEXINX v50 protection"
-                );
-        }
-
-        if (
-            token !==
-            script.token
-        ) {
-            return res
-                .status(403)
-                .type("text/plain")
-                .send(
-                    "Blocked by LEXINX v50 protection"
-                );
-        }
-
-        /*
-           Loader lấy source mới nhất.
-           Vì script.source đã được edit
-           nên loader cũ tự nhận source mới.
-        */
-
-        res
-            .status(200)
-            .type("text/plain")
-            .set(
-                "Cache-Control",
-                "no-store, no-cache, must-revalidate"
-            )
-            .set(
-                "Pragma",
-                "no-cache"
-            )
-            .set(
-                "X-Content-Type-Options",
-                "nosniff"
-            )
-            .send(
-                script.source
-            );
-    }
-);
-
-/* =========================================================
-   404
-========================================================= */
-
-app.use((req, res) => {
-    res
-        .status(404)
-        .type("text/plain")
-        .send(
-            "Blocked by LEXINX v50 protection"
+        alert(
+            "Loader copied!"
         );
-});
+    }
+}
+
+
+/* =========================================================
+   ESCAPE
+========================================================= */
+
+function escapeHTML(value){
+
+    return String(value)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+}
+
 
 /* =========================================================
    START
 ========================================================= */
 
-app.listen(
-    PORT,
-    "0.0.0.0",
-    () => {
+checkSession();
 
-        console.log(
-            "================================="
-        );
+</script>
 
-        console.log(
-            "LEXINX PROTECT ONLINE"
-        );
-
-        console.log(
-            "PORT:",
-            PORT
-        );
-
-        console.log(
-            "DOMAIN:",
-            DOMAIN
-        );
-
-        console.log(
-            "================================="
-        );
-    }
-);
+</body>
