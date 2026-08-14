@@ -1,5 +1,4 @@
 const express = require("express");
-const multer = require("multer");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -14,43 +13,11 @@ const DB_FILE = path.join(DATA_DIR, "scripts.json");
 fs.mkdirSync(SCRIPT_DIR, { recursive: true });
 
 if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, "{}");
+    fs.writeFileSync(DB_FILE, "{}", "utf8");
 }
 
-app.use(express.json({ limit: "3mb" }));
-app.use(express.urlencoded({
-    extended: true,
-    limit: "3mb"
-}));
-
-app.use(express.static(
-    path.join(__dirname, "public")
-));
-
-const upload = multer({
-    storage: multer.memoryStorage(),
-
-    limits: {
-        fileSize: 2 * 1024 * 1024
-    },
-
-    fileFilter: (req, file, cb) => {
-
-        const ext =
-            path.extname(file.originalname)
-                .toLowerCase();
-
-        if (ext !== ".lua" && ext !== ".txt") {
-            return cb(
-                new Error(
-                    "Only .lua and .txt files are allowed"
-                )
-            );
-        }
-
-        cb(null, true);
-    }
-});
+app.use(express.json({ limit: "10mb" }));
+app.use(express.static(path.join(__dirname, "public")));
 
 function readDB() {
     try {
@@ -70,372 +37,233 @@ function writeDB(db) {
     );
 }
 
-function createID() {
-
+function generateID() {
     const db = readDB();
 
     let id;
 
     do {
-        id = crypto
-            .randomBytes(12)
-            .toString("base64url");
+        id = crypto.randomBytes(12).toString("hex");
     } while (db[id]);
 
     return id;
 }
 
 function cleanName(name) {
-
-    return String(name)
+    return String(name || "Script")
         .replace(/[^a-zA-Z0-9._-]/g, "_")
         .slice(0, 100);
 }
 
-/*
-==================================================
-HOME
-==================================================
-*/
+/* =========================
+   HOME
+========================= */
 
 app.get("/", (req, res) => {
-
     res.sendFile(
-        path.join(
-            __dirname,
-            "public",
-            "index.html"
-        )
+        path.join(__dirname, "public", "index.html")
     );
 });
 
-/*
-==================================================
-UPLOAD FILE
-==================================================
-*/
+/* =========================
+   CREATE SCRIPT
+========================= */
 
-app.post(
-    "/api/upload",
-    upload.single("script"),
-    (req, res) => {
+app.post("/api/create", (req, res) => {
+    try {
+        const code =
+            typeof req.body.code === "string"
+                ? req.body.code
+                : "";
 
-        try {
-
-            if (!req.file) {
-                return res.status(400).json({
-                    ok: false,
-                    error: "No file uploaded"
-                });
-            }
-
-            const source =
-                req.file.buffer.toString("utf8");
-
-            if (!source.trim()) {
-                return res.status(400).json({
-                    ok: false,
-                    error: "Script is empty"
-                });
-            }
-
-            const id = createID();
-
-            const filename =
-                id + ".lua";
-
-            fs.writeFileSync(
-                path.join(
-                    SCRIPT_DIR,
-                    filename
-                ),
-                source,
-                "utf8"
+        const name =
+            cleanName(
+                req.body.name || "Script"
             );
 
-            const db = readDB();
-
-            db[id] = {
-                id,
-                name: cleanName(
-                    req.file.originalname
-                ),
-                filename,
-                createdAt:
-                    new Date().toISOString()
-            };
-
-            writeDB(db);
-
-            const loader =
-                `loadstring(game:HttpGet("${req.protocol}://${req.get("host")}/api/${id}"))()`;
-
-            res.json({
-                ok: true,
-                id,
-                name: db[id].name,
-                loader
-            });
-
-        } catch (error) {
-
-            console.error(error);
-
-            res.status(500).json({
+        if (!code.trim()) {
+            return res.status(400).json({
                 ok: false,
-                error: error.message
+                error: "Script is empty"
             });
         }
+
+        const id = generateID();
+
+        const filename = `${id}.lua`;
+
+        fs.writeFileSync(
+            path.join(SCRIPT_DIR, filename),
+            code,
+            "utf8"
+        );
+
+        const db = readDB();
+
+        db[id] = {
+            id,
+            name,
+            filename,
+            createdAt: new Date().toISOString()
+        };
+
+        writeDB(db);
+
+        const baseURL =
+            `${req.protocol}://${req.get("host")}`;
+
+        const loader =
+            `loadstring(game:HttpGet("${baseURL}/api/${id}"))()`;
+
+        res.json({
+            ok: true,
+            id,
+            name,
+            loader
+        });
+
+    } catch (error) {
+        console.error(error);
+
+        res.status(500).json({
+            ok: false,
+            error: "Failed to create script"
+        });
     }
-);
+});
 
-/*
-==================================================
-WRITE SCRIPT DIRECTLY
-==================================================
-*/
+/* =========================
+   LIST SCRIPTS
+========================= */
 
-app.post(
-    "/api/create",
-    (req, res) => {
-
-        try {
-
-            const code =
-                typeof req.body.code === "string"
-                    ? req.body.code
-                    : "";
-
-            const name =
-                typeof req.body.name === "string"
-                    ? req.body.name
-                    : "script.lua";
-
-            if (!code.trim()) {
-
-                return res.status(400).json({
-                    ok: false,
-                    error: "Script is empty"
-                });
-            }
-
-            const id =
-                createID();
-
-            const filename =
-                id + ".lua";
-
-            fs.writeFileSync(
-                path.join(
-                    SCRIPT_DIR,
-                    filename
-                ),
-                code,
-                "utf8"
-            );
-
-            const db =
-                readDB();
-
-            db[id] = {
-                id,
-                name:
-                    cleanName(name)
-                        .endsWith(".lua")
-                        ? cleanName(name)
-                        : cleanName(name) + ".lua",
-                filename,
-                createdAt:
-                    new Date().toISOString()
-            };
-
-            writeDB(db);
-
-            const loader =
-                `loadstring(game:HttpGet("${req.protocol}://${req.get("host")}/api/${id}"))()`;
-
-            res.json({
-                ok: true,
-                id,
-                name: db[id].name,
-                loader
-            });
-
-        } catch (error) {
-
-            console.error(error);
-
-            res.status(500).json({
-                ok: false,
-                error: error.message
-            });
-        }
-    }
-);
-
-/*
-==================================================
-LIST
-==================================================
-*/
-
-app.get(
-    "/api/scripts",
-    (req, res) => {
-
-        const db =
-            readDB();
+app.get("/api/scripts", (req, res) => {
+    try {
+        const db = readDB();
 
         const scripts =
-            Object.values(db)
-                .sort(
-                    (a, b) =>
-                        new Date(b.createdAt) -
-                        new Date(a.createdAt)
-                );
+            Object.values(db).sort(
+                (a, b) =>
+                    new Date(b.createdAt) -
+                    new Date(a.createdAt)
+            );
 
         res.json({
             ok: true,
             scripts
         });
+
+    } catch {
+        res.status(500).json({
+            ok: false,
+            error: "Failed to load scripts"
+        });
     }
-);
+});
 
-/*
-==================================================
-GET PAYLOAD
-==================================================
-*/
+/* =========================
+   PAYLOAD
+========================= */
 
-app.get(
-    "/api/:id",
-    (req, res) => {
+app.get("/api/:id", (req, res) => {
 
-        const id =
-            req.params.id;
+    const id = req.params.id;
 
-        if (
-            !/^[A-Za-z0-9_-]{10,40}$/.test(id)
-        ) {
-            return res
-                .status(404)
-                .type("text/plain")
-                .send(
-                    "Blocked by LEXINX v50 protection"
-                );
-        }
+    /*
+       ID được server tạo ra luôn có
+       24 ký tự hexadecimal.
+    */
 
-        const db =
-            readDB();
-
-        const script =
-            db[id];
-
-        if (!script) {
-            return res
-                .status(404)
-                .type("text/plain")
-                .send(
-                    "Blocked by LEXINX v50 protection"
-                );
-        }
-
-        const filepath =
-            path.join(
-                SCRIPT_DIR,
-                script.filename
-            );
-
-        if (!fs.existsSync(filepath)) {
-            return res
-                .status(404)
-                .type("text/plain")
-                .send(
-                    "Payload unavailable"
-                );
-        }
-
-        const payload =
-            fs.readFileSync(
-                filepath,
-                "utf8"
-            );
-
-        res
-            .status(200)
-            .set(
-                "Cache-Control",
-                "no-store, no-cache, must-revalidate"
-            )
+    if (!/^[a-f0-9]{24}$/.test(id)) {
+        return res
+            .status(404)
             .type("text/plain")
-            .send(payload);
-    }
-);
-
-/*
-==================================================
-DELETE
-==================================================
-*/
-
-app.delete(
-    "/api/scripts/:id",
-    (req, res) => {
-
-        const id =
-            req.params.id;
-
-        const db =
-            readDB();
-
-        const script =
-            db[id];
-
-        if (!script) {
-            return res.status(404).json({
-                ok: false,
-                error: "Script not found"
-            });
-        }
-
-        const filepath =
-            path.join(
-                SCRIPT_DIR,
-                script.filename
+            .send(
+                "Blocked by LEXINX v50 protection"
             );
-
-        try {
-
-            if (fs.existsSync(filepath)) {
-                fs.unlinkSync(filepath);
-            }
-
-            delete db[id];
-
-            writeDB(db);
-
-            res.json({
-                ok: true
-            });
-
-        } catch (error) {
-
-            res.status(500).json({
-                ok: false,
-                error: "Delete failed"
-            });
-        }
     }
-);
 
-/*
-==================================================
-404
-==================================================
-*/
+    const db = readDB();
+    const script = db[id];
+
+    if (!script) {
+        return res
+            .status(404)
+            .type("text/plain")
+            .send(
+                "Blocked by LEXINX v50 protection"
+            );
+    }
+
+    const file =
+        path.join(
+            SCRIPT_DIR,
+            script.filename
+        );
+
+    if (!fs.existsSync(file)) {
+        return res
+            .status(404)
+            .type("text/plain")
+            .send(
+                "Blocked by LEXINX v50 protection"
+            );
+    }
+
+    const payload =
+        fs.readFileSync(file, "utf8");
+
+    res
+        .status(200)
+        .type("text/plain")
+        .set(
+            "Cache-Control",
+            "no-store, no-cache, must-revalidate"
+        )
+        .send(payload);
+});
+
+/* =========================
+   DELETE
+========================= */
+
+app.delete("/api/scripts/:id", (req, res) => {
+
+    const id = req.params.id;
+
+    const db = readDB();
+    const script = db[id];
+
+    if (!script) {
+        return res.status(404).json({
+            ok: false,
+            error: "Script not found"
+        });
+    }
+
+    const file =
+        path.join(
+            SCRIPT_DIR,
+            script.filename
+        );
+
+    if (fs.existsSync(file)) {
+        fs.unlinkSync(file);
+    }
+
+    delete db[id];
+
+    writeDB(db);
+
+    res.json({
+        ok: true
+    });
+});
+
+/* =========================
+   UNKNOWN ROUTES
+========================= */
 
 app.use((req, res) => {
-
     res
         .status(404)
         .type("text/plain")
@@ -444,38 +272,12 @@ app.use((req, res) => {
         );
 });
 
-/*
-==================================================
-ERROR
-==================================================
-*/
-
-app.use((err, req, res, next) => {
-
-    console.error(err);
-
-    res.status(400).json({
-        ok: false,
-        error:
-            err.message ||
-            "Request error"
-    });
-});
-
-/*
-==================================================
-START
-==================================================
-*/
+/* =========================
+   START
+========================= */
 
 app.listen(PORT, () => {
-
     console.log(
-        "LEXINX PROTECT ONLINE"
-    );
-
-    console.log(
-        "PORT:",
-        PORT
+        `LEXINX API running on port ${PORT}`
     );
 });
