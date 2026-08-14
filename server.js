@@ -8,7 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const DOMAIN =
     process.env.DOMAIN ||
-    "https://Lexinx-protect.onrender.com";
+    "https://Lexinx-protect-2.onrender.com";
 
 const DATA_DIR = path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "scripts.json");
@@ -21,10 +21,8 @@ if (!fs.existsSync(DB_FILE)) {
     fs.writeFileSync(DB_FILE, "{}", "utf8");
 }
 
-app.use(express.json({
-    limit: "15mb"
-}));
-
+app.use(express.json({ limit: "20mb" }));
+app.use(express.urlencoded({ extended: true, limit: "20mb" }));
 app.use(express.static(PUBLIC_DIR));
 
 function readDB() {
@@ -47,7 +45,7 @@ function writeDB(db) {
 
 function createID() {
     return crypto
-        .randomBytes(10)
+        .randomBytes(12)
         .toString("hex");
 }
 
@@ -58,9 +56,25 @@ function cleanName(name) {
 }
 
 /*
-    Trang web
-*/
+    Kiểm tra request có giống Roblox hay không.
 
+    Đây chỉ là lớp chặn trình duyệt cơ bản,
+    không phải cơ chế xác thực bảo mật.
+*/
+function looksLikeRoblox(req) {
+    const ua = String(
+        req.headers["user-agent"] || ""
+    ).toLowerCase();
+
+    return (
+        ua.includes("roblox") ||
+        ua.includes("robloxapp")
+    );
+}
+
+/*
+    WEB
+*/
 app.get("/", (req, res) => {
     res.sendFile(
         path.join(PUBLIC_DIR, "index.html")
@@ -68,11 +82,9 @@ app.get("/", (req, res) => {
 });
 
 /*
-    Tạo script
+    CREATE SCRIPT
 */
-
 app.post("/api/create", (req, res) => {
-
     const source =
         typeof req.body?.source === "string"
             ? req.body.source
@@ -85,8 +97,9 @@ app.post("/api/create", (req, res) => {
         });
     }
 
-    const name =
-        cleanName(req.body?.name);
+    const name = cleanName(
+        req.body?.name
+    );
 
     const id = createID();
 
@@ -96,7 +109,8 @@ app.post("/api/create", (req, res) => {
         id,
         name,
         source,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        updatedAt: Date.now()
     };
 
     writeDB(db);
@@ -117,30 +131,104 @@ app.post("/api/create", (req, res) => {
 });
 
 /*
-    Danh sách script
+    EDIT SCRIPT
 */
+app.post("/api/edit/:id", (req, res) => {
+    const id = req.params.id;
 
-app.get("/api/scripts", (req, res) => {
+    const source =
+        typeof req.body?.source === "string"
+            ? req.body.source
+            : "";
+
+    const name =
+        cleanName(req.body?.name);
+
+    if (!source.trim()) {
+        return res.status(400).json({
+            ok: false,
+            error: "Script is empty"
+        });
+    }
 
     const db = readDB();
 
-    const scripts =
-        Object.values(db)
-            .map(script => {
+    if (!db[id]) {
+        return res.status(404).json({
+            ok: false,
+            error: "Script not found"
+        });
+    }
 
-                const endpoint =
-                    `${DOMAIN}/api/${script.id}`;
+    db[id].source = source;
 
-                return {
-                    id: script.id,
-                    name: script.name,
-                    createdAt: script.createdAt,
-                    endpoint,
-                    loader:
-                        `loadstring(game:HttpGet("${endpoint}"))()`
-                };
-            })
-            .reverse();
+    if (name) {
+        db[id].name = name;
+    }
+
+    db[id].updatedAt = Date.now();
+
+    writeDB(db);
+
+    const endpoint =
+        `${DOMAIN}/api/${id}`;
+
+    res.json({
+        ok: true,
+        id,
+        name: db[id].name,
+        endpoint,
+        loader:
+            `loadstring(game:HttpGet("${endpoint}"))()`
+    });
+});
+
+/*
+    DELETE SCRIPT
+*/
+app.delete("/api/delete/:id", (req, res) => {
+    const id = req.params.id;
+
+    const db = readDB();
+
+    if (!db[id]) {
+        return res.status(404).json({
+            ok: false,
+            error: "Script not found"
+        });
+    }
+
+    delete db[id];
+
+    writeDB(db);
+
+    res.json({
+        ok: true
+    });
+});
+
+/*
+    LIST SCRIPTS
+*/
+app.get("/api/scripts", (req, res) => {
+    const db = readDB();
+
+    const scripts = Object.values(db)
+        .map(script => {
+            const endpoint =
+                `${DOMAIN}/api/${script.id}`;
+
+            return {
+                id: script.id,
+                name: script.name,
+                createdAt: script.createdAt,
+                updatedAt: script.updatedAt,
+                endpoint,
+                loader:
+                    `loadstring(game:HttpGet("${endpoint}"))()`
+            };
+        })
+        .reverse();
 
     res.json({
         ok: true,
@@ -149,12 +237,26 @@ app.get("/api/scripts", (req, res) => {
 });
 
 /*
-    SERVER GỬI SOURCE THẲNG
+    SOURCE ENDPOINT
+
+    Roblox request:
+        trả Lua source
+
+    Browser thông thường:
+        403
 */
-
 app.get("/api/:id", (req, res) => {
-
     const id = req.params.id;
+
+    if (!looksLikeRoblox(req)) {
+        return res
+            .status(403)
+            .type("text/plain")
+            .send(
+                "LEXINX PROTECT\n\n" +
+                "This endpoint is only available to Roblox."
+            );
+    }
 
     const db = readDB();
     const script = db[id];
@@ -164,14 +266,9 @@ app.get("/api/:id", (req, res) => {
             .status(404)
             .type("text/plain")
             .send(
-                "Blocked by LEXINX v50 protection"
+                "Script not found."
             );
     }
-
-    /*
-        Không trả HTML.
-        Endpoint này chỉ trả Lua source.
-    */
 
     res
         .status(200)
@@ -181,6 +278,10 @@ app.get("/api/:id", (req, res) => {
             "no-store, no-cache, must-revalidate"
         )
         .set(
+            "Pragma",
+            "no-cache"
+        )
+        .set(
             "X-Content-Type-Options",
             "nosniff"
         )
@@ -188,15 +289,14 @@ app.get("/api/:id", (req, res) => {
 });
 
 /*
-    Route không tồn tại
+    OTHER ROUTES
 */
-
 app.use((req, res) => {
     res
         .status(404)
         .type("text/plain")
         .send(
-            "Blocked by LEXINX v50 protection"
+            "Blocked by LEXINX PROTECT"
         );
 });
 
