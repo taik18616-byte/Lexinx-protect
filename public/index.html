@@ -7,7 +7,7 @@
 
 <meta
     name="viewport"
-    content="width=device-width,initial-scale=1"
+    content="width=device-width, initial-scale=1.0"
 >
 
 <title>LEXINX PROTECT</title>
@@ -26,144 +26,102 @@ body {
         radial-gradient(
             circle at top,
             #181818,
-            #050505 60%
+            #050505 55%
         );
 
     color: white;
 
     font-family:
         Arial,
+        Helvetica,
         sans-serif;
 }
 
 .container {
-    width:
-        min(950px, 94%);
-
-    margin:
-        45px auto;
+    width: min(950px, 94%);
+    margin: 35px auto 80px;
 }
 
-.logo {
+.header {
     text-align: center;
-
-    font-size: 44px;
-
-    font-weight: 900;
-
-    letter-spacing: 3px;
+    margin-bottom: 30px;
 }
 
-.subtitle {
-    text-align: center;
+.header h1 {
+    margin: 0;
 
+    font-size: 34px;
+    letter-spacing: 5px;
+}
+
+.header p {
     color: #777;
-
-    margin:
-        10px 0 35px;
+    margin-top: 8px;
 }
 
 .card {
-    background: #101010;
+    background: rgba(15, 15, 15, .95);
 
-    border:
-        1px solid #292929;
+    border: 1px solid #292929;
 
-    border-radius: 18px;
+    border-radius: 16px;
 
-    padding: 25px;
-
-    margin-bottom: 25px;
-}
-
-.tabs {
-    display: flex;
-
-    gap: 10px;
+    padding: 22px;
 
     margin-bottom: 20px;
+
+    box-shadow:
+        0 15px 40px rgba(0,0,0,.35);
 }
 
-.tab {
-    flex: 1;
-
-    margin: 0;
-
-    background: #181818;
-
-    color: #aaa;
-
-    border:
-        1px solid #292929;
+.card h2 {
+    margin-top: 0;
 }
 
-.tab.active {
-    background: white;
-
-    color: black;
-}
-
-input[type=file] {
-    width: 100%;
-
-    padding: 14px;
-
-    background: #080808;
-
-    border:
-        1px solid #333;
-
-    border-radius: 10px;
-
-    color: #aaa;
-}
-
+input[type="text"],
+input[type="file"],
 textarea {
+
     width: 100%;
-
-    height: 330px;
-
-    resize: vertical;
 
     background: #050505;
 
     color: #ddd;
 
-    border:
-        1px solid #333;
+    border: 1px solid #333;
 
-    border-radius: 12px;
+    border-radius: 10px;
 
-    padding: 15px;
+    padding: 12px;
+
+    outline: none;
+}
+
+input[type="text"] {
+    margin-bottom: 12px;
+}
+
+input:focus,
+textarea:focus {
+    border-color: #666;
+}
+
+textarea {
+    min-height: 320px;
+
+    resize: vertical;
 
     font-family:
         Consolas,
         monospace;
 
-    font-size: 14px;
+    line-height: 1.5;
 
-    outline: none;
+    margin-top: 12px;
 }
 
-textarea:focus {
-    border-color: #666;
-}
-
-.name-input {
-    width: 100%;
-
-    padding: 13px;
-
-    margin-bottom: 12px;
-
-    background: #080808;
-
-    color: white;
-
-    border:
-        1px solid #333;
-
-    border-radius: 10px;
+input[type="file"] {
+    margin-bottom: 5px;
 }
 
 button {
@@ -171,10 +129,9 @@ button {
 
     border-radius: 9px;
 
-    padding:
-        11px 17px;
+    padding: 11px 16px;
 
-    margin-top: 12px;
+    cursor: pointer;
 
     background: white;
 
@@ -182,64 +139,98 @@ button {
 
     font-weight: bold;
 
-    cursor: pointer;
+    transition: .15s;
 }
 
 button:hover {
-    opacity: .82;
+    transform: translateY(-1px);
+    opacity: .85;
+}
+
+.primary {
+    margin-top: 12px;
 }
 
 .status {
-    margin-top: 15px;
+    margin-top: 12px;
 
     color: #888;
+
+    min-height: 20px;
+
+    font-family: monospace;
 }
+
+/* SCRIPT */
 
 .script {
     background: #080808;
 
-    border:
-        1px solid #252525;
+    border: 1px solid #292929;
 
-    border-radius: 12px;
+    border-radius: 13px;
 
-    padding: 18px;
+    padding: 17px;
 
-    margin-top: 14px;
+    margin-top: 13px;
 }
 
 .script-name {
-    font-size: 18px;
-
     font-weight: bold;
+
+    font-size: 17px;
+
+    margin-bottom: 5px;
 }
 
 .script-id {
     color: #666;
 
-    font-size: 12px;
+    font-family: monospace;
 
-    margin-top: 5px;
+    font-size: 11px;
 }
 
-.loader {
-    margin-top: 12px;
+/* FULL LOADER */
 
-    padding: 12px;
+.loader-label {
+    margin-top: 14px;
+
+    color: #777;
+
+    font-size: 12px;
+}
+
+.loader-row {
+    display: flex;
+
+    gap: 8px;
+
+    margin-top: 7px;
+}
+
+.loader-input {
+    flex: 1;
+
+    min-width: 0;
 
     background: #000;
 
-    color: #999;
+    color: #aaa;
+
+    border: 1px solid #333;
 
     border-radius: 8px;
 
-    overflow-x: auto;
-
-    white-space: nowrap;
+    padding: 12px;
 
     font-family: monospace;
 
     font-size: 12px;
+}
+
+.copy-loader {
+    white-space: nowrap;
 }
 
 .actions {
@@ -247,17 +238,23 @@ button:hover {
 
     gap: 8px;
 
+    margin-top: 12px;
+
     flex-wrap: wrap;
 }
 
 .delete {
-    background: #222;
+    background: #252525;
 
     color: white;
 }
 
 .empty {
     color: #666;
+
+    text-align: center;
+
+    padding: 25px;
 }
 
 </style>
@@ -268,284 +265,192 @@ button:hover {
 
 <div class="container">
 
-<div class="logo">
-LEXINX PROTECT
-</div>
+    <div class="header">
 
-<div class="subtitle">
-Lua / TXT Script Protection & Loader Manager
-</div>
+        <h1>LEXINX PROTECT</h1>
 
-<div class="card">
+        <p>
+            Lua Script Protection & Loader Generator
+        </p>
 
-<h2>Create Protected Script</h2>
+    </div>
 
-<div class="tabs">
 
-<button
-    class="tab active"
-    id="fileTab"
-    onclick="switchTab('file')"
->
-    Upload File
-</button>
+    <!-- CREATE -->
 
-<button
-    class="tab"
-    id="codeTab"
-    onclick="switchTab('code')"
->
-    Write Script
-</button>
+    <div class="card">
 
-</div>
+        <h2>Create Loader</h2>
 
-<div id="fileMode">
+        <input
+            id="name"
+            type="text"
+            placeholder="Script name"
+        >
 
-<input
-    id="file"
-    type="file"
-    accept=".lua,.txt"
->
+        <input
+            id="file"
+            type="file"
+            accept=".lua,.txt"
+        >
 
-</div>
+        <textarea
+            id="code"
+            placeholder="Paste your Lua script here..."
+        ></textarea>
 
-<div
-    id="codeMode"
-    style="display:none;"
->
+        <button
+            class="primary"
+            onclick="createScript()"
+        >
+            Create Protected Loader
+        </button>
 
-<input
-    id="scriptName"
-    class="name-input"
-    type="text"
-    placeholder="Script name, e.g. MyScript.lua"
->
+        <div
+            id="status"
+            class="status"
+        ></div>
 
-<textarea
-    id="code"
-    placeholder="Write or paste your Lua script here..."
-    spellcheck="false"
-></textarea>
+    </div>
 
-</div>
 
-<button
-    id="protectButton"
-    onclick="protectScript()"
->
-Protect Script
-</button>
+    <!-- LIST -->
 
-<div
-    id="status"
-    class="status"
-></div>
+    <div class="card">
+
+        <h2>Script List</h2>
+
+        <div id="scripts">
+            Loading...
+        </div>
+
+    </div>
 
 </div>
 
-<div class="card">
-
-<h2>
-Protected Scripts
-</h2>
-
-<div id="scripts">
-Loading...
-</div>
-
-</div>
-
-</div>
 
 <script>
 
-let mode = "file";
+/* =========================
+   CREATE
+========================= */
 
-function switchTab(type) {
-
-    mode = type;
-
-    const fileMode =
-        document.getElementById(
-            "fileMode"
-        );
-
-    const codeMode =
-        document.getElementById(
-            "codeMode"
-        );
-
-    const fileTab =
-        document.getElementById(
-            "fileTab"
-        );
-
-    const codeTab =
-        document.getElementById(
-            "codeTab"
-        );
-
-    if (type === "file") {
-
-        fileMode.style.display =
-            "block";
-
-        codeMode.style.display =
-            "none";
-
-        fileTab.classList.add(
-            "active"
-        );
-
-        codeTab.classList.remove(
-            "active"
-        );
-
-    } else {
-
-        fileMode.style.display =
-            "none";
-
-        codeMode.style.display =
-            "block";
-
-        fileTab.classList.remove(
-            "active"
-        );
-
-        codeTab.classList.add(
-            "active"
-        );
-    }
-}
-
-async function protectScript() {
+async function createScript() {
 
     const status =
         document.getElementById(
             "status"
         );
 
-    status.textContent =
-        "Processing...";
+    const name =
+        document.getElementById(
+            "name"
+        ).value.trim()
+        || "Script";
+
+    const file =
+        document.getElementById(
+            "file"
+        ).files[0];
+
+    let code =
+        document.getElementById(
+            "code"
+        ).value;
 
     try {
 
-        if (mode === "file") {
+        /*
+        Nếu có file:
+        đọc trực tiếp thành text.
+        */
 
-            const file =
-                document.getElementById(
-                    "file"
-                ).files[0];
+        if (file) {
 
-            if (!file) {
+            const lower =
+                file.name.toLowerCase();
+
+            if (
+                !lower.endsWith(".lua") &&
+                !lower.endsWith(".txt")
+            ) {
                 throw new Error(
-                    "Please select a .lua or .txt file."
+                    "Only .lua and .txt files are supported"
                 );
             }
 
-            const formData =
-                new FormData();
+            code =
+                await file.text();
+        }
 
-            formData.append(
-                "script",
-                file
+        if (!code.trim()) {
+            throw new Error(
+                "Script is empty"
+            );
+        }
+
+        status.textContent =
+            "Creating loader...";
+
+        const response =
+            await fetch(
+                "/api/create",
+                {
+                    method: "POST",
+
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body:
+                        JSON.stringify({
+                            name:
+                                file
+                                    ? file.name
+                                    : name,
+
+                            code
+                        })
+                }
             );
 
-            const response =
-                await fetch(
-                    "/api/upload",
-                    {
-                        method: "POST",
-                        body: formData
-                    }
-                );
+        const data =
+            await response.json();
 
-            const data =
-                await response.json();
-
-            if (!response.ok) {
-                throw new Error(
-                    data.error ||
-                    "Upload failed"
-                );
-            }
-
-            status.textContent =
-                "Protected successfully: " +
-                data.id;
-
-            document.getElementById(
-                "file"
-            ).value = "";
-
-        } else {
-
-            const code =
-                document.getElementById(
-                    "code"
-                ).value;
-
-            const name =
-                document.getElementById(
-                    "scriptName"
-                ).value.trim() ||
-                "script.lua";
-
-            if (!code.trim()) {
-                throw new Error(
-                    "Please enter a script."
-                );
-            }
-
-            const response =
-                await fetch(
-                    "/api/create",
-                    {
-                        method: "POST",
-
-                        headers: {
-                            "Content-Type":
-                                "application/json"
-                        },
-
-                        body: JSON.stringify({
-                            code,
-                            name
-                        })
-                    }
-                );
-
-            const data =
-                await response.json();
-
-            if (!response.ok) {
-                throw new Error(
-                    data.error ||
-                    "Creation failed"
-                );
-            }
-
-            status.textContent =
-                "Protected successfully: " +
-                data.id;
-
-            document.getElementById(
-                "code"
-            ).value = "";
-
+        if (!response.ok) {
+            throw new Error(
+                data.error ||
+                "Server error"
+            );
         }
+
+        status.textContent =
+            "Loader created: " +
+            data.id;
+
+        document.getElementById(
+            "code"
+        ).value = "";
+
+        document.getElementById(
+            "file"
+        ).value = "";
 
         await loadScripts();
 
     } catch (error) {
 
         status.textContent =
-            "ERROR: " +
+            "Error: " +
             error.message;
     }
 }
+
+
+/* =========================
+   LOAD SCRIPTS
+========================= */
 
 async function loadScripts() {
 
@@ -558,7 +463,10 @@ async function loadScripts() {
 
         const response =
             await fetch(
-                "/api/scripts"
+                "/api/scripts",
+                {
+                    cache: "no-store"
+                }
             );
 
         const data =
@@ -566,12 +474,12 @@ async function loadScripts() {
 
         if (
             !data.ok ||
-            !data.scripts.length
+            data.scripts.length === 0
         ) {
 
             box.innerHTML =
                 `<div class="empty">
-                    No protected scripts.
+                    No scripts created yet.
                 </div>`;
 
             return;
@@ -584,101 +492,210 @@ async function loadScripts() {
             of data.scripts
         ) {
 
+            /*
+            FULL LOADER
+            */
+
             const loader =
                 `loadstring(game:HttpGet("${location.origin}/api/${script.id}"))()`;
 
-            const item =
+            const div =
                 document.createElement(
                     "div"
                 );
 
-            item.className =
+            div.className =
                 "script";
 
-            item.innerHTML = `
+            /* NAME */
 
-                <div class="script-name">
-                    ${escapeHTML(
-                        script.name
-                    )}
-                </div>
+            const name =
+                document.createElement(
+                    "div"
+                );
 
-                <div class="script-id">
-                    ID:
-                    ${escapeHTML(
-                        script.id
-                    )}
-                </div>
+            name.className =
+                "script-name";
 
-                <div class="loader">
-                    ${escapeHTML(
-                        loader
-                    )}
-                </div>
+            name.textContent =
+                script.name;
 
-                <div class="actions">
+            /* ID */
 
-                    <button class="copy">
-                        Copy Loader
-                    </button>
+            const id =
+                document.createElement(
+                    "div"
+                );
 
-                    <button class="delete">
-                        Delete
-                    </button>
+            id.className =
+                "script-id";
 
-                </div>
-            `;
+            id.textContent =
+                "ID: " + script.id;
 
-            item
-                .querySelector(".copy")
-                .onclick = async () => {
+            /* LABEL */
 
-                    await navigator
-                        .clipboard
-                        .writeText(
-                            loader
+            const label =
+                document.createElement(
+                    "div"
+                );
+
+            label.className =
+                "loader-label";
+
+            label.textContent =
+                "FULL LOADER";
+
+            /* LOADER ROW */
+
+            const row =
+                document.createElement(
+                    "div"
+                );
+
+            row.className =
+                "loader-row";
+
+            /* INPUT */
+
+            const input =
+                document.createElement(
+                    "input"
+                );
+
+            input.className =
+                "loader-input";
+
+            input.value =
+                loader;
+
+            input.readOnly = true;
+
+            /* COPY */
+
+            const copy =
+                document.createElement(
+                    "button"
+                );
+
+            copy.className =
+                "copy-loader";
+
+            copy.textContent =
+                "Copy Full Loader";
+
+            copy.onclick =
+                async () => {
+
+                    try {
+
+                        await navigator
+                            .clipboard
+                            .writeText(
+                                loader
+                            );
+
+                    } catch {
+
+                        input.focus();
+
+                        input.select();
+
+                        document.execCommand(
+                            "copy"
                         );
+                    }
 
-                    item
-                        .querySelector(
-                            ".copy"
-                        )
-                        .textContent =
+                    copy.textContent =
                         "Copied!";
+
+                    setTimeout(
+                        () => {
+                            copy.textContent =
+                                "Copy Full Loader";
+                        },
+                        1500
+                    );
                 };
 
-            item
-                .querySelector(".delete")
-                .onclick = async () => {
+            row.appendChild(input);
+            row.appendChild(copy);
 
-                    if (
-                        !confirm(
-                            "Delete this script?"
-                        )
-                    ) {
+            /* ACTIONS */
+
+            const actions =
+                document.createElement(
+                    "div"
+                );
+
+            actions.className =
+                "actions";
+
+            const open =
+                document.createElement(
+                    "button"
+                );
+
+            open.textContent =
+                "Open Payload URL";
+
+            open.onclick =
+                () => {
+                    window.open(
+                        `/api/${script.id}`,
+                        "_blank"
+                    );
+                };
+
+            const del =
+                document.createElement(
+                    "button"
+                );
+
+            del.className =
+                "delete";
+
+            del.textContent =
+                "Delete";
+
+            del.onclick =
+                async () => {
+
+                    const confirmDelete =
+                        confirm(
+                            `Delete "${script.name}"?`
+                        );
+
+                    if (!confirmDelete) {
                         return;
                     }
 
-                    const result =
+                    const response =
                         await fetch(
-                            "/api/scripts/" +
-                            encodeURIComponent(
-                                script.id
-                            ),
+                            `/api/scripts/${encodeURIComponent(script.id)}`,
                             {
                                 method:
                                     "DELETE"
                             }
                         );
 
-                    if (result.ok) {
+                    if (response.ok) {
                         loadScripts();
                     }
                 };
 
-            box.appendChild(
-                item
-            );
+            actions.appendChild(open);
+            actions.appendChild(del);
+
+            /* BUILD */
+
+            div.appendChild(name);
+            div.appendChild(id);
+            div.appendChild(label);
+            div.appendChild(row);
+            div.appendChild(actions);
+
+            box.appendChild(div);
         }
 
     } catch (error) {
@@ -687,33 +704,15 @@ async function loadScripts() {
             `<div class="empty">
                 Failed to load scripts.
             </div>`;
+
+        console.error(error);
     }
 }
 
-function escapeHTML(value) {
 
-    return String(value)
-        .replaceAll(
-            "&",
-            "&amp;"
-        )
-        .replaceAll(
-            "<",
-            "&lt;"
-        )
-        .replaceAll(
-            ">",
-            "&gt;"
-        )
-        .replaceAll(
-            '"',
-            "&quot;"
-        )
-        .replaceAll(
-            "'",
-            "&#039;"
-        );
-}
+/* =========================
+   START
+========================= */
 
 loadScripts();
 
