@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 
 <head>
 
@@ -97,12 +97,7 @@ pre {
     border: 1px solid #222;
     padding: 12px;
     border-radius: 8px;
-    max-height: 300px;
     overflow: auto;
-}
-
-#message {
-    color: #aaa;
 }
 
 </style>
@@ -117,7 +112,7 @@ pre {
 
 <h1>LEXINX PROTECT</h1>
 
-<p>Upload / Paste Lua Source</p>
+<p>Script Source</p>
 
 <input
     id="name"
@@ -126,7 +121,7 @@ pre {
 
 <textarea
     id="source"
-    placeholder="Paste your Lua source here..."
+    placeholder="Paste Lua source here..."
 ></textarea>
 
 <input
@@ -191,6 +186,8 @@ async function copyText(text) {
 
         await navigator.clipboard.writeText(text);
 
+        alert("Copied!");
+
     } catch {
 
         const area =
@@ -205,6 +202,8 @@ async function copyText(text) {
         document.execCommand("copy");
 
         area.remove();
+
+        alert("Copied!");
 
     }
 
@@ -258,22 +257,24 @@ async function createScript() {
     }
 
     /*
-        COPY LAYER 1
+        SERVER ĐÃ TỰ TẠO:
 
-        Ví dụ:
+        Layer 2
 
-        loadstring(game:HttpGet(
-            "https://domain/api/loader/ID"
-        ))()
+        và
+
+        Layer 1
+
+        Web chỉ copy Layer 1.
     */
 
     await copyText(
-        data.layer1
+        data.loader
     );
 
     document.getElementById("message")
         .textContent =
-        "Created — Layer 1 copied.";
+        "Created. Loader copied.";
 
     clearEditor();
 
@@ -338,12 +339,12 @@ async function saveEdit() {
     }
 
     await copyText(
-        data.layer1
+        data.loader
     );
 
     document.getElementById("message")
         .textContent =
-        "Updated — new Layer 1 copied.";
+        "Updated. Loader copied.";
 
     clearEditor();
 
@@ -426,9 +427,7 @@ async function loadScripts() {
         if (!data.ok) {
 
             box.innerHTML =
-                escapeHTML(
-                    data.error
-                );
+                escapeHTML(data.error);
 
             return;
 
@@ -456,24 +455,18 @@ async function loadScripts() {
             div.innerHTML = `
 
 <strong>
-    ${escapeHTML(script.name)}
+${escapeHTML(script.name)}
 </strong>
 
 <div class="id">
-    ID: ${escapeHTML(script.id)}
+ID: ${escapeHTML(script.id)}
 </div>
 
 <button
     class="primary"
-    onclick='copyText(${JSON.stringify(script.layer1)})'
+    onclick='copyText(${JSON.stringify(script.loader)})'
 >
 COPY LOADER
-</button>
-
-<button
-    onclick='copyText(${JSON.stringify(script.layer2)})'
->
-COPY LAYER 2
 </button>
 
 <button
@@ -490,20 +483,14 @@ DELETE
 </button>
 
 <details>
+
 <summary>
-LAYER 1
+SHOW LOADER
 </summary>
 
-<pre>${escapeHTML(script.layer1)}</pre>
-
-</details>
-
-<details>
-<summary>
-LAYER 2
-</summary>
-
-<pre>${escapeHTML(script.layer2)}</pre>
+<pre>
+${escapeHTML(script.loader)}
+</pre>
 
 </details>
 
