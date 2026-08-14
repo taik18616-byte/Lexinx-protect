@@ -10,12 +10,6 @@ const DOMAIN =
     process.env.DOMAIN ||
     "https://Lexinx-protect.onrender.com";
 
-/*
-========================================================
-CONFIG
-========================================================
-*/
-
 const DATA_DIR = path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "scripts.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
@@ -23,50 +17,26 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const SESSION_TTL = 2 * 60 * 1000;
 const TOKEN_TTL = 20 * 1000;
 
-/*
- * QUAN TRỌNG:
- *
- * Trên Render nên đặt:
- *
- * LEXINX_MASTER_KEY=<64 hex characters>
- *
- * Không hard-code key vào source.
- */
-
 const MASTER_KEY_HEX =
     process.env.LEXINX_MASTER_KEY || "";
 
 if (!/^[0-9a-fA-F]{64}$/.test(MASTER_KEY_HEX)) {
     console.error(
-        "Missing/invalid LEXINX_MASTER_KEY."
-    );
-    console.error(
-        "Set a 32-byte key as 64 hexadecimal characters."
+        "LEXINX_MASTER_KEY must be exactly 64 hexadecimal characters."
     );
     process.exit(1);
 }
 
 const MASTER_KEY =
-    Buffer.from(
-        MASTER_KEY_HEX,
-        "hex"
-    );
+    Buffer.from(MASTER_KEY_HEX, "hex");
 
-/*
-========================================================
-DIRECTORIES
-========================================================
-*/
+fs.mkdirSync(DATA_DIR, {
+    recursive: true
+});
 
-fs.mkdirSync(
-    DATA_DIR,
-    { recursive: true }
-);
-
-fs.mkdirSync(
-    PUBLIC_DIR,
-    { recursive: true }
-);
+fs.mkdirSync(PUBLIC_DIR, {
+    recursive: true
+});
 
 if (!fs.existsSync(DB_FILE)) {
     fs.writeFileSync(
@@ -75,12 +45,6 @@ if (!fs.existsSync(DB_FILE)) {
         "utf8"
     );
 }
-
-/*
-========================================================
-MIDDLEWARE
-========================================================
-*/
 
 app.disable("x-powered-by");
 
@@ -91,16 +55,12 @@ app.use(
 );
 
 app.use(
-    express.static(
-        PUBLIC_DIR
-    )
+    express.static(PUBLIC_DIR)
 );
 
-/*
-========================================================
-DATABASE
-========================================================
-*/
+/* ========================================================
+   DATABASE
+======================================================== */
 
 function readDB() {
     try {
@@ -116,11 +76,11 @@ function readDB() {
 }
 
 function writeDB(db) {
-    const temp =
+    const tmp =
         DB_FILE + ".tmp";
 
     fs.writeFileSync(
-        temp,
+        tmp,
         JSON.stringify(
             db,
             null,
@@ -130,16 +90,14 @@ function writeDB(db) {
     );
 
     fs.renameSync(
-        temp,
+        tmp,
         DB_FILE
     );
 }
 
-/*
-========================================================
-RANDOM
-========================================================
-*/
+/* ========================================================
+   HELPERS
+======================================================== */
 
 function randomHex(bytes = 32) {
     return crypto
@@ -158,28 +116,32 @@ function cleanName(name) {
         .slice(0, 80);
 }
 
-/*
-========================================================
-AES-256-GCM
-========================================================
+function safeEqual(a, b) {
+    if (
+        typeof a !== "string" ||
+        typeof b !== "string"
+    ) {
+        return false;
+    }
 
-Storage format:
+    const aa = Buffer.from(a);
+    const bb = Buffer.from(b);
 
-{
-    algorithm,
-    iv,
-    tag,
-    data
+    if (aa.length !== bb.length) {
+        return false;
+    }
+
+    return crypto.timingSafeEqual(
+        aa,
+        bb
+    );
 }
 
-AES-GCM cung cấp:
-- confidentiality
-- integrity/authentication
-========================================================
-*/
+/* ========================================================
+   AES-256-GCM
+======================================================== */
 
 function encryptSource(source) {
-
     const iv =
         crypto.randomBytes(12);
 
@@ -205,28 +167,17 @@ function encryptSource(source) {
         cipher.getAuthTag();
 
     return {
-        algorithm:
-            "aes-256-gcm",
-
-        iv:
-            iv.toString("base64"),
-
-        tag:
-            tag.toString("base64"),
-
-        data:
-            encrypted.toString(
-                "base64"
-            )
+        algorithm: "aes-256-gcm",
+        iv: iv.toString("base64"),
+        tag: tag.toString("base64"),
+        data: encrypted.toString("base64")
     };
 }
 
 function decryptSource(record) {
-
     if (
         !record ||
-        record.algorithm !==
-            "aes-256-gcm"
+        record.algorithm !== "aes-256-gcm"
     ) {
         throw new Error(
             "Invalid encrypted source"
@@ -245,7 +196,7 @@ function decryptSource(record) {
             "base64"
         );
 
-    const encrypted =
+    const data =
         Buffer.from(
             record.data,
             "base64"
@@ -258,28 +209,68 @@ function decryptSource(record) {
             iv
         );
 
-    decipher.setAuthTag(
-        tag
-    );
+    decipher.setAuthTag(tag);
 
-    const decrypted =
+    const plain =
         Buffer.concat([
-            decipher.update(
-                encrypted
-            ),
+            decipher.update(data),
             decipher.final()
         ]);
 
-    return decrypted.toString(
-        "utf8"
-    );
+    return plain.toString("utf8");
 }
 
-/*
-========================================================
-SECURITY RESPONSE
-========================================================
-*/
+/* ========================================================
+   L2 PACKER
+
+   Chỉ dùng để đóng gói L2.
+   Không chứa source.
+======================================================== */
+
+function createL2Payload() {
+    const nonce = randomHex(16);
+
+    const payload = [
+        "local HttpService=game:GetService(\"HttpService\")",
+        `local DOMAIN=${JSON.stringify(DOMAIN)}`,
+        "return function(session,token,nonce)",
+        "local r=request({",
+        "Url=DOMAIN..\"/api/stage/2\",",
+        "Method=\"POST\",",
+        "Headers={[\"Content-Type\"]=\"application/json\"},",
+        "Body=HttpService:JSONEncode({session=session,token=token,nonce=nonce})",
+        "})",
+        "if not r or r.StatusCode~=200 then error(\"LEXINX BLOCK\") end",
+        "local ok,d=pcall(function() return HttpService:JSONDecode(r.Body) end)",
+        "if not ok or type(d)~=\"table\" or d.ok~=true or d.stage~=2 then error(\"LEXINX BLOCK\") end",
+        "return d",
+        "end"
+    ].join("\n");
+
+    const encoded =
+        Buffer.from(
+            payload,
+            "utf8"
+        ).toString("base64");
+
+    const checksum =
+        crypto
+            .createHash("sha256")
+            .update(encoded)
+            .digest("hex");
+
+    return {
+        version: 1,
+        nonce,
+        encoding: "base64",
+        checksum,
+        payload: encoded
+    };
+}
+
+/* ========================================================
+   SECURITY HEADERS
+======================================================== */
 
 function secure(res) {
     return res
@@ -301,19 +292,10 @@ function block(res) {
     return secure(res)
         .status(403)
         .type("text/plain")
-        .send(
-            "LEXINX BLOCK"
-        );
+        .send("LEXINX BLOCK");
 }
 
-/*
-========================================================
-BROWSER NAVIGATION CHECK
-========================================================
-*/
-
-function browserNavigation(req) {
-
+function isBrowserNavigation(req) {
     const accept =
         String(
             req.headers.accept || ""
@@ -321,85 +303,54 @@ function browserNavigation(req) {
 
     const mode =
         String(
-            req.headers[
-                "sec-fetch-mode"
-            ] || ""
+            req.headers["sec-fetch-mode"] || ""
         ).toLowerCase();
 
     const dest =
         String(
-            req.headers[
-                "sec-fetch-dest"
-            ] || ""
+            req.headers["sec-fetch-dest"] || ""
         ).toLowerCase();
 
     return (
-        accept.includes(
-            "text/html"
-        ) ||
+        accept.includes("text/html") ||
         mode === "navigate" ||
         dest === "document"
     );
 }
 
-/*
-========================================================
-SESSION
-========================================================
-*/
+/* ========================================================
+   SESSIONS
+======================================================== */
 
 const sessions = new Map();
 
-function createChallenge() {
-
+function newChallenge() {
     return {
-        token:
-            randomHex(32),
-
-        nonce:
-            randomHex(16),
-
+        token: randomHex(32),
+        nonce: randomHex(16),
         expiresAt:
             Date.now() +
             TOKEN_TTL,
-
-        used:
-            false
+        used: false
     };
 }
 
-function createSession(
-    scriptID
-) {
-
+function createSession(scriptID) {
     const session = {
-
-        id:
-            randomHex(32),
-
+        id: randomHex(32),
         scriptID,
-
-        createdAt:
-            Date.now(),
-
+        createdAt: Date.now(),
         expiresAt:
             Date.now() +
             SESSION_TTL,
-
-        stage:
-            2,
-
-        l2:
-            createChallenge(),
-
-        l3:
-            null,
-
-        l4:
-            null,
-
-        l5:
-            null
+        stage: 1,
+        challenges: {
+            1: newChallenge(),
+            2: null,
+            3: null,
+            4: null,
+            5: null
+        }
     };
 
     sessions.set(
@@ -411,10 +362,8 @@ function createSession(
 }
 
 function getSession(id) {
-
     if (
-        typeof id !==
-        "string"
+        typeof id !== "string"
     ) {
         return null;
     }
@@ -430,11 +379,7 @@ function getSession(id) {
         Date.now() >
         session.expiresAt
     ) {
-
-        sessions.delete(
-            id
-        );
-
+        sessions.delete(id);
         return null;
     }
 
@@ -446,7 +391,6 @@ function consumeChallenge(
     token,
     nonce
 ) {
-
     if (!challenge) {
         return false;
     }
@@ -463,56 +407,58 @@ function consumeChallenge(
     }
 
     if (
-        typeof token !==
-            "string" ||
-        typeof nonce !==
-            "string"
-    ) {
-        return false;
-    }
-
-    if (
-        !crypto.timingSafeEqual(
-            Buffer.from(
-                token
-            ),
-            Buffer.from(
-                challenge.token
-            )
+        !safeEqual(
+            token,
+            challenge.token
         )
     ) {
         return false;
     }
 
     if (
-        !crypto.timingSafeEqual(
-            Buffer.from(
-                nonce
-            ),
-            Buffer.from(
-                challenge.nonce
-            )
+        !safeEqual(
+            nonce,
+            challenge.nonce
         )
     ) {
         return false;
     }
 
-    challenge.used =
-        true;
+    challenge.used = true;
 
     return true;
 }
 
-/*
-========================================================
-HOME
-========================================================
-*/
+function nextStage(
+    session,
+    expected,
+    next
+) {
+    if (
+        session.stage !==
+        expected
+    ) {
+        return null;
+    }
+
+    const challenge =
+        newChallenge();
+
+    session.challenges[next] =
+        challenge;
+
+    session.stage = next;
+
+    return challenge;
+}
+
+/* ========================================================
+   HOME
+======================================================== */
 
 app.get(
     "/",
     (req, res) => {
-
         res.sendFile(
             path.join(
                 PUBLIC_DIR,
@@ -522,24 +468,20 @@ app.get(
     }
 );
 
-/*
-========================================================
-CREATE
-========================================================
-*/
+/* ========================================================
+   CREATE SCRIPT
+======================================================== */
 
 app.post(
     "/api/create",
     (req, res) => {
-
         const source =
             typeof req.body?.source ===
-                "string"
+            "string"
                 ? req.body.source
                 : "";
 
         if (!source.trim()) {
-
             return res
                 .status(400)
                 .json({
@@ -557,22 +499,19 @@ app.post(
         const id =
             randomHex(12);
 
-        const encrypted =
-            encryptSource(
-                source
-            );
-
         const db =
             readDB();
 
         db[id] = {
-
             id,
-
             name,
-
             source:
-                encrypted,
+                encryptSource(
+                    source
+                ),
+
+            l2:
+                createL2Payload(),
 
             createdAt:
                 Date.now(),
@@ -583,38 +522,31 @@ app.post(
 
         writeDB(db);
 
-        const loaderURL =
+        const endpoint =
             `${DOMAIN}/api/loader/${id}`;
 
         secure(res).json({
-
             ok: true,
-
             id,
-
             name,
-
-            endpoint:
-                loaderURL,
-
+            endpoint,
             loader:
                 `loadstring(game:HttpGet(${JSON.stringify(
-                    loaderURL
+                    endpoint
                 )}))()`
         });
     }
 );
 
-/*
-========================================================
-EDIT
-========================================================
-*/
+/* ========================================================
+   EDIT SCRIPT
+
+   Khi edit source, L2 cũng được tạo lại.
+======================================================== */
 
 app.post(
     "/api/edit/:id",
     (req, res) => {
-
         const db =
             readDB();
 
@@ -624,7 +556,6 @@ app.post(
             ];
 
         if (!script) {
-
             return res
                 .status(404)
                 .json({
@@ -636,13 +567,11 @@ app.post(
 
         if (
             typeof req.body?.source ===
-                "string"
+            "string"
         ) {
-
             if (
                 !req.body.source.trim()
             ) {
-
                 return res
                     .status(400)
                     .json({
@@ -656,14 +585,15 @@ app.post(
                 encryptSource(
                     req.body.source
                 );
+
+            script.l2 =
+                createL2Payload();
         }
 
         if (
             typeof req.body?.name ===
-                "string" &&
-            req.body.name.trim()
+            "string"
         ) {
-
             script.name =
                 cleanName(
                     req.body.name
@@ -675,43 +605,34 @@ app.post(
 
         writeDB(db);
 
-        const loaderURL =
+        const endpoint =
             `${DOMAIN}/api/loader/${script.id}`;
 
         secure(res).json({
-
             ok: true,
-
-            id:
-                script.id,
-
-            name:
-                script.name,
-
+            id: script.id,
+            name: script.name,
+            endpoint,
             loader:
                 `loadstring(game:HttpGet(${JSON.stringify(
-                    loaderURL
+                    endpoint
                 )}))()`
         });
     }
 );
 
-/*
-========================================================
-L1
-========================================================
+/* ========================================================
+   L1 -> L2
 
-L1 không chứa source.
-Nó chỉ nhận challenge rồi chạy chain.
-========================================================
-*/
+   Browser navigation => 403.
+   Roblox loader => Lua L1.
+======================================================== */
 
 app.get(
     "/api/loader/:id",
     (req, res) => {
-
         if (
-            browserNavigation(req)
+            isBrowserNavigation(req)
         ) {
             return block(res);
         }
@@ -728,210 +649,204 @@ app.get(
             return block(res);
         }
 
-        /*
-         * Kiểm tra encrypted payload
-         * trước khi tạo session.
-         */
-
-        if (
-            !script.source ||
-            script.source.algorithm !==
-                "aes-256-gcm"
-        ) {
-            return block(res);
-        }
-
         const session =
             createSession(
                 script.id
             );
 
-        const lua = `
-local HttpService = game:GetService("HttpService")
+        const l2 =
+            script.l2 ||
+            createL2Payload();
 
-local DOMAIN = ${JSON.stringify(
+        /*
+         * L1 chỉ chứa loader.
+         * L2 payload được encode base64.
+         */
+
+        const lua = `
+local HttpService=game:GetService("HttpService")
+
+local B64=${JSON.stringify(
+            l2.payload
+        )}
+
+local CHECK=${JSON.stringify(
+            l2.checksum
+        )}
+
+local function decodeBase64(s)
+    local chars="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    local out={}
+    local buffer=0
+    local bits=0
+
+    for i=1,#s do
+        local c=s:sub(i,i)
+        if c~="=" then
+            local p=chars:find(c,1,true)
+            if p then
+                buffer=buffer*64+(p-1)
+                bits=bits+6
+
+                if bits>=8 then
+                    bits=bits-8
+                    local b=math.floor(buffer/2^bits)%256
+                    out[#out+1]=string.char(b)
+                end
+            end
+        end
+    end
+
+    return table.concat(out)
+end
+
+local L2=decodeBase64(B64)
+
+local DOMAIN=${JSON.stringify(
             DOMAIN
         )}
 
-local SESSION = ${JSON.stringify(
+local SESSION=${JSON.stringify(
             session.id
         )}
 
-local TOKEN = ${JSON.stringify(
-            session.l2.token
+local TOKEN=${JSON.stringify(
+            session.challenges[1].token
         )}
 
-local NONCE = ${JSON.stringify(
-            session.l2.nonce
+local NONCE=${JSON.stringify(
+            session.challenges[1].nonce
         )}
 
-local function requestJSON(
-    url,
-    body
+local response=request({
+    Url=DOMAIN.."/api/stage/2",
+    Method="POST",
+    Headers={
+        ["Content-Type"]="application/json"
+    },
+    Body=HttpService:JSONEncode({
+        session=SESSION,
+        token=TOKEN,
+        nonce=NONCE
+    })
+})
+
+if not response or response.StatusCode~=200 then
+    error("LEXINX BLOCK")
+end
+
+local ok,data=pcall(function()
+    return HttpService:JSONDecode(
+        response.Body
+    )
+end)
+
+if not ok or type(data)~="table" then
+    error("LEXINX BLOCK")
+end
+
+if data.ok~=true or data.stage~=2 then
+    error("LEXINX BLOCK")
+end
+
+local function post(path,body)
+    local r=request({
+        Url=DOMAIN..path,
+        Method="POST",
+        Headers={
+            ["Content-Type"]="application/json"
+        },
+        Body=HttpService:JSONEncode(body)
+    })
+
+    if not r or r.StatusCode~=200 then
+        error("LEXINX BLOCK")
+    end
+
+    local success,result=pcall(function()
+        return HttpService:JSONDecode(
+            r.Body
+        )
+    end)
+
+    if not success or type(result)~="table" then
+        error("LEXINX BLOCK")
+    end
+
+    if result.ok~=true then
+        error("LEXINX BLOCK")
+    end
+
+    return result
+end
+
+local L3=post(
+    "/api/stage/3",
+    {
+        session=data.session,
+        token=data.token,
+        nonce=data.nonce
+    }
 )
 
-    local ok, response =
-        pcall(function()
-
-            return request({
-
-                Url = url,
-
-                Method = "POST",
-
-                Headers = {
-                    ["Content-Type"] =
-                        "application/json"
-                },
-
-                Body =
-                    HttpService:JSONEncode(
-                        body
-                    )
-            })
-
-        end)
-
-    if not ok then
-        error("LEXINX BLOCK")
-    end
-
-    if not response then
-        error("LEXINX BLOCK")
-    end
-
-    if response.StatusCode ~= 200 then
-        error(
-            "LEXINX BLOCK HTTP " ..
-            tostring(
-                response.StatusCode
-            )
-        )
-    end
-
-    local okJSON, data =
-        pcall(function()
-
-            return HttpService:JSONDecode(
-                response.Body
-            )
-
-        end)
-
-    if not okJSON then
-        error("LEXINX BLOCK")
-    end
-
-    if type(data) ~= "table" then
-        error("LEXINX BLOCK")
-    end
-
-    if data.ok ~= true then
-        error("LEXINX BLOCK")
-    end
-
-    return data
-end
-
---------------------------------------------------------
--- L2 -> L3
---------------------------------------------------------
-
-local L3 =
-    requestJSON(
-        DOMAIN .. "/api/l3",
-        {
-            session = SESSION,
-            token = TOKEN,
-            nonce = NONCE
-        }
-    )
-
-if L3.stage ~= 3 then
+if L3.stage~=3 then
     error("LEXINX BLOCK")
 end
 
---------------------------------------------------------
--- L3 -> L4
---------------------------------------------------------
+local L4=post(
+    "/api/stage/4",
+    {
+        session=L3.session,
+        token=L3.token,
+        nonce=L3.nonce
+    }
+)
 
-local L4 =
-    requestJSON(
-        DOMAIN .. "/api/l4",
-        {
-            session = L3.session,
-            token = L3.token,
-            nonce = L3.nonce
-        }
-    )
-
-if L4.stage ~= 4 then
+if L4.stage~=4 then
     error("LEXINX BLOCK")
 end
 
---------------------------------------------------------
--- L4 -> L5
---------------------------------------------------------
+local L5=post(
+    "/api/stage/5",
+    {
+        session=L4.session,
+        token=L4.token,
+        nonce=L4.nonce
+    }
+)
 
-local L5 =
-    requestJSON(
-        DOMAIN .. "/api/l5",
-        {
-            session = L4.session,
-            token = L4.token,
-            nonce = L4.nonce
-        }
-    )
-
-if L5.stage ~= 5 then
+if L5.stage~=5 then
     error("LEXINX BLOCK")
 end
 
---------------------------------------------------------
--- L5 -> SOURCE
---------------------------------------------------------
+local source=post(
+    "/api/source",
+    {
+        session=L5.session,
+        token=L5.token,
+        nonce=L5.nonce
+    }
+)
 
-local result =
-    requestJSON(
-        DOMAIN .. "/api/data",
-        {
-            session = L5.session,
-            token = L5.token,
-            nonce = L5.nonce
-        }
-    )
-
-if type(result.code) ~= "string" then
-    error(
-        "LEXINX BLOCK: SOURCE MISSING"
-    )
+if type(source.code)~="string" then
+    error("LEXINX BLOCK")
 end
 
---------------------------------------------------------
--- EXECUTE
---------------------------------------------------------
-
-local fn, compileError =
-    loadstring(result.code)
+local fn,err=loadstring(source.code)
 
 if not fn then
     error(
-        "LEXINX COMPILE ERROR: " ..
-        tostring(
-            compileError
-        )
+        "LEXINX COMPILE ERROR: "
+        ..tostring(err)
     )
 end
 
-local success, runtimeError =
-    pcall(fn)
+local success,runtimeErr=pcall(fn)
 
 if not success then
     error(
-        "LEXINX RUNTIME ERROR: " ..
-        tostring(
-            runtimeError
-        )
+        "LEXINX RUNTIME ERROR: "
+        ..tostring(runtimeErr)
     )
 end
 `;
@@ -942,25 +857,20 @@ end
     }
 );
 
-/*
-========================================================
-L2 -> L3
-========================================================
-*/
+/* ========================================================
+   STAGE 2
+======================================================== */
 
 app.get(
-    "/api/l3",
-    (req, res) => {
-        return block(res);
-    }
+    "/api/stage/2",
+    (req, res) => block(res)
 );
 
 app.post(
-    "/api/l3",
+    "/api/stage/2",
     (req, res) => {
-
         if (
-            browserNavigation(req)
+            isBrowserNavigation(req)
         ) {
             return block(res);
         }
@@ -976,17 +886,13 @@ app.post(
                 session
             );
 
-        if (!s) {
-            return block(res);
-        }
-
-        if (s.stage !== 2) {
+        if (!s || s.stage !== 1) {
             return block(res);
         }
 
         if (
             !consumeChallenge(
-                s.l2,
+                s.challenges[1],
                 token,
                 nonce
             )
@@ -994,48 +900,105 @@ app.post(
             return block(res);
         }
 
-        s.l3 =
-            createChallenge();
+        const next =
+            nextStage(
+                s,
+                1,
+                2
+            );
 
-        s.stage = 3;
+        if (!next) {
+            return block(res);
+        }
 
         secure(res).json({
-
             ok: true,
+            stage: 2,
+            session: s.id,
+            token: next.token,
+            nonce: next.nonce
+        });
+    }
+);
 
+/* ========================================================
+   STAGE 3
+======================================================== */
+
+app.get(
+    "/api/stage/3",
+    (req, res) => block(res)
+);
+
+app.post(
+    "/api/stage/3",
+    (req, res) => {
+        if (
+            isBrowserNavigation(req)
+        ) {
+            return block(res);
+        }
+
+        const {
+            session,
+            token,
+            nonce
+        } = req.body || {};
+
+        const s =
+            getSession(
+                session
+            );
+
+        if (!s || s.stage !== 2) {
+            return block(res);
+        }
+
+        if (
+            !consumeChallenge(
+                s.challenges[2],
+                token,
+                nonce
+            )
+        ) {
+            return block(res);
+        }
+
+        const next =
+            nextStage(
+                s,
+                2,
+                3
+            );
+
+        if (!next) {
+            return block(res);
+        }
+
+        secure(res).json({
+            ok: true,
             stage: 3,
-
-            session:
-                s.id,
-
-            token:
-                s.l3.token,
-
-            nonce:
-                s.l3.nonce
+            session: s.id,
+            token: next.token,
+            nonce: next.nonce
         });
     }
 );
 
-/*
-========================================================
-L3 -> L4
-========================================================
-*/
+/* ========================================================
+   STAGE 4
+======================================================== */
 
 app.get(
-    "/api/l4",
-    (req, res) => {
-        return block(res);
-    }
+    "/api/stage/4",
+    (req, res) => block(res)
 );
 
 app.post(
-    "/api/l4",
+    "/api/stage/4",
     (req, res) => {
-
         if (
-            browserNavigation(req)
+            isBrowserNavigation(req)
         ) {
             return block(res);
         }
@@ -1051,17 +1014,13 @@ app.post(
                 session
             );
 
-        if (!s) {
-            return block(res);
-        }
-
-        if (s.stage !== 3) {
+        if (!s || s.stage !== 3) {
             return block(res);
         }
 
         if (
             !consumeChallenge(
-                s.l3,
+                s.challenges[3],
                 token,
                 nonce
             )
@@ -1069,48 +1028,41 @@ app.post(
             return block(res);
         }
 
-        s.l4 =
-            createChallenge();
+        const next =
+            nextStage(
+                s,
+                3,
+                4
+            );
 
-        s.stage = 4;
+        if (!next) {
+            return block(res);
+        }
 
         secure(res).json({
-
             ok: true,
-
             stage: 4,
-
-            session:
-                s.id,
-
-            token:
-                s.l4.token,
-
-            nonce:
-                s.l4.nonce
+            session: s.id,
+            token: next.token,
+            nonce: next.nonce
         });
     }
 );
 
-/*
-========================================================
-L4 -> L5
-========================================================
-*/
+/* ========================================================
+   STAGE 5
+======================================================== */
 
 app.get(
-    "/api/l5",
-    (req, res) => {
-        return block(res);
-    }
+    "/api/stage/5",
+    (req, res) => block(res)
 );
 
 app.post(
-    "/api/l5",
+    "/api/stage/5",
     (req, res) => {
-
         if (
-            browserNavigation(req)
+            isBrowserNavigation(req)
         ) {
             return block(res);
         }
@@ -1126,17 +1078,13 @@ app.post(
                 session
             );
 
-        if (!s) {
-            return block(res);
-        }
-
-        if (s.stage !== 4) {
+        if (!s || s.stage !== 4) {
             return block(res);
         }
 
         if (
             !consumeChallenge(
-                s.l4,
+                s.challenges[4],
                 token,
                 nonce
             )
@@ -1144,48 +1092,41 @@ app.post(
             return block(res);
         }
 
-        s.l5 =
-            createChallenge();
+        const next =
+            nextStage(
+                s,
+                4,
+                5
+            );
 
-        s.stage = 5;
+        if (!next) {
+            return block(res);
+        }
 
         secure(res).json({
-
             ok: true,
-
             stage: 5,
-
-            session:
-                s.id,
-
-            token:
-                s.l5.token,
-
-            nonce:
-                s.l5.nonce
+            session: s.id,
+            token: next.token,
+            nonce: next.nonce
         });
     }
 );
 
-/*
-========================================================
-L5 -> SOURCE
-========================================================
-*/
+/* ========================================================
+   SOURCE
+======================================================== */
 
 app.get(
-    "/api/data",
-    (req, res) => {
-        return block(res);
-    }
+    "/api/source",
+    (req, res) => block(res)
 );
 
 app.post(
-    "/api/data",
+    "/api/source",
     (req, res) => {
-
         if (
-            browserNavigation(req)
+            isBrowserNavigation(req)
         ) {
             return block(res);
         }
@@ -1201,17 +1142,13 @@ app.post(
                 session
             );
 
-        if (!s) {
-            return block(res);
-        }
-
-        if (s.stage !== 5) {
+        if (!s || s.stage !== 5) {
             return block(res);
         }
 
         if (
             !consumeChallenge(
-                s.l5,
+                s.challenges[5],
                 token,
                 nonce
             )
@@ -1228,35 +1165,21 @@ app.post(
             ];
 
         if (!script) {
-
             sessions.delete(
                 s.id
             );
 
-            return res
-                .status(404)
-                .json({
-                    ok: false,
-                    error:
-                        "Script not found"
-                });
+            return block(res);
         }
-
-        /*
-         * Decrypt chỉ tại bước cuối.
-         */
 
         let source;
 
         try {
-
             source =
                 decryptSource(
                     script.source
                 );
-
         } catch {
-
             sessions.delete(
                 s.id
             );
@@ -1265,8 +1188,7 @@ app.post(
         }
 
         /*
-         * Session bị hủy ngay sau
-         * khi lấy source.
+         * One-time session destroyed.
          */
 
         sessions.delete(
@@ -1274,81 +1196,65 @@ app.post(
         );
 
         secure(res).json({
-
             ok: true,
-
-            code:
-                source
+            code: source
         });
     }
 );
 
-/*
-========================================================
-LIST
-========================================================
-*/
+/* ========================================================
+   LIST
+======================================================== */
 
 app.get(
     "/api/scripts",
     (req, res) => {
-
         const db =
             readDB();
 
         const scripts =
             Object.values(db)
                 .reverse()
-                .map(
-                    script => {
+                .map(script => {
+                    const endpoint =
+                        `${DOMAIN}/api/loader/${script.id}`;
 
-                        const url =
-                            `${DOMAIN}/api/loader/${script.id}`;
+                    return {
+                        id:
+                            script.id,
 
-                        return {
+                        name:
+                            script.name,
 
-                            id:
-                                script.id,
+                        createdAt:
+                            script.createdAt,
 
-                            name:
-                                script.name,
+                        updatedAt:
+                            script.updatedAt,
 
-                            createdAt:
-                                script.createdAt,
+                        endpoint,
 
-                            updatedAt:
-                                script.updatedAt,
-
-                            endpoint:
-                                url,
-
-                            loader:
-                                `loadstring(game:HttpGet(${JSON.stringify(
-                                    url
-                                )}))()`
-                        };
-                    }
-                );
+                        loader:
+                            `loadstring(game:HttpGet(${JSON.stringify(
+                                endpoint
+                            )}))()`
+                    };
+                });
 
         secure(res).json({
-
             ok: true,
-
             scripts
         });
     }
 );
 
-/*
-========================================================
-DELETE
-========================================================
-*/
+/* ========================================================
+   DELETE
+======================================================== */
 
 app.delete(
     "/api/delete/:id",
     (req, res) => {
-
         const db =
             readDB();
 
@@ -1357,7 +1263,6 @@ app.delete(
                 req.params.id
             ]
         ) {
-
             return res
                 .status(404)
                 .json({
@@ -1379,28 +1284,23 @@ app.delete(
     }
 );
 
-/*
-========================================================
-UNKNOWN API
-========================================================
-*/
+/* ========================================================
+   UNKNOWN API
+======================================================== */
 
 app.use(
     "/api",
     (req, res) => {
-        return block(res);
+        block(res);
     }
 );
 
-/*
-========================================================
-404
-========================================================
-*/
+/* ========================================================
+   404
+======================================================== */
 
 app.use(
     (req, res) => {
-
         secure(res)
             .status(404)
             .type("text/plain")
@@ -1410,15 +1310,12 @@ app.use(
     }
 );
 
-/*
-========================================================
-SESSION CLEANUP
-========================================================
-*/
+/* ========================================================
+   CLEAN EXPIRED SESSIONS
+======================================================== */
 
 setInterval(
     () => {
-
         const now =
             Date.now();
 
@@ -1426,37 +1323,28 @@ setInterval(
             const [
                 id,
                 session
-            ]
-            of sessions
+            ] of sessions
         ) {
-
             if (
                 now >
                 session.expiresAt
             ) {
-
-                sessions.delete(
-                    id
-                );
+                sessions.delete(id);
             }
         }
-
     },
     30 * 1000
 );
 
-/*
-========================================================
-START
-========================================================
-*/
+/* ========================================================
+   START
+======================================================== */
 
 app.listen(
     PORT,
     () => {
-
         console.log(
-            "================================"
+            "======================================"
         );
 
         console.log(
@@ -1464,39 +1352,27 @@ app.listen(
         );
 
         console.log(
-            "DOMAIN:",
+            "Domain:",
             DOMAIN
         );
 
         console.log(
-            "PORT:",
+            "Port:",
             PORT
         );
 
         console.log(
-            "FLOW:",
-            "L1 -> L2 -> L3 -> L4 -> L5 -> SOURCE"
+            "Flow:",
+            "L1 -> L2(encoded) -> L3 -> L4 -> L5 -> SOURCE"
         );
 
         console.log(
-            "AES:",
+            "Encryption:",
             "AES-256-GCM"
         );
 
         console.log(
-            "SESSION TTL:",
-            SESSION_TTL,
-            "ms"
-        );
-
-        console.log(
-            "TOKEN TTL:",
-            TOKEN_TTL,
-            "ms"
-        );
-
-        console.log(
-            "================================"
+            "======================================"
         );
     }
 );
