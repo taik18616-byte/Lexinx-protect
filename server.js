@@ -16,15 +16,11 @@ fs.mkdirSync(SCRIPT_DIR, {
 });
 
 if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(
-        DB_FILE,
-        "{}",
-        "utf8"
-    );
+    fs.writeFileSync(DB_FILE, "{}", "utf8");
 }
 
 app.use(express.json({
-    limit: "15mb"
+    limit: "20mb"
 }));
 
 app.use(
@@ -33,9 +29,9 @@ app.use(
     )
 );
 
-/* =========================================
+/* =========================
    DATABASE
-========================================= */
+========================= */
 
 function readDB() {
     try {
@@ -62,251 +58,44 @@ function writeDB(db) {
     );
 }
 
-/* =========================================
+/* =========================
    ID
-========================================= */
+========================= */
 
 function createID() {
+
     const db = readDB();
 
     let id;
 
     do {
-        id =
-            crypto
-                .randomBytes(18)
-                .toString("base64url");
-    }
-    while (db[id]);
+        id = crypto
+            .randomBytes(16)
+            .toString("hex");
+    } while (db[id]);
 
     return id;
 }
 
-/* =========================================
-   BASIC SOURCE PROTECTION
-=========================================
+/* =========================
+   CLEAN NAME
+========================= */
 
-   Đây là đóng gói source ở server.
-   Không phải mã hóa tuyệt đối:
-   code cuối cùng vẫn phải được
-   giải mã/thực thi ở client.
-========================================= */
+function cleanName(name) {
 
-function encodeLua(source) {
-
-    const bytes =
-        Buffer.from(
-            source,
-            "utf8"
-        );
-
-    const key =
-        crypto.randomBytes(32);
-
-    const output =
-        Buffer.alloc(
-            bytes.length
-        );
-
-    for (
-        let i = 0;
-        i < bytes.length;
-        i++
-    ) {
-        output[i] =
-            bytes[i] ^
-            key[i % key.length];
-    }
-
-    return {
-        data:
-            output.toString("base64"),
-
-        key:
-            key.toString("base64")
-    };
+    return String(
+        name || "Script"
+    )
+        .replace(
+            /[^a-zA-Z0-9._ -]/g,
+            "_"
+        )
+        .slice(0, 100);
 }
 
-/* =========================================
-   LUA WRAPPER
-========================================= */
-
-function makePayload(source) {
-
-    const packed =
-        encodeLua(source);
-
-    const payload = `
--- LEXINX PROTECT
--- Generated payload
-
-local function _bxor(a, b)
-    local r = 0
-    local p = 1
-
-    while a > 0 or b > 0 do
-        local aa = a % 2
-        local bb = b % 2
-
-        if aa ~= bb then
-            r = r + p
-        end
-
-        a = math.floor(a / 2)
-        b = math.floor(b / 2)
-        p = p * 2
-    end
-
-    return r
-end
-
-local function _b64(s)
-
-    local chars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-
-    s = s:gsub(
-        "[^" .. chars .. "=]",
-        ""
-    )
-
-    local result = {}
-
-    for i = 1, #s, 4 do
-
-        local a =
-            chars:find(
-                s:sub(i, i),
-                1,
-                true
-            )
-
-        local b =
-            chars:find(
-                s:sub(i + 1, i + 1),
-                1,
-                true
-            )
-
-        local c =
-            chars:find(
-                s:sub(i + 2, i + 2),
-                1,
-                true
-            )
-
-        local d =
-            chars:find(
-                s:sub(i + 3, i + 3),
-                1,
-                true
-            )
-
-        a = (a or 1) - 1
-        b = (b or 1) - 1
-        c = (c or 1) - 1
-        d = (d or 1) - 1
-
-        local n1 =
-            a * 4 +
-            math.floor(b / 16)
-
-        local n2 =
-            (b % 16) * 16 +
-            math.floor(c / 4)
-
-        local n3 =
-            (c % 4) * 64 +
-            d
-
-        result[#result + 1] =
-            string.char(n1)
-
-        if s:sub(i + 2, i + 2) ~= "=" then
-            result[#result + 1] =
-                string.char(n2)
-        end
-
-        if s:sub(i + 3, i + 3) ~= "=" then
-            result[#result + 1] =
-                string.char(n3)
-        end
-    end
-
-    return table.concat(result)
-end
-
-local _data =
-    _b64(${JSON.stringify(packed.data)})
-
-local _key =
-    _b64(${JSON.stringify(packed.key)})
-
-local _out = {}
-
-for i = 1, #_data do
-
-    local a =
-        string.byte(
-            _data,
-            i
-        )
-
-    local b =
-        string.byte(
-            _key,
-            ((i - 1) % #_key) + 1
-        )
-
-    _out[i] =
-        string.char(
-            _bxor(a, b)
-        )
-end
-
-local _source =
-    table.concat(_out)
-
-local _load =
-    (getgenv and getgenv().loadstring)
-    or loadstring
-
-if type(_load) ~= "function" then
-    warn("LEXINX: loadstring unavailable")
-    return
-end
-
-local _fn, _err =
-    _load(
-        _source,
-        "LEXINX_PAYLOAD"
-    )
-
-if not _fn then
-    warn(
-        "LEXINX COMPILE ERROR: "
-        .. tostring(_err)
-    )
-    return
-end
-
-local _ok, _runtime =
-    pcall(_fn)
-
-if not _ok then
-    warn(
-        "LEXINX RUNTIME ERROR: "
-        .. tostring(_runtime)
-    )
-end
-`;
-
-    return payload.trim();
-}
-
-/* =========================================
+/* =========================
    HOME
-========================================= */
+========================= */
 
 app.get("/", (req, res) => {
 
@@ -319,9 +108,9 @@ app.get("/", (req, res) => {
     );
 });
 
-/* =========================================
-   CREATE
-========================================= */
+/* =========================
+   CREATE SCRIPT
+========================= */
 
 app.post(
     "/api/create",
@@ -329,24 +118,14 @@ app.post(
 
         try {
 
-            const name =
-                String(
-                    req.body.name ||
-                    "Script"
-                )
-                .replace(
-                    /[^a-zA-Z0-9._ -]/g,
-                    "_"
-                )
-                .slice(
-                    0,
-                    80
-                );
-
             const source =
-                String(
-                    req.body.code ||
-                    ""
+                typeof req.body.code === "string"
+                    ? req.body.code
+                    : "";
+
+            const name =
+                cleanName(
+                    req.body.name
                 );
 
             if (!source.trim()) {
@@ -363,20 +142,24 @@ app.post(
             const id =
                 createID();
 
-            const payload =
-                makePayload(
-                    source
-                );
-
             const filename =
-                id + ".lua";
+                `${id}.lua`;
+
+            /*
+             * KHÔNG OBF
+             * KHÔNG XOR
+             * KHÔNG BASE64
+             * KHÔNG VM
+             *
+             * Lưu nguyên source.
+             */
 
             fs.writeFileSync(
                 path.join(
                     SCRIPT_DIR,
                     filename
                 ),
-                payload,
+                source,
                 "utf8"
             );
 
@@ -393,11 +176,11 @@ app.post(
 
             writeDB(db);
 
-            const base =
+            const baseURL =
                 `${req.protocol}://${req.get("host")}`;
 
             const loader =
-                `loadstring(game:HttpGet("${base}/api/${id}"))()`;
+                `loadstring(game:HttpGet("${baseURL}/api/${id}"))()`;
 
             res.json({
                 ok: true,
@@ -406,50 +189,63 @@ app.post(
                 loader
             });
 
-        } catch (err) {
+        } catch (error) {
 
-            console.error(err);
+            console.error(error);
 
             res
                 .status(500)
                 .json({
                     ok: false,
                     error:
-                        "Failed to create loader"
+                        "Failed to create script"
                 });
         }
     }
 );
 
-/* =========================================
-   LIST
-========================================= */
+/* =========================
+   LIST SCRIPTS
+========================= */
 
 app.get(
     "/api/scripts",
     (req, res) => {
 
-        const db =
-            readDB();
+        try {
 
-        const scripts =
-            Object.values(db)
-                .sort(
-                    (a, b) =>
-                        b.createdAt -
-                        a.createdAt
-                );
+            const db =
+                readDB();
 
-        res.json({
-            ok: true,
-            scripts
-        });
+            const scripts =
+                Object.values(db)
+                    .sort(
+                        (a, b) =>
+                            b.createdAt -
+                            a.createdAt
+                    );
+
+            res.json({
+                ok: true,
+                scripts
+            });
+
+        } catch (error) {
+
+            res
+                .status(500)
+                .json({
+                    ok: false,
+                    error:
+                        "Failed to load scripts"
+                });
+        }
     }
 );
 
-/* =========================================
-   PAYLOAD
-========================================= */
+/* =========================
+   GET PAYLOAD
+========================= */
 
 app.get(
     "/api/:id",
@@ -457,6 +253,22 @@ app.get(
 
         const id =
             req.params.id;
+
+        /*
+         * Chỉ cho ID hợp lệ.
+         */
+
+        if (
+            !/^[a-f0-9]{32}$/.test(id)
+        ) {
+
+            return res
+                .status(404)
+                .type("text/plain")
+                .send(
+                    "Blocked by LEXINX v50 protection"
+                );
+        }
 
         const db =
             readDB();
@@ -492,7 +304,11 @@ app.get(
                 );
         }
 
-        const payload =
+        /*
+         * Trả nguyên source.
+         */
+
+        const source =
             fs.readFileSync(
                 file,
                 "utf8"
@@ -509,61 +325,78 @@ app.get(
                 "Pragma",
                 "no-cache"
             )
-            .send(payload);
+            .send(source);
     }
 );
 
-/* =========================================
+/* =========================
    DELETE
-========================================= */
+========================= */
 
 app.delete(
     "/api/scripts/:id",
     (req, res) => {
 
-        const id =
-            req.params.id;
+        try {
 
-        const db =
-            readDB();
+            const id =
+                req.params.id;
 
-        const item =
-            db[id];
+            const db =
+                readDB();
 
-        if (!item) {
+            const item =
+                db[id];
 
-            return res
-                .status(404)
+            if (!item) {
+
+                return res
+                    .status(404)
+                    .json({
+                        ok: false,
+                        error:
+                            "Script not found"
+                    });
+            }
+
+            const file =
+                path.join(
+                    SCRIPT_DIR,
+                    item.filename
+                );
+
+            if (
+                fs.existsSync(file)
+            ) {
+                fs.unlinkSync(file);
+            }
+
+            delete db[id];
+
+            writeDB(db);
+
+            res.json({
+                ok: true
+            });
+
+        } catch (error) {
+
+            console.error(error);
+
+            res
+                .status(500)
                 .json({
-                    ok: false
+                    ok: false,
+                    error:
+                        "Delete failed"
                 });
         }
-
-        const file =
-            path.join(
-                SCRIPT_DIR,
-                item.filename
-            );
-
-        if (
-            fs.existsSync(file)
-        ) {
-            fs.unlinkSync(file);
-        }
-
-        delete db[id];
-
-        writeDB(db);
-
-        res.json({
-            ok: true
-        });
     }
 );
 
-/* =========================================
-   UNKNOWN
-========================================= */
+/* =========================
+   404
+========================= */
 
 app.use(
     (req, res) => {
@@ -577,9 +410,9 @@ app.use(
     }
 );
 
-/* =========================================
+/* =========================
    START
-========================================= */
+========================= */
 
 app.listen(
     PORT,
