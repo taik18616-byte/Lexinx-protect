@@ -4,68 +4,74 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
+
 const PORT = process.env.PORT || 3000;
+const DOMAIN =
+    process.env.DOMAIN ||
+    "https://Lexinx-protect.onrender.com";
 
-const DATA = path.join(__dirname, "data");
-const PUBLIC = path.join(__dirname, "public");
-const DB = path.join(DATA, "scripts.json");
+const DATA_DIR = path.join(__dirname, "data");
+const DB_FILE = path.join(DATA_DIR, "scripts.json");
+const PUBLIC_DIR = path.join(__dirname, "public");
 
-fs.mkdirSync(DATA, { recursive: true });
-fs.mkdirSync(PUBLIC, { recursive: true });
+fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 
-if (!fs.existsSync(DB)) {
-    fs.writeFileSync(DB, "{}", "utf8");
+if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(DB_FILE, "{}", "utf8");
 }
 
-app.use(express.json({ limit: "10mb" }));
-app.use(express.static(PUBLIC));
+app.use(express.json({
+    limit: "15mb"
+}));
+
+app.use(express.static(PUBLIC_DIR));
 
 function readDB() {
     try {
-        return JSON.parse(fs.readFileSync(DB, "utf8"));
+        return JSON.parse(
+            fs.readFileSync(DB_FILE, "utf8")
+        );
     } catch {
         return {};
     }
 }
 
 function writeDB(db) {
-    fs.writeFileSync(DB, JSON.stringify(db, null, 2));
-}
-
-function makeID() {
-    return crypto.randomBytes(12).toString("hex");
-}
-
-/*
- * Browser/direct URL blocker.
- * Đây chỉ là lớp lọc cơ bản, không phải
- * xác thực Roblox tuyệt đối.
- */
-function looksLikeBrowser(req) {
-    const ua = String(req.get("user-agent") || "").toLowerCase();
-
-    return (
-        ua.includes("mozilla") ||
-        ua.includes("chrome") ||
-        ua.includes("firefox") ||
-        ua.includes("safari") ||
-        ua.includes("edg")
+    fs.writeFileSync(
+        DB_FILE,
+        JSON.stringify(db, null, 2),
+        "utf8"
     );
 }
 
-/* Web */
+function createID() {
+    return crypto
+        .randomBytes(10)
+        .toString("hex");
+}
+
+function cleanName(name) {
+    return String(name || "Script")
+        .replace(/[^\w .-]/g, "_")
+        .slice(0, 80);
+}
+
+/*
+    Trang web
+*/
 
 app.get("/", (req, res) => {
-    res.sendFile(path.join(PUBLIC, "index.html"));
+    res.sendFile(
+        path.join(PUBLIC_DIR, "index.html")
+    );
 });
 
-/* Tạo script */
+/*
+    Tạo script
+*/
 
 app.post("/api/create", (req, res) => {
-    const name =
-        String(req.body?.name || "Script")
-            .replace(/[^\w .-]/g, "_")
-            .slice(0, 80);
 
     const source =
         typeof req.body?.source === "string"
@@ -75,11 +81,15 @@ app.post("/api/create", (req, res) => {
     if (!source.trim()) {
         return res.status(400).json({
             ok: false,
-            error: "Script rỗng"
+            error: "Script is empty"
         });
     }
 
-    const id = makeID();
+    const name =
+        cleanName(req.body?.name);
+
+    const id = createID();
+
     const db = readDB();
 
     db[id] = {
@@ -91,40 +101,61 @@ app.post("/api/create", (req, res) => {
 
     writeDB(db);
 
+    const endpoint =
+        `${DOMAIN}/api/${id}`;
+
+    const loader =
+        `loadstring(game:HttpGet("${endpoint}"))()`;
+
     res.json({
         ok: true,
         id,
-        name
-    });
-});
-
-/* Danh sách */
-
-app.get("/api/scripts", (req, res) => {
-    const db = readDB();
-
-    res.json({
-        ok: true,
-        scripts: Object.values(db).map(x => ({
-            id: x.id,
-            name: x.name,
-            createdAt: x.createdAt
-        }))
+        name,
+        endpoint,
+        loader
     });
 });
 
 /*
- * Payload endpoint.
- *
- * Mở trực tiếp bằng browser:
- * → Blocked
- *
- * Request không giống browser:
- * → source được trả về.
- */
+    Danh sách script
+*/
+
+app.get("/api/scripts", (req, res) => {
+
+    const db = readDB();
+
+    const scripts =
+        Object.values(db)
+            .map(script => {
+
+                const endpoint =
+                    `${DOMAIN}/api/${script.id}`;
+
+                return {
+                    id: script.id,
+                    name: script.name,
+                    createdAt: script.createdAt,
+                    endpoint,
+                    loader:
+                        `loadstring(game:HttpGet("${endpoint}"))()`
+                };
+            })
+            .reverse();
+
+    res.json({
+        ok: true,
+        scripts
+    });
+});
+
+/*
+    SERVER GỬI SOURCE THẲNG
+*/
 
 app.get("/api/:id", (req, res) => {
+
     const id = req.params.id;
+
     const db = readDB();
     const script = db[id];
 
@@ -132,33 +163,49 @@ app.get("/api/:id", (req, res) => {
         return res
             .status(404)
             .type("text/plain")
-            .send("Blocked by LEXINX v50 protection");
+            .send(
+                "Blocked by LEXINX v50 protection"
+            );
     }
 
-    if (looksLikeBrowser(req)) {
-        return res
-            .status(403)
-            .type("text/plain")
-            .send("Blocked by LEXINX v50 protection");
-    }
+    /*
+        Không trả HTML.
+        Endpoint này chỉ trả Lua source.
+    */
 
     res
+        .status(200)
         .type("text/plain")
-        .set("Cache-Control", "no-store")
+        .set(
+            "Cache-Control",
+            "no-store, no-cache, must-revalidate"
+        )
+        .set(
+            "X-Content-Type-Options",
+            "nosniff"
+        )
         .send(script.source);
 });
 
-/* Route không tồn tại */
+/*
+    Route không tồn tại
+*/
 
 app.use((req, res) => {
     res
         .status(404)
         .type("text/plain")
-        .send("Blocked by LEXINX v50 protection");
+        .send(
+            "Blocked by LEXINX v50 protection"
+        );
 });
 
 app.listen(PORT, () => {
     console.log(
         `LEXINX PROTECT running on port ${PORT}`
+    );
+
+    console.log(
+        `Domain: ${DOMAIN}`
     );
 });
