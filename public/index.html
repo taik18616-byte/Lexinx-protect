@@ -1,23 +1,26 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport"
-      content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 
 <title>LEXINX PROTECT</title>
 
 <style>
+* {
+    box-sizing: border-box;
+}
+
 body {
     margin: 0;
-    background: #070707;
-    color: #eee;
-    font-family: Arial;
+    background: #080808;
+    color: #fff;
+    font-family: Arial, sans-serif;
 }
 
 .container {
     width: min(900px, 94%);
-    margin: 40px auto;
+    margin: 35px auto;
 }
 
 .card {
@@ -25,23 +28,26 @@ body {
     border: 1px solid #292929;
     border-radius: 14px;
     padding: 20px;
-    margin-bottom: 20px;
+    margin-bottom: 18px;
+}
+
+h1 {
+    margin-top: 0;
 }
 
 input,
 textarea {
     width: 100%;
-    box-sizing: border-box;
-    background: #050505;
-    color: white;
+    background: #070707;
+    color: #fff;
     border: 1px solid #333;
     border-radius: 8px;
     padding: 11px;
-    margin-bottom: 10px;
+    margin: 7px 0;
 }
 
 textarea {
-    min-height: 300px;
+    height: 300px;
     resize: vertical;
     font-family: monospace;
 }
@@ -50,12 +56,12 @@ button {
     border: 0;
     border-radius: 8px;
     padding: 10px 14px;
+    margin: 5px 5px 5px 0;
     cursor: pointer;
     font-weight: bold;
 }
 
 .script {
-    background: #080808;
     border: 1px solid #292929;
     border-radius: 10px;
     padding: 15px;
@@ -63,13 +69,7 @@ button {
 }
 
 .loader {
-    width: 100%;
     margin-top: 10px;
-}
-
-.status {
-    margin-top: 10px;
-    color: #888;
     font-family: monospace;
 }
 </style>
@@ -84,11 +84,6 @@ button {
 <h1>LEXINX PROTECT</h1>
 
 <input
-    id="admin"
-    type="password"
-    placeholder="Admin token">
-
-<input
     id="name"
     placeholder="Script name">
 
@@ -98,7 +93,7 @@ button {
     accept=".lua,.txt">
 
 <textarea
-    id="code"
+    id="source"
     placeholder="Paste Lua source here...">
 </textarea>
 
@@ -106,9 +101,7 @@ button {
 Create Script
 </button>
 
-<div id="status"
-     class="status">
-</div>
+<p id="status"></p>
 
 </div>
 
@@ -116,7 +109,7 @@ Create Script
 
 <h2>Scripts</h2>
 
-<div id="list">
+<div id="scripts">
 Loading...
 </div>
 
@@ -126,103 +119,65 @@ Loading...
 
 <script>
 
-async function api(
-    url,
-    options = {}
-) {
-
-    options.headers =
-        options.headers || {};
-
-    options.headers[
-        "X-Admin-Token"
-    ] =
-        document.getElementById(
-            "admin"
-        ).value;
-
-    return fetch(
-        url,
-        options
-    );
-}
-
 async function createScript() {
 
-    const status =
-        document.getElementById(
-            "status"
-        );
-
-    let code =
-        document.getElementById(
-            "code"
-        ).value;
-
     const file =
-        document.getElementById(
-            "file"
-        ).files[0];
+        document.getElementById("file")
+            .files[0];
+
+    let source =
+        document.getElementById("source")
+            .value;
 
     if (file) {
-        code =
-            await file.text();
+        source = await file.text();
     }
 
-    if (!code.trim()) {
-        status.textContent =
-            "Script is empty";
+    if (!source.trim()) {
+        document.getElementById("status")
+            .textContent =
+            "Script is empty.";
         return;
     }
 
     const name =
-        document.getElementById(
-            "name"
-        ).value ||
+        document.getElementById("name")
+            .value ||
         file?.name ||
         "Script";
 
-    status.textContent =
-        "Creating...";
-
     const response =
-        await api(
-            "/api/create",
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type":
-                        "application/json"
-                },
-                body:
-                    JSON.stringify({
-                        name,
-                        code
-                    })
-            }
-        );
+        await fetch("/api/create", {
+            method: "POST",
+            headers: {
+                "Content-Type":
+                    "application/json"
+            },
+            body: JSON.stringify({
+                name,
+                source
+            })
+        });
 
     const data =
         await response.json();
 
-    if (!response.ok) {
-        status.textContent =
-            data.error ||
-            "Error";
+    if (!data.ok) {
+        document.getElementById("status")
+            .textContent =
+            data.error || "Error";
         return;
     }
 
-    status.textContent =
-        "Created: " +
-        data.id;
+    document.getElementById("status")
+        .textContent =
+        "Created: " + data.id;
 
-    document.getElementById(
-        "code"
-    ).value = "";
+    document.getElementById("source")
+        .value = "";
 
-    document.getElementById(
-        "file"
-    ).value = "";
+    document.getElementById("file")
+        .value = "";
 
     loadScripts();
 }
@@ -230,143 +185,91 @@ async function createScript() {
 async function loadScripts() {
 
     const response =
-        await api(
-            "/api/scripts"
-        );
+        await fetch("/api/scripts");
 
     const data =
         await response.json();
 
-    const list =
-        document.getElementById(
-            "list"
-        );
+    const container =
+        document.getElementById("scripts");
 
-    list.innerHTML = "";
+    container.innerHTML = "";
 
-    if (
-        !data.ok ||
-        data.scripts.length === 0
-    ) {
-        list.textContent =
-            "No scripts.";
-        return;
-    }
-
-    for (
-        const script
-        of data.scripts
-    ) {
+    for (const script of data.scripts) {
 
         const box =
-            document.createElement(
-                "div"
-            );
+            document.createElement("div");
 
-        box.className =
-            "script";
+        box.className = "script";
 
         const title =
-            document.createElement(
-                "b"
-            );
+            document.createElement("b");
 
         title.textContent =
             script.name;
 
         const id =
-            document.createElement(
-                "div"
-            );
+            document.createElement("div");
 
         id.textContent =
-            "ID: " +
-            script.id;
-
-        const loader =
-            document.createElement(
-                "input"
-            );
-
-        loader.className =
-            "loader";
-
-        loader.readOnly = true;
+            "ID: " + script.id;
 
         /*
-         * Đây là URL của endpoint
-         * tạo session.
-         *
-         * Không phải payload trực tiếp.
+         * Endpoint của source.
          */
+        const url =
+            location.origin +
+            "/api/" +
+            script.id;
 
-        loader.value =
-            `${location.origin}/api/session?id=${script.id}`;
+        /*
+         * Loader template chỉ được
+         * hiển thị/copy như text.
+         */
+        const loader =
+            `GET ${url}`;
+
+        const field =
+            document.createElement("input");
+
+        field.className = "loader";
+        field.value = loader;
+        field.readOnly = true;
 
         const copy =
-            document.createElement(
-                "button"
-            );
+            document.createElement("button");
 
         copy.textContent =
-            "Copy URL";
+            "Copy Loader";
 
-        copy.onclick = () => {
+        copy.onclick = async () => {
 
-            navigator.clipboard
-                .writeText(
-                    loader.value
-                );
+            await navigator.clipboard
+                .writeText(loader);
 
             copy.textContent =
                 "Copied!";
 
-            setTimeout(
-                () => {
-                    copy.textContent =
-                        "Copy URL";
-                },
-                1000
-            );
+            setTimeout(() => {
+                copy.textContent =
+                    "Copy Loader";
+            }, 1000);
         };
 
-        const del =
-            document.createElement(
-                "button"
-            );
-
-        del.textContent =
-            "Delete";
-
-        del.onclick =
-            async () => {
-
-                if (
-                    !confirm(
-                        "Delete this script?"
-                    )
-                ) {
-                    return;
-                }
-
-                await api(
-                    `/api/scripts/${script.id}`,
-                    {
-                        method:
-                            "DELETE"
-                    }
-                );
-
-                loadScripts();
-            };
-
         box.appendChild(title);
+        box.appendChild(
+            document.createElement("br")
+        );
         box.appendChild(id);
-        box.appendChild(loader);
+        box.appendChild(field);
         box.appendChild(copy);
-        box.appendChild(del);
 
-        list.appendChild(box);
+        container.appendChild(box);
+    }
+
+    if (!data.scripts.length) {
+        container.textContent =
+            "No scripts.";
     }
 }
 
