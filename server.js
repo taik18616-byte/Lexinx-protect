@@ -5,7 +5,6 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
-
 const PORT = process.env.PORT || 3000;
 
 const DATA_DIR = path.join(__dirname, "data");
@@ -18,21 +17,35 @@ if (!fs.existsSync(DB_FILE)) {
     fs.writeFileSync(DB_FILE, "{}");
 }
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: "3mb" }));
+app.use(express.urlencoded({
+    extended: true,
+    limit: "3mb"
+}));
+
+app.use(express.static(
+    path.join(__dirname, "public")
+));
 
 const upload = multer({
     storage: multer.memoryStorage(),
 
     limits: {
-        fileSize: 1024 * 1024
+        fileSize: 2 * 1024 * 1024
     },
 
     fileFilter: (req, file, cb) => {
-        const ext = path.extname(file.originalname).toLowerCase();
+
+        const ext =
+            path.extname(file.originalname)
+                .toLowerCase();
 
         if (ext !== ".lua" && ext !== ".txt") {
-            return cb(new Error("Only .lua and .txt files are allowed"));
+            return cb(
+                new Error(
+                    "Only .lua and .txt files are allowed"
+                )
+            );
         }
 
         cb(null, true);
@@ -41,7 +54,9 @@ const upload = multer({
 
 function readDB() {
     try {
-        return JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
+        return JSON.parse(
+            fs.readFileSync(DB_FILE, "utf8")
+        );
     } catch {
         return {};
     }
@@ -50,342 +65,53 @@ function readDB() {
 function writeDB(db) {
     fs.writeFileSync(
         DB_FILE,
-        JSON.stringify(db, null, 2)
+        JSON.stringify(db, null, 2),
+        "utf8"
     );
 }
 
 function createID() {
-    return crypto
-        .randomBytes(9)
-        .toString("base64url");
+
+    const db = readDB();
+
+    let id;
+
+    do {
+        id = crypto
+            .randomBytes(12)
+            .toString("base64url");
+    } while (db[id]);
+
+    return id;
 }
 
 function cleanName(name) {
-    return name
+
+    return String(name)
         .replace(/[^a-zA-Z0-9._-]/g, "_")
         .slice(0, 100);
 }
 
 /*
 ==================================================
-WEB
+HOME
 ==================================================
 */
 
 app.get("/", (req, res) => {
-    res.type("html").send(`
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
 
-<title>LEXINX PROTECT</title>
-
-<style>
-
-* {
-    box-sizing: border-box;
-}
-
-body {
-    margin: 0;
-    background: #050505;
-    color: white;
-    font-family: Arial, sans-serif;
-}
-
-.container {
-    width: min(900px, 94%);
-    margin: 50px auto;
-}
-
-.title {
-    text-align: center;
-    font-size: 42px;
-    font-weight: bold;
-}
-
-.subtitle {
-    text-align: center;
-    color: #888;
-    margin-bottom: 40px;
-}
-
-.card {
-    background: #101010;
-    border: 1px solid #252525;
-    border-radius: 16px;
-    padding: 25px;
-    margin-bottom: 25px;
-}
-
-input[type=file] {
-    width: 100%;
-    padding: 15px;
-    background: #080808;
-    color: white;
-    border: 1px solid #333;
-    border-radius: 10px;
-}
-
-button {
-    margin-top: 15px;
-    padding: 12px 18px;
-    border: 0;
-    border-radius: 9px;
-    background: white;
-    color: black;
-    cursor: pointer;
-    font-weight: bold;
-}
-
-button:hover {
-    opacity: .85;
-}
-
-.script {
-    background: #080808;
-    border: 1px solid #252525;
-    padding: 18px;
-    border-radius: 12px;
-    margin-top: 15px;
-}
-
-.name {
-    font-weight: bold;
-    margin-bottom: 8px;
-}
-
-.id {
-    color: #777;
-    font-size: 13px;
-}
-
-.loader {
-    margin-top: 10px;
-    padding: 10px;
-    background: #000;
-    border-radius: 8px;
-    overflow-x: auto;
-    white-space: nowrap;
-    font-family: monospace;
-    color: #aaa;
-}
-
-.status {
-    margin-top: 15px;
-    color: #aaa;
-}
-
-</style>
-</head>
-
-<body>
-
-<div class="container">
-
-<div class="title">
-LEXINX PROTECT
-</div>
-
-<div class="subtitle">
-Lua / TXT Script Protection System
-</div>
-
-<div class="card">
-
-<h2>Upload Script</h2>
-
-<form id="uploadForm">
-
-<input
-    type="file"
-    id="file"
-    name="script"
-    accept=".lua,.txt"
-    required
->
-
-<button type="submit">
-Protect Script
-</button>
-
-</form>
-
-<div id="status" class="status"></div>
-
-</div>
-
-<div class="card">
-
-<h2>Protected Scripts</h2>
-
-<div id="scripts">
-Loading...
-</div>
-
-</div>
-
-</div>
-
-<script>
-
-const form =
-    document.getElementById("uploadForm");
-
-const status =
-    document.getElementById("status");
-
-form.addEventListener("submit", async (e) => {
-
-    e.preventDefault();
-
-    const file =
-        document.getElementById("file").files[0];
-
-    if (!file) return;
-
-    status.textContent =
-        "Uploading...";
-
-    const formData =
-        new FormData();
-
-    formData.append("script", file);
-
-    try {
-
-        const response =
-            await fetch("/api/upload", {
-                method: "POST",
-                body: formData
-            });
-
-        const data =
-            await response.json();
-
-        if (!response.ok) {
-            throw new Error(
-                data.error || "Upload failed"
-            );
-        }
-
-        status.textContent =
-            "Protected successfully: " +
-            data.id;
-
-        form.reset();
-
-        loadScripts();
-
-    } catch (err) {
-
-        status.textContent =
-            "Error: " + err.message;
-    }
-});
-
-async function loadScripts() {
-
-    const container =
-        document.getElementById("scripts");
-
-    try {
-
-        const response =
-            await fetch("/api/scripts");
-
-        const scripts =
-            await response.json();
-
-        if (!scripts.length) {
-
-            container.innerHTML =
-                "<p>No scripts yet.</p>";
-
-            return;
-        }
-
-        container.innerHTML = "";
-
-        for (const script of scripts) {
-
-            const div =
-                document.createElement("div");
-
-            div.className = "script";
-
-            const loader =
-                "loadstring(game:HttpGet(\"" +
-                location.origin +
-                "/api/" +
-                script.id +
-                "\"))()";
-
-            div.innerHTML = `
-
-                <div class="name">
-                    ${escapeHTML(script.name)}
-                </div>
-
-                <div class="id">
-                    ID: ${script.id}
-                </div>
-
-                <div class="loader">
-                    ${escapeHTML(loader)}
-                </div>
-
-                <button>
-                    Copy Loader
-                </button>
-            `;
-
-            div.querySelector("button")
-                .addEventListener("click", async () => {
-
-                    await navigator.clipboard.writeText(
-                        loader
-                    );
-
-                    div.querySelector("button")
-                        .textContent =
-                        "Copied!";
-                });
-
-            container.appendChild(div);
-        }
-
-    } catch {
-
-        container.innerHTML =
-            "<p>Failed to load scripts.</p>";
-    }
-}
-
-function escapeHTML(str) {
-
-    return String(str)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-}
-
-loadScripts();
-
-</script>
-
-</body>
-</html>
-`);
+    res.sendFile(
+        path.join(
+            __dirname,
+            "public",
+            "index.html"
+        )
+    );
 });
 
 /*
 ==================================================
-UPLOAD
+UPLOAD FILE
 ==================================================
 */
 
@@ -398,6 +124,7 @@ app.post(
 
             if (!req.file) {
                 return res.status(400).json({
+                    ok: false,
                     error: "No file uploaded"
                 });
             }
@@ -407,6 +134,7 @@ app.post(
 
             if (!source.trim()) {
                 return res.status(400).json({
+                    ok: false,
                     error: "Script is empty"
                 });
             }
@@ -416,14 +144,11 @@ app.post(
             const filename =
                 id + ".lua";
 
-            const filepath =
+            fs.writeFileSync(
                 path.join(
                     SCRIPT_DIR,
                     filename
-                );
-
-            fs.writeFileSync(
-                filepath,
+                ),
                 source,
                 "utf8"
             );
@@ -442,20 +167,23 @@ app.post(
 
             writeDB(db);
 
+            const loader =
+                `loadstring(game:HttpGet("${req.protocol}://${req.get("host")}/api/${id}"))()`;
+
             res.json({
                 ok: true,
                 id,
-
-                loader:
-                    `loadstring(game:HttpGet("${req.protocol}://${req.get("host")}/api/${id}"))()`
+                name: db[id].name,
+                loader
             });
 
-        } catch (err) {
+        } catch (error) {
 
-            console.error(err);
+            console.error(error);
 
             res.status(500).json({
-                error: "Upload failed"
+                ok: false,
+                error: error.message
             });
         }
     }
@@ -463,74 +191,242 @@ app.post(
 
 /*
 ==================================================
-SCRIPT LIST
+WRITE SCRIPT DIRECTLY
 ==================================================
 */
 
-app.get("/api/scripts", (req, res) => {
+app.post(
+    "/api/create",
+    (req, res) => {
 
-    const db = readDB();
+        try {
 
-    const result =
-        Object.values(db)
-        .sort(
-            (a, b) =>
-                new Date(b.createdAt) -
-                new Date(a.createdAt)
-        );
+            const code =
+                typeof req.body.code === "string"
+                    ? req.body.code
+                    : "";
 
-    res.json(result);
-});
+            const name =
+                typeof req.body.name === "string"
+                    ? req.body.name
+                    : "script.lua";
+
+            if (!code.trim()) {
+
+                return res.status(400).json({
+                    ok: false,
+                    error: "Script is empty"
+                });
+            }
+
+            const id =
+                createID();
+
+            const filename =
+                id + ".lua";
+
+            fs.writeFileSync(
+                path.join(
+                    SCRIPT_DIR,
+                    filename
+                ),
+                code,
+                "utf8"
+            );
+
+            const db =
+                readDB();
+
+            db[id] = {
+                id,
+                name:
+                    cleanName(name)
+                        .endsWith(".lua")
+                        ? cleanName(name)
+                        : cleanName(name) + ".lua",
+                filename,
+                createdAt:
+                    new Date().toISOString()
+            };
+
+            writeDB(db);
+
+            const loader =
+                `loadstring(game:HttpGet("${req.protocol}://${req.get("host")}/api/${id}"))()`;
+
+            res.json({
+                ok: true,
+                id,
+                name: db[id].name,
+                loader
+            });
+
+        } catch (error) {
+
+            console.error(error);
+
+            res.status(500).json({
+                ok: false,
+                error: error.message
+            });
+        }
+    }
+);
 
 /*
 ==================================================
-PAYLOAD ENDPOINT
+LIST
 ==================================================
 */
 
-app.get("/api/:id", (req, res) => {
+app.get(
+    "/api/scripts",
+    (req, res) => {
 
-    const id = req.params.id;
+        const db =
+            readDB();
 
-    const db = readDB();
+        const scripts =
+            Object.values(db)
+                .sort(
+                    (a, b) =>
+                        new Date(b.createdAt) -
+                        new Date(a.createdAt)
+                );
 
-    const script = db[id];
+        res.json({
+            ok: true,
+            scripts
+        });
+    }
+);
 
-    if (!script) {
+/*
+==================================================
+GET PAYLOAD
+==================================================
+*/
 
-        return res
-            .status(404)
-            .type("text/plain")
-            .send(
-                "Blocked by LEXINX v50 protection"
+app.get(
+    "/api/:id",
+    (req, res) => {
+
+        const id =
+            req.params.id;
+
+        if (
+            !/^[A-Za-z0-9_-]{10,40}$/.test(id)
+        ) {
+            return res
+                .status(404)
+                .type("text/plain")
+                .send(
+                    "Blocked by LEXINX v50 protection"
+                );
+        }
+
+        const db =
+            readDB();
+
+        const script =
+            db[id];
+
+        if (!script) {
+            return res
+                .status(404)
+                .type("text/plain")
+                .send(
+                    "Blocked by LEXINX v50 protection"
+                );
+        }
+
+        const filepath =
+            path.join(
+                SCRIPT_DIR,
+                script.filename
             );
-    }
 
-    const filepath =
-        path.join(
-            SCRIPT_DIR,
-            script.filename
-        );
+        if (!fs.existsSync(filepath)) {
+            return res
+                .status(404)
+                .type("text/plain")
+                .send(
+                    "Payload unavailable"
+                );
+        }
 
-    if (!fs.existsSync(filepath)) {
+        const payload =
+            fs.readFileSync(
+                filepath,
+                "utf8"
+            );
 
-        return res
-            .status(404)
+        res
+            .status(200)
+            .set(
+                "Cache-Control",
+                "no-store, no-cache, must-revalidate"
+            )
             .type("text/plain")
-            .send("Payload unavailable");
+            .send(payload);
     }
+);
 
-    const payload =
-        fs.readFileSync(
-            filepath,
-            "utf8"
-        );
+/*
+==================================================
+DELETE
+==================================================
+*/
 
-    res
-        .status(200)
-        .type("text/plain")
-        .send(payload);
-});
+app.delete(
+    "/api/scripts/:id",
+    (req, res) => {
+
+        const id =
+            req.params.id;
+
+        const db =
+            readDB();
+
+        const script =
+            db[id];
+
+        if (!script) {
+            return res.status(404).json({
+                ok: false,
+                error: "Script not found"
+            });
+        }
+
+        const filepath =
+            path.join(
+                SCRIPT_DIR,
+                script.filename
+            );
+
+        try {
+
+            if (fs.existsSync(filepath)) {
+                fs.unlinkSync(filepath);
+            }
+
+            delete db[id];
+
+            writeDB(db);
+
+            res.json({
+                ok: true
+            });
+
+        } catch (error) {
+
+            res.status(500).json({
+                ok: false,
+                error: "Delete failed"
+            });
+        }
+    }
+);
 
 /*
 ==================================================
@@ -550,7 +446,7 @@ app.use((req, res) => {
 
 /*
 ==================================================
-ERROR HANDLER
+ERROR
 ==================================================
 */
 
@@ -559,7 +455,10 @@ app.use((err, req, res, next) => {
     console.error(err);
 
     res.status(400).json({
-        error: err.message
+        ok: false,
+        error:
+            err.message ||
+            "Request error"
     });
 });
 
@@ -572,7 +471,11 @@ START
 app.listen(PORT, () => {
 
     console.log(
-        "LEXINX PROTECT running on port " +
+        "LEXINX PROTECT ONLINE"
+    );
+
+    console.log(
+        "PORT:",
         PORT
     );
 });
