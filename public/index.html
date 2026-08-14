@@ -7,7 +7,7 @@
 
 <meta
     name="viewport"
-    content="width=device-width, initial-scale=1.0"
+    content="width=device-width,initial-scale=1"
 >
 
 <title>LEXINX PROTECT</title>
@@ -20,26 +20,14 @@
 
 body {
     margin: 0;
-    min-height: 100vh;
-
-    background:
-        radial-gradient(
-            circle at top,
-            #181818,
-            #050505 55%
-        );
-
-    color: white;
-
-    font-family:
-        Arial,
-        Helvetica,
-        sans-serif;
+    background: #050505;
+    color: #eee;
+    font-family: Arial, sans-serif;
 }
 
 .container {
-    width: min(950px, 94%);
-    margin: 35px auto 80px;
+    width: min(1000px, 94%);
+    margin: 35px auto;
 }
 
 .header {
@@ -48,213 +36,112 @@ body {
 }
 
 .header h1 {
-    margin: 0;
-
-    font-size: 34px;
     letter-spacing: 5px;
+    margin-bottom: 8px;
 }
 
 .header p {
     color: #777;
-    margin-top: 8px;
 }
 
 .card {
-    background: rgba(15, 15, 15, .95);
-
+    background: #101010;
     border: 1px solid #292929;
-
-    border-radius: 16px;
-
+    border-radius: 15px;
     padding: 22px;
-
     margin-bottom: 20px;
-
-    box-shadow:
-        0 15px 40px rgba(0,0,0,.35);
 }
 
-.card h2 {
-    margin-top: 0;
-}
-
-input[type="text"],
-input[type="file"],
+input,
 textarea {
-
     width: 100%;
-
     background: #050505;
-
-    color: #ddd;
-
     border: 1px solid #333;
-
-    border-radius: 10px;
-
+    border-radius: 9px;
+    color: #ddd;
     padding: 12px;
-
-    outline: none;
 }
 
-input[type="text"] {
+input {
     margin-bottom: 12px;
-}
-
-input:focus,
-textarea:focus {
-    border-color: #666;
 }
 
 textarea {
     min-height: 320px;
-
     resize: vertical;
-
-    font-family:
-        Consolas,
-        monospace;
-
-    line-height: 1.5;
-
-    margin-top: 12px;
-}
-
-input[type="file"] {
-    margin-bottom: 5px;
+    font-family: monospace;
 }
 
 button {
     border: 0;
-
-    border-radius: 9px;
-
-    padding: 11px 16px;
-
+    border-radius: 8px;
+    padding: 11px 15px;
     cursor: pointer;
-
-    background: white;
-
-    color: black;
-
     font-weight: bold;
-
-    transition: .15s;
 }
 
-button:hover {
-    transform: translateY(-1px);
-    opacity: .85;
-}
-
-.primary {
+.create {
     margin-top: 12px;
 }
-
-.status {
-    margin-top: 12px;
-
-    color: #888;
-
-    min-height: 20px;
-
-    font-family: monospace;
-}
-
-/* SCRIPT */
 
 .script {
-    background: #080808;
-
     border: 1px solid #292929;
-
-    border-radius: 13px;
-
-    padding: 17px;
-
-    margin-top: 13px;
+    background: #080808;
+    border-radius: 12px;
+    padding: 16px;
+    margin-top: 12px;
 }
 
 .script-name {
     font-weight: bold;
-
     font-size: 17px;
-
-    margin-bottom: 5px;
 }
 
 .script-id {
     color: #666;
-
-    font-family: monospace;
-
-    font-size: 11px;
+    font: 11px monospace;
+    margin-top: 5px;
 }
 
-/* FULL LOADER */
-
-.loader-label {
-    margin-top: 14px;
-
+.loader-title {
     color: #777;
-
     font-size: 12px;
+    margin-top: 15px;
 }
 
 .loader-row {
     display: flex;
-
     gap: 8px;
-
-    margin-top: 7px;
+    margin-top: 6px;
 }
 
-.loader-input {
+.loader {
     flex: 1;
-
     min-width: 0;
-
     background: #000;
-
     color: #aaa;
-
-    border: 1px solid #333;
-
-    border-radius: 8px;
-
-    padding: 12px;
-
-    font-family: monospace;
-
-    font-size: 12px;
+    font: 12px monospace;
 }
 
-.copy-loader {
+.copy {
     white-space: nowrap;
 }
 
 .actions {
     display: flex;
-
     gap: 8px;
-
-    margin-top: 12px;
-
-    flex-wrap: wrap;
+    margin-top: 10px;
 }
 
 .delete {
-    background: #252525;
-
+    background: #242424;
     color: white;
 }
 
-.empty {
-    color: #666;
-
-    text-align: center;
-
-    padding: 25px;
+.status {
+    color: #777;
+    margin-top: 10px;
+    font-family: monospace;
 }
 
 </style>
@@ -265,75 +152,63 @@ button:hover {
 
 <div class="container">
 
-    <div class="header">
+<div class="header">
 
-        <h1>LEXINX PROTECT</h1>
+<h1>LEXINX PROTECT</h1>
 
-        <p>
-            Lua Script Protection & Loader Generator
-        </p>
-
-    </div>
-
-
-    <!-- CREATE -->
-
-    <div class="card">
-
-        <h2>Create Loader</h2>
-
-        <input
-            id="name"
-            type="text"
-            placeholder="Script name"
-        >
-
-        <input
-            id="file"
-            type="file"
-            accept=".lua,.txt"
-        >
-
-        <textarea
-            id="code"
-            placeholder="Paste your Lua script here..."
-        ></textarea>
-
-        <button
-            class="primary"
-            onclick="createScript()"
-        >
-            Create Protected Loader
-        </button>
-
-        <div
-            id="status"
-            class="status"
-        ></div>
-
-    </div>
-
-
-    <!-- LIST -->
-
-    <div class="card">
-
-        <h2>Script List</h2>
-
-        <div id="scripts">
-            Loading...
-        </div>
-
-    </div>
+<p>
+Lua Protection & Loader Generator
+</p>
 
 </div>
 
+<div class="card">
+
+<h2>Protect Script</h2>
+
+<input
+    id="name"
+    placeholder="Script name"
+>
+
+<input
+    id="file"
+    type="file"
+    accept=".lua,.txt"
+>
+
+<textarea
+    id="code"
+    placeholder="Paste your Lua source here..."
+></textarea>
+
+<button
+    class="create"
+    onclick="createScript()"
+>
+Create Protected Loader
+</button>
+
+<div
+    class="status"
+    id="status"
+></div>
+
+</div>
+
+<div class="card">
+
+<h2>Your Scripts</h2>
+
+<div id="scripts">
+Loading...
+</div>
+
+</div>
+
+</div>
 
 <script>
-
-/* =========================
-   CREATE
-========================= */
 
 async function createScript() {
 
@@ -345,8 +220,8 @@ async function createScript() {
     const name =
         document.getElementById(
             "name"
-        ).value.trim()
-        || "Script";
+        ).value ||
+        "Script";
 
     const file =
         document.getElementById(
@@ -360,25 +235,7 @@ async function createScript() {
 
     try {
 
-        /*
-        Nếu có file:
-        đọc trực tiếp thành text.
-        */
-
         if (file) {
-
-            const lower =
-                file.name.toLowerCase();
-
-            if (
-                !lower.endsWith(".lua") &&
-                !lower.endsWith(".txt")
-            ) {
-                throw new Error(
-                    "Only .lua and .txt files are supported"
-                );
-            }
-
             code =
                 await file.text();
         }
@@ -390,26 +247,20 @@ async function createScript() {
         }
 
         status.textContent =
-            "Creating loader...";
+            "Protecting...";
 
         const response =
             await fetch(
                 "/api/create",
                 {
                     method: "POST",
-
                     headers: {
                         "Content-Type":
                             "application/json"
                     },
-
                     body:
                         JSON.stringify({
-                            name:
-                                file
-                                    ? file.name
-                                    : name,
-
+                            name,
                             code
                         })
                 }
@@ -418,15 +269,15 @@ async function createScript() {
         const data =
             await response.json();
 
-        if (!response.ok) {
+        if (!data.ok) {
             throw new Error(
                 data.error ||
-                "Server error"
+                "Failed"
             );
         }
 
         status.textContent =
-            "Loader created: " +
+            "Created: " +
             data.id;
 
         document.getElementById(
@@ -437,20 +288,15 @@ async function createScript() {
             "file"
         ).value = "";
 
-        await loadScripts();
+        loadScripts();
 
-    } catch (error) {
+    } catch (e) {
 
         status.textContent =
-            "Error: " +
-            error.message;
+            "ERROR: " +
+            e.message;
     }
 }
-
-
-/* =========================
-   LOAD SCRIPTS
-========================= */
 
 async function loadScripts() {
 
@@ -472,117 +318,76 @@ async function loadScripts() {
         const data =
             await response.json();
 
+        box.innerHTML = "";
+
         if (
-            !data.ok ||
-            data.scripts.length === 0
+            !data.scripts.length
         ) {
 
             box.innerHTML =
-                `<div class="empty">
-                    No scripts created yet.
+                `<div style="color:#666">
+                    No protected scripts.
                 </div>`;
 
             return;
         }
-
-        box.innerHTML = "";
 
         for (
             const script
             of data.scripts
         ) {
 
-            /*
-            FULL LOADER
-            */
-
             const loader =
                 `loadstring(game:HttpGet("${location.origin}/api/${script.id}"))()`;
 
-            const div =
+            const item =
                 document.createElement(
                     "div"
                 );
 
-            div.className =
+            item.className =
                 "script";
 
-            /* NAME */
+            item.innerHTML = `
+                <div class="script-name">
+                    ${escapeHTML(script.name)}
+                </div>
 
-            const name =
-                document.createElement(
-                    "div"
-                );
+                <div class="script-id">
+                    ID: ${escapeHTML(script.id)}
+                </div>
 
-            name.className =
-                "script-name";
+                <div class="loader-title">
+                    FULL LOADER
+                </div>
 
-            name.textContent =
-                script.name;
+                <div class="loader-row">
 
-            /* ID */
+                    <input
+                        class="loader"
+                        readonly
+                        value="${escapeHTML(loader)}"
+                    >
 
-            const id =
-                document.createElement(
-                    "div"
-                );
+                    <button class="copy">
+                        Copy Full Loader
+                    </button>
 
-            id.className =
-                "script-id";
+                </div>
 
-            id.textContent =
-                "ID: " + script.id;
+                <div class="actions">
 
-            /* LABEL */
+                    <button class="delete">
+                        Delete
+                    </button>
 
-            const label =
-                document.createElement(
-                    "div"
-                );
-
-            label.className =
-                "loader-label";
-
-            label.textContent =
-                "FULL LOADER";
-
-            /* LOADER ROW */
-
-            const row =
-                document.createElement(
-                    "div"
-                );
-
-            row.className =
-                "loader-row";
-
-            /* INPUT */
-
-            const input =
-                document.createElement(
-                    "input"
-                );
-
-            input.className =
-                "loader-input";
-
-            input.value =
-                loader;
-
-            input.readOnly = true;
-
-            /* COPY */
+                </div>
+            `;
 
             const copy =
-                document.createElement(
-                    "button"
+                item.querySelector(
+                    ".copy"
                 );
-
-            copy.className =
-                "copy-loader";
-
-            copy.textContent =
-                "Copy Full Loader";
 
             copy.onclick =
                 async () => {
@@ -597,7 +402,10 @@ async function loadScripts() {
 
                     } catch {
 
-                        input.focus();
+                        const input =
+                            item.querySelector(
+                                ".loader"
+                            );
 
                         input.select();
 
@@ -618,101 +426,67 @@ async function loadScripts() {
                     );
                 };
 
-            row.appendChild(input);
-            row.appendChild(copy);
-
-            /* ACTIONS */
-
-            const actions =
-                document.createElement(
-                    "div"
-                );
-
-            actions.className =
-                "actions";
-
-            const open =
-                document.createElement(
-                    "button"
-                );
-
-            open.textContent =
-                "Open Payload URL";
-
-            open.onclick =
-                () => {
-                    window.open(
-                        `/api/${script.id}`,
-                        "_blank"
-                    );
-                };
-
             const del =
-                document.createElement(
-                    "button"
+                item.querySelector(
+                    ".delete"
                 );
-
-            del.className =
-                "delete";
-
-            del.textContent =
-                "Delete";
 
             del.onclick =
                 async () => {
 
-                    const confirmDelete =
-                        confirm(
-                            `Delete "${script.name}"?`
-                        );
-
-                    if (!confirmDelete) {
+                    if (
+                        !confirm(
+                            "Delete this script?"
+                        )
+                    ) {
                         return;
                     }
 
-                    const response =
-                        await fetch(
-                            `/api/scripts/${encodeURIComponent(script.id)}`,
-                            {
-                                method:
-                                    "DELETE"
-                            }
-                        );
+                    await fetch(
+                        `/api/scripts/${encodeURIComponent(script.id)}`,
+                        {
+                            method:
+                                "DELETE"
+                        }
+                    );
 
-                    if (response.ok) {
-                        loadScripts();
-                    }
+                    loadScripts();
                 };
 
-            actions.appendChild(open);
-            actions.appendChild(del);
-
-            /* BUILD */
-
-            div.appendChild(name);
-            div.appendChild(id);
-            div.appendChild(label);
-            div.appendChild(row);
-            div.appendChild(actions);
-
-            box.appendChild(div);
+            box.appendChild(item);
         }
 
-    } catch (error) {
+    } catch {
 
-        box.innerHTML =
-            `<div class="empty">
-                Failed to load scripts.
-            </div>`;
-
-        console.error(error);
+        box.textContent =
+            "Failed to load scripts.";
     }
 }
 
+function escapeHTML(value) {
 
-/* =========================
-   START
-========================= */
+    return String(value)
+        .replace(
+            /&/g,
+            "&amp;"
+        )
+        .replace(
+            /</g,
+            "&lt;"
+        )
+        .replace(
+            />/g,
+            "&gt;"
+        )
+        .replace(
+            /"/g,
+            "&quot;"
+        )
+        .replace(
+            /'/g,
+            "&#039;"
+        );
+}
 
 loadScripts();
 
