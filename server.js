@@ -4,42 +4,28 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
-
 const PORT = process.env.PORT || 3000;
 
 const DATA_DIR = path.join(__dirname, "data");
 const SCRIPT_DIR = path.join(DATA_DIR, "scripts");
 const DB_FILE = path.join(DATA_DIR, "scripts.json");
 
-fs.mkdirSync(SCRIPT_DIR, {
-    recursive: true
-});
+const ADMIN_TOKEN =
+    process.env.ADMIN_TOKEN || "CHANGE_THIS_ADMIN_TOKEN";
+
+fs.mkdirSync(SCRIPT_DIR, { recursive: true });
 
 if (!fs.existsSync(DB_FILE)) {
     fs.writeFileSync(DB_FILE, "{}", "utf8");
 }
 
-app.use(express.json({
-    limit: "20mb"
-}));
-
-app.use(
-    express.static(
-        path.join(__dirname, "public")
-    )
-);
-
-/* =========================
-   DATABASE
-========================= */
+app.use(express.json({ limit: "10mb" }));
+app.use(express.static(path.join(__dirname, "public")));
 
 function readDB() {
     try {
         return JSON.parse(
-            fs.readFileSync(
-                DB_FILE,
-                "utf8"
-            )
+            fs.readFileSync(DB_FILE, "utf8")
         );
     } catch {
         return {};
@@ -49,56 +35,55 @@ function readDB() {
 function writeDB(db) {
     fs.writeFileSync(
         DB_FILE,
-        JSON.stringify(
-            db,
-            null,
-            2
-        ),
+        JSON.stringify(db, null, 2),
         "utf8"
     );
 }
 
-/* =========================
-   ID
-========================= */
-
-function createID() {
-
-    const db = readDB();
-
-    let id;
-
-    do {
-        id = crypto
-            .randomBytes(16)
-            .toString("hex");
-    } while (db[id]);
-
-    return id;
+function randomID() {
+    return crypto.randomBytes(18).toString("hex");
 }
 
-/* =========================
-   CLEAN NAME
-========================= */
-
-function cleanName(name) {
-
-    return String(
-        name || "Script"
-    )
-        .replace(
-            /[^a-zA-Z0-9._ -]/g,
-            "_"
-        )
-        .slice(0, 100);
+function randomToken() {
+    return crypto.randomBytes(32).toString("hex");
 }
 
+function safeName(name) {
+    return String(name || "script")
+        .replace(/[^a-zA-Z0-9._ -]/g, "_")
+        .slice(0, 80);
+}
+
+function validAdmin(req) {
+    return req.get("X-Admin-Token") === ADMIN_TOKEN;
+}
+
+/*
+ * Token sống 60 giây.
+ * Token chỉ được dùng một lần.
+ */
+const sessions = new Map();
+
+function cleanupSessions() {
+    const now = Date.now();
+
+    for (const [token, session] of sessions) {
+        if (
+            session.expiresAt < now ||
+            session.used
+        ) {
+            sessions.delete(token);
+        }
+    }
+}
+
+setInterval(cleanupSessions, 30_000);
+
 /* =========================
-   HOME
+   WEB
 ========================= */
 
 app.get("/", (req, res) => {
-
     res.sendFile(
         path.join(
             __dirname,
@@ -112,313 +97,270 @@ app.get("/", (req, res) => {
    CREATE SCRIPT
 ========================= */
 
-app.post(
-    "/api/create",
-    (req, res) => {
-
-        try {
-
-            const source =
-                typeof req.body.code === "string"
-                    ? req.body.code
-                    : "";
-
-            const name =
-                cleanName(
-                    req.body.name
-                );
-
-            if (!source.trim()) {
-
-                return res
-                    .status(400)
-                    .json({
-                        ok: false,
-                        error:
-                            "Script is empty"
-                    });
-            }
-
-            const id =
-                createID();
-
-            const filename =
-                `${id}.lua`;
-
-            /*
-             * KHÔNG OBF
-             * KHÔNG XOR
-             * KHÔNG BASE64
-             * KHÔNG VM
-             *
-             * Lưu nguyên source.
-             */
-
-            fs.writeFileSync(
-                path.join(
-                    SCRIPT_DIR,
-                    filename
-                ),
-                source,
-                "utf8"
-            );
-
-            const db =
-                readDB();
-
-            db[id] = {
-                id,
-                name,
-                filename,
-                createdAt:
-                    Date.now()
-            };
-
-            writeDB(db);
-
-            const baseURL =
-                `${req.protocol}://${req.get("host")}`;
-
-            const loader =
-                `loadstring(game:HttpGet("${baseURL}/api/${id}"))()`;
-
-            res.json({
-                ok: true,
-                id,
-                name,
-                loader
-            });
-
-        } catch (error) {
-
-            console.error(error);
-
-            res
-                .status(500)
-                .json({
-                    ok: false,
-                    error:
-                        "Failed to create script"
-                });
-        }
+app.post("/api/create", (req, res) => {
+    if (!validAdmin(req)) {
+        return res.status(401).json({
+            ok: false,
+            error: "Unauthorized"
+        });
     }
-);
+
+    const code =
+        typeof req.body.code === "string"
+            ? req.body.code
+            : "";
+
+    if (!code.trim()) {
+        return res.status(400).json({
+            ok: false,
+            error: "Script is empty"
+        });
+    }
+
+    const name =
+        safeName(req.body.name);
+
+    const id = randomID();
+
+    const filename =
+        `${id}.lua`;
+
+    fs.writeFileSync(
+        path.join(SCRIPT_DIR, filename),
+        code,
+        "utf8"
+    );
+
+    const db = readDB();
+
+    db[id] = {
+        id,
+        name,
+        filename,
+        createdAt: Date.now()
+    };
+
+    writeDB(db);
+
+    res.json({
+        ok: true,
+        id,
+        name
+    });
+});
 
 /* =========================
-   LIST SCRIPTS
+   LIST
 ========================= */
 
-app.get(
-    "/api/scripts",
-    (req, res) => {
-
-        try {
-
-            const db =
-                readDB();
-
-            const scripts =
-                Object.values(db)
-                    .sort(
-                        (a, b) =>
-                            b.createdAt -
-                            a.createdAt
-                    );
-
-            res.json({
-                ok: true,
-                scripts
-            });
-
-        } catch (error) {
-
-            res
-                .status(500)
-                .json({
-                    ok: false,
-                    error:
-                        "Failed to load scripts"
-                });
-        }
+app.get("/api/scripts", (req, res) => {
+    if (!validAdmin(req)) {
+        return res.status(401).json({
+            ok: false,
+            error: "Unauthorized"
+        });
     }
-);
+
+    const db = readDB();
+
+    res.json({
+        ok: true,
+        scripts: Object.values(db)
+            .sort(
+                (a, b) =>
+                    b.createdAt -
+                    a.createdAt
+            )
+    });
+});
 
 /* =========================
-   GET PAYLOAD
+   CREATE SHORT SESSION
 ========================= */
 
-app.get(
-    "/api/:id",
-    (req, res) => {
+app.post("/api/session", (req, res) => {
+    const id = req.body?.id;
 
-        const id =
-            req.params.id;
+    if (
+        typeof id !== "string" ||
+        !/^[a-f0-9]{36}$/.test(id)
+    ) {
+        return res.status(400).json({
+            ok: false,
+            error: "Invalid ID"
+        });
+    }
 
-        /*
-         * Chỉ cho ID hợp lệ.
-         */
+    const db = readDB();
 
-        if (
-            !/^[a-f0-9]{32}$/.test(id)
-        ) {
+    if (!db[id]) {
+        return res.status(404).json({
+            ok: false,
+            error: "Not found"
+        });
+    }
 
-            return res
-                .status(404)
-                .type("text/plain")
-                .send(
-                    "Blocked by LEXINX v50 protection"
-                );
-        }
+    const token = randomToken();
 
-        const db =
-            readDB();
+    sessions.set(token, {
+        id,
+        expiresAt:
+            Date.now() + 60_000,
+        used: false
+    });
 
-        const item =
-            db[id];
+    res.json({
+        ok: true,
+        token,
+        expiresIn: 60
+    });
+});
 
-        if (!item) {
+/* =========================
+   PAYLOAD
+========================= */
 
-            return res
-                .status(404)
-                .type("text/plain")
-                .send(
-                    "Blocked by LEXINX v50 protection"
-                );
-        }
+app.get("/api/payload/:token", (req, res) => {
+    const token =
+        req.params.token;
 
-        const file =
-            path.join(
-                SCRIPT_DIR,
-                item.filename
-            );
+    const session =
+        sessions.get(token);
 
-        if (
-            !fs.existsSync(file)
-        ) {
-
-            return res
-                .status(404)
-                .type("text/plain")
-                .send(
-                    "Blocked by LEXINX v50 protection"
-                );
-        }
-
-        /*
-         * Trả nguyên source.
-         */
-
-        const source =
-            fs.readFileSync(
-                file,
-                "utf8"
-            );
-
-        res
-            .status(200)
+    if (!session) {
+        return res
+            .status(403)
             .type("text/plain")
-            .set(
-                "Cache-Control",
-                "no-store, no-cache, must-revalidate"
-            )
-            .set(
-                "Pragma",
-                "no-cache"
-            )
-            .send(source);
+            .send(
+                "Blocked by LEXINX v50 protection"
+            );
     }
-);
 
-/* =========================
-   DELETE
-========================= */
+    if (
+        session.used ||
+        session.expiresAt < Date.now()
+    ) {
+        sessions.delete(token);
 
-app.delete(
-    "/api/scripts/:id",
-    (req, res) => {
-
-        try {
-
-            const id =
-                req.params.id;
-
-            const db =
-                readDB();
-
-            const item =
-                db[id];
-
-            if (!item) {
-
-                return res
-                    .status(404)
-                    .json({
-                        ok: false,
-                        error:
-                            "Script not found"
-                    });
-            }
-
-            const file =
-                path.join(
-                    SCRIPT_DIR,
-                    item.filename
-                );
-
-            if (
-                fs.existsSync(file)
-            ) {
-                fs.unlinkSync(file);
-            }
-
-            delete db[id];
-
-            writeDB(db);
-
-            res.json({
-                ok: true
-            });
-
-        } catch (error) {
-
-            console.error(error);
-
-            res
-                .status(500)
-                .json({
-                    ok: false,
-                    error:
-                        "Delete failed"
-                });
-        }
+        return res
+            .status(401)
+            .type("text/plain")
+            .send(
+                "Expired or already used"
+            );
     }
-);
 
-/* =========================
-   404
-========================= */
+    const db = readDB();
+    const item = db[session.id];
 
-app.use(
-    (req, res) => {
+    if (!item) {
+        sessions.delete(token);
 
-        res
+        return res
             .status(404)
             .type("text/plain")
             .send(
                 "Blocked by LEXINX v50 protection"
             );
     }
-);
+
+    const file =
+        path.join(
+            SCRIPT_DIR,
+            item.filename
+        );
+
+    if (!fs.existsSync(file)) {
+        sessions.delete(token);
+
+        return res
+            .status(404)
+            .type("text/plain")
+            .send(
+                "Blocked by LEXINX v50 protection"
+            );
+    }
+
+    session.used = true;
+
+    const source =
+        fs.readFileSync(
+            file,
+            "utf8"
+        );
+
+    /*
+     * Không obfuscate.
+     * Trả source nguyên bản.
+     */
+
+    res
+        .type("text/plain")
+        .set(
+            "Cache-Control",
+            "no-store, no-cache"
+        )
+        .send(source);
+});
 
 /* =========================
-   START
+   DELETE
 ========================= */
 
-app.listen(
-    PORT,
-    () => {
-        console.log(
-            `LEXINX PROTECT running on port ${PORT}`
-        );
+app.delete("/api/scripts/:id", (req, res) => {
+    if (!validAdmin(req)) {
+        return res.status(401).json({
+            ok: false,
+            error: "Unauthorized"
+        });
     }
-);
+
+    const id =
+        req.params.id;
+
+    const db = readDB();
+    const item = db[id];
+
+    if (!item) {
+        return res.status(404).json({
+            ok: false,
+            error: "Not found"
+        });
+    }
+
+    const file =
+        path.join(
+            SCRIPT_DIR,
+            item.filename
+        );
+
+    if (fs.existsSync(file)) {
+        fs.unlinkSync(file);
+    }
+
+    delete db[id];
+
+    writeDB(db);
+
+    res.json({
+        ok: true
+    });
+});
+
+/* =========================
+   BLOCK UNKNOWN ROUTES
+========================= */
+
+app.use((req, res) => {
+    res.status(404)
+        .type("text/plain")
+        .send(
+            "Blocked by LEXINX v50 protection"
+        );
+});
+
+app.listen(PORT, () => {
+    console.log(
+        `LEXINX PROTECT running on port ${PORT}`
+    );
+});
