@@ -1,4 +1,5 @@
 const express = require("express");
+const multer = require("multer");
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -7,1124 +8,571 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 
-const DOMAIN =
-    process.env.DOMAIN ||
-    "https://lexinx-protect.onrender.com";
+const DATA_DIR = path.join(__dirname, "data");
+const SCRIPT_DIR = path.join(DATA_DIR, "scripts");
+const DB_FILE = path.join(DATA_DIR, "scripts.json");
 
-const DATA_DIR =
-    path.join(__dirname, "data");
+fs.mkdirSync(SCRIPT_DIR, { recursive: true });
 
-const DATA_FILE =
-    path.join(DATA_DIR, "scripts.json");
-
-const TOKEN_TTL = 60 * 1000;
-
-
-// ============================================================
-// MIDDLEWARE
-// ============================================================
-
-app.use(
-    express.json({
-        limit: "2mb"
-    })
-);
-
-app.use(
-    express.static(
-        path.join(
-            __dirname,
-            "public"
-        )
-    )
-);
-
-
-// ============================================================
-// DATABASE
-// ============================================================
-
-if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, {
-        recursive: true
-    });
+if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(DB_FILE, "{}");
 }
 
-if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(
-        DATA_FILE,
-        "[]",
-        "utf8"
-    );
-}
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-function readScripts() {
+const upload = multer({
+    storage: multer.memoryStorage(),
 
+    limits: {
+        fileSize: 1024 * 1024
+    },
+
+    fileFilter: (req, file, cb) => {
+        const ext = path.extname(file.originalname).toLowerCase();
+
+        if (ext !== ".lua" && ext !== ".txt") {
+            return cb(new Error("Only .lua and .txt files are allowed"));
+        }
+
+        cb(null, true);
+    }
+});
+
+function readDB() {
     try {
-
-        return JSON.parse(
-            fs.readFileSync(
-                DATA_FILE,
-                "utf8"
-            )
-        );
-
+        return JSON.parse(fs.readFileSync(DB_FILE, "utf8"));
     } catch {
-
-        return [];
+        return {};
     }
 }
 
-function saveScripts(data) {
-
+function writeDB(db) {
     fs.writeFileSync(
-        DATA_FILE,
-        JSON.stringify(
-            data,
-            null,
-            2
-        ),
-        "utf8"
+        DB_FILE,
+        JSON.stringify(db, null, 2)
     );
 }
 
-
-// ============================================================
-// RANDOM ID
-// ============================================================
-
-function randomString(length) {
-
-    const chars =
-        "ABCDEFGHJKLMNPQRSTUVWXYZ" +
-        "abcdefghijkmnopqrstuvwxyz" +
-        "23456789";
-
-    let result = "";
-
-    for (let i = 0; i < length; i++) {
-
-        result +=
-            chars[
-                crypto.randomInt(
-                    0,
-                    chars.length
-                )
-            ];
-    }
-
-    return result;
+function createID() {
+    return crypto
+        .randomBytes(9)
+        .toString("base64url");
 }
 
-
-function generateScriptId() {
-
-    const scripts =
-        readScripts();
-
-    let id;
-
-    do {
-
-        id =
-            randomString(10);
-
-    } while (
-        scripts.some(
-            x => x.id === id
-        )
-    );
-
-    return id;
+function cleanName(name) {
+    return name
+        .replace(/[^a-zA-Z0-9._-]/g, "_")
+        .slice(0, 100);
 }
 
+/*
+==================================================
+WEB
+==================================================
+*/
 
-// ============================================================
-// BLOCK PAGE
-// ============================================================
-
-function blocked(res, reason = "LEXINX BLOCK") {
-
-    let output = "";
-
-    for (let i = 0; i < 1000; i++) {
-
-        output +=
-            i % 2 === 0
-                ? "LEXINX PROTECT\n"
-                : "BLOCKED BY LEXINX\n";
-    }
-
-    return res
-        .status(403)
-        .type("html")
-        .send(`
+app.get("/", (req, res) => {
+    res.type("html").send(`
 <!DOCTYPE html>
-
 <html>
-
 <head>
-
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 
 <title>LEXINX PROTECT</title>
 
 <style>
 
-html,
+* {
+    box-sizing: border-box;
+}
+
 body {
     margin: 0;
-    padding: 0;
     background: #050505;
-    color: #ff3030;
+    color: white;
+    font-family: Arial, sans-serif;
+}
+
+.container {
+    width: min(900px, 94%);
+    margin: 50px auto;
+}
+
+.title {
+    text-align: center;
+    font-size: 42px;
+    font-weight: bold;
+}
+
+.subtitle {
+    text-align: center;
+    color: #888;
+    margin-bottom: 40px;
+}
+
+.card {
+    background: #101010;
+    border: 1px solid #252525;
+    border-radius: 16px;
+    padding: 25px;
+    margin-bottom: 25px;
+}
+
+input[type=file] {
+    width: 100%;
+    padding: 15px;
+    background: #080808;
+    color: white;
+    border: 1px solid #333;
+    border-radius: 10px;
+}
+
+button {
+    margin-top: 15px;
+    padding: 12px 18px;
+    border: 0;
+    border-radius: 9px;
+    background: white;
+    color: black;
+    cursor: pointer;
+    font-weight: bold;
+}
+
+button:hover {
+    opacity: .85;
+}
+
+.script {
+    background: #080808;
+    border: 1px solid #252525;
+    padding: 18px;
+    border-radius: 12px;
+    margin-top: 15px;
+}
+
+.name {
+    font-weight: bold;
+    margin-bottom: 8px;
+}
+
+.id {
+    color: #777;
+    font-size: 13px;
+}
+
+.loader {
+    margin-top: 10px;
+    padding: 10px;
+    background: #000;
+    border-radius: 8px;
+    overflow-x: auto;
+    white-space: nowrap;
     font-family: monospace;
+    color: #aaa;
 }
 
-body {
-    padding: 30px;
-}
-
-h1 {
-    font-size: 34px;
-}
-
-pre {
-    white-space: pre-wrap;
-    word-break: break-word;
+.status {
+    margin-top: 15px;
+    color: #aaa;
 }
 
 </style>
-
 </head>
 
 <body>
 
-<h1>BLOCKED BY LEXINX</h1>
+<div class="container">
 
-<pre>${output}</pre>
+<div class="title">
+LEXINX PROTECT
+</div>
+
+<div class="subtitle">
+Lua / TXT Script Protection System
+</div>
+
+<div class="card">
+
+<h2>Upload Script</h2>
+
+<form id="uploadForm">
+
+<input
+    type="file"
+    id="file"
+    name="script"
+    accept=".lua,.txt"
+    required
+>
+
+<button type="submit">
+Protect Script
+</button>
+
+</form>
+
+<div id="status" class="status"></div>
+
+</div>
+
+<div class="card">
+
+<h2>Protected Scripts</h2>
+
+<div id="scripts">
+Loading...
+</div>
+
+</div>
+
+</div>
+
+<script>
+
+const form =
+    document.getElementById("uploadForm");
+
+const status =
+    document.getElementById("status");
+
+form.addEventListener("submit", async (e) => {
+
+    e.preventDefault();
+
+    const file =
+        document.getElementById("file").files[0];
+
+    if (!file) return;
+
+    status.textContent =
+        "Uploading...";
+
+    const formData =
+        new FormData();
+
+    formData.append("script", file);
+
+    try {
+
+        const response =
+            await fetch("/api/upload", {
+                method: "POST",
+                body: formData
+            });
+
+        const data =
+            await response.json();
+
+        if (!response.ok) {
+            throw new Error(
+                data.error || "Upload failed"
+            );
+        }
+
+        status.textContent =
+            "Protected successfully: " +
+            data.id;
+
+        form.reset();
+
+        loadScripts();
+
+    } catch (err) {
+
+        status.textContent =
+            "Error: " + err.message;
+    }
+});
+
+async function loadScripts() {
+
+    const container =
+        document.getElementById("scripts");
+
+    try {
+
+        const response =
+            await fetch("/api/scripts");
+
+        const scripts =
+            await response.json();
+
+        if (!scripts.length) {
+
+            container.innerHTML =
+                "<p>No scripts yet.</p>";
+
+            return;
+        }
+
+        container.innerHTML = "";
+
+        for (const script of scripts) {
+
+            const div =
+                document.createElement("div");
+
+            div.className = "script";
+
+            const loader =
+                "loadstring(game:HttpGet(\"" +
+                location.origin +
+                "/api/" +
+                script.id +
+                "\"))()";
+
+            div.innerHTML = `
+
+                <div class="name">
+                    ${escapeHTML(script.name)}
+                </div>
+
+                <div class="id">
+                    ID: ${script.id}
+                </div>
+
+                <div class="loader">
+                    ${escapeHTML(loader)}
+                </div>
+
+                <button>
+                    Copy Loader
+                </button>
+            `;
+
+            div.querySelector("button")
+                .addEventListener("click", async () => {
+
+                    await navigator.clipboard.writeText(
+                        loader
+                    );
+
+                    div.querySelector("button")
+                        .textContent =
+                        "Copied!";
+                });
+
+            container.appendChild(div);
+        }
+
+    } catch {
+
+        container.innerHTML =
+            "<p>Failed to load scripts.</p>";
+    }
+}
+
+function escapeHTML(str) {
+
+    return String(str)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+loadScripts();
+
+</script>
 
 </body>
-
 </html>
-        `);
-}
+`);
+});
 
-
-// ============================================================
-// BASIC BROWSER CHECK
-// ============================================================
-
-function isBrowser(req) {
-
-    const ua =
-        String(
-            req.headers[
-                "user-agent"
-            ] || ""
-        ).toLowerCase();
-
-    const browserPatterns = [
-        "mozilla",
-        "chrome",
-        "firefox",
-        "safari",
-        "edg",
-        "opera"
-    ];
-
-    return browserPatterns.some(
-        x => ua.includes(x)
-    );
-}
-
-
-// ============================================================
-// TOKEN DATABASE
-// ============================================================
-
-const sessions =
-    new Map();
-
-
-// ============================================================
-// CLEAN EXPIRED TOKENS
-// ============================================================
-
-function cleanupSessions() {
-
-    const now =
-        Date.now();
-
-    for (
-        const [
-            token,
-            session
-        ] of sessions
-    ) {
-
-        if (
-            now >
-            session.expiresAt
-        ) {
-
-            sessions.delete(
-                token
-            );
-        }
-    }
-}
-
-setInterval(
-    cleanupSessions,
-    30 * 1000
-);
-
-
-// ============================================================
-// ADMIN CREATE
-// ============================================================
+/*
+==================================================
+UPLOAD
+==================================================
+*/
 
 app.post(
-    "/admin/create",
+    "/api/upload",
+    upload.single("script"),
     (req, res) => {
 
-        const {
-            name,
-            payload
-        } = req.body || {};
+        try {
 
-        if (
-            typeof name !== "string" ||
-            typeof payload !== "string"
-        ) {
+            if (!req.file) {
+                return res.status(400).json({
+                    error: "No file uploaded"
+                });
+            }
 
-            return res.status(400).json({
-                ok: false,
-                error: "Invalid input"
-            });
-        }
+            const source =
+                req.file.buffer.toString("utf8");
 
-        if (!name.trim()) {
+            if (!source.trim()) {
+                return res.status(400).json({
+                    error: "Script is empty"
+                });
+            }
 
-            return res.status(400).json({
-                ok: false,
-                error: "Name required"
-            });
-        }
+            const id = createID();
 
-        if (!payload.trim()) {
+            const filename =
+                id + ".lua";
 
-            return res.status(400).json({
-                ok: false,
-                error: "Payload required"
-            });
-        }
+            const filepath =
+                path.join(
+                    SCRIPT_DIR,
+                    filename
+                );
 
-        if (
-            payload.length >
-            1000000
-        ) {
+            fs.writeFileSync(
+                filepath,
+                source,
+                "utf8"
+            );
 
-            return res.status(413).json({
-                ok: false,
-                error: "Payload too large"
-            });
-        }
+            const db = readDB();
 
-        const scripts =
-            readScripts();
-
-        const id =
-            generateScriptId();
-
-        const script = {
-
-            id,
-
-            name:
-                name.trim(),
-
-            payload,
-
-            active: true,
-
-            createdAt:
-                new Date()
-                    .toISOString()
-        };
-
-        scripts.push(
-            script
-        );
-
-        saveScripts(
-            scripts
-        );
-
-        res.json({
-
-            ok: true,
-
-            script: {
-
+            db[id] = {
                 id,
+                name: cleanName(
+                    req.file.originalname
+                ),
+                filename,
+                createdAt:
+                    new Date().toISOString()
+            };
 
-                name:
-                    script.name,
+            writeDB(db);
+
+            res.json({
+                ok: true,
+                id,
 
                 loader:
-                    `loadstring(game:HttpGet("${DOMAIN}/loader/${id}"))()`
-            }
-        });
-    }
-);
+                    `loadstring(game:HttpGet("${req.protocol}://${req.get("host")}/api/${id}"))()`
+            });
 
+        } catch (err) {
 
-// ============================================================
-// ADMIN LIST
-// ============================================================
+            console.error(err);
 
-app.get(
-    "/admin/list",
-    (req, res) => {
-
-        const scripts =
-            readScripts();
-
-        res.json({
-
-            ok: true,
-
-            scripts:
-                scripts.map(
-                    script => ({
-
-                        id:
-                            script.id,
-
-                        name:
-                            script.name,
-
-                        active:
-                            script.active,
-
-                        createdAt:
-                            script.createdAt,
-
-                        loader:
-                            `loadstring(game:HttpGet("${DOMAIN}/loader/${script.id}"))()`
-                    })
-                )
-        });
-    }
-);
-
-
-// ============================================================
-// REVOKE
-// ============================================================
-
-app.post(
-    "/admin/revoke/:id",
-    (req, res) => {
-
-        const scripts =
-            readScripts();
-
-        const script =
-            scripts.find(
-                x =>
-                    x.id ===
-                    req.params.id
-            );
-
-        if (!script) {
-
-            return res.status(404).json({
-                ok: false,
-                error: "Script not found"
+            res.status(500).json({
+                error: "Upload failed"
             });
         }
-
-        script.active = false;
-
-        saveScripts(
-            scripts
-        );
-
-        res.json({
-            ok: true
-        });
     }
 );
 
+/*
+==================================================
+SCRIPT LIST
+==================================================
+*/
 
-// ============================================================
-// ENABLE
-// ============================================================
+app.get("/api/scripts", (req, res) => {
 
-app.post(
-    "/admin/enable/:id",
-    (req, res) => {
+    const db = readDB();
 
-        const scripts =
-            readScripts();
-
-        const script =
-            scripts.find(
-                x =>
-                    x.id ===
-                    req.params.id
-            );
-
-        if (!script) {
-
-            return res.status(404).json({
-                ok: false,
-                error: "Script not found"
-            });
-        }
-
-        script.active = true;
-
-        saveScripts(
-            scripts
+    const result =
+        Object.values(db)
+        .sort(
+            (a, b) =>
+                new Date(b.createdAt) -
+                new Date(a.createdAt)
         );
 
-        res.json({
-            ok: true
-        });
-    }
-);
+    res.json(result);
+});
 
+/*
+==================================================
+PAYLOAD ENDPOINT
+==================================================
+*/
 
-// ============================================================
-// DELETE
-// ============================================================
+app.get("/api/:id", (req, res) => {
 
-app.delete(
-    "/admin/delete/:id",
-    (req, res) => {
+    const id = req.params.id;
 
-        let scripts =
-            readScripts();
+    const db = readDB();
 
-        const oldLength =
-            scripts.length;
+    const script = db[id];
 
-        scripts =
-            scripts.filter(
-                x =>
-                    x.id !==
-                    req.params.id
-            );
-
-        if (
-            scripts.length ===
-            oldLength
-        ) {
-
-            return res.status(404).json({
-                ok: false,
-                error: "Script not found"
-            });
-        }
-
-        saveScripts(
-            scripts
-        );
-
-        res.json({
-            ok: true
-        });
-    }
-);
-
-
-// ============================================================
-// LOADER ENDPOINT
-//
-// Browser -> BLOCK
-// Executor -> nhận Lua loader
-// ============================================================
-
-app.get(
-    "/loader/:id",
-    (req, res) => {
-
-        if (isBrowser(req)) {
-
-            return blocked(
-                res,
-                "BROWSER"
-            );
-        }
-
-        const scripts =
-            readScripts();
-
-        const script =
-            scripts.find(
-                x =>
-                    x.id ===
-                    req.params.id
-            );
-
-        if (!script) {
-
-            return blocked(
-                res,
-                "INVALID ID"
-            );
-        }
-
-        if (!script.active) {
-
-            return blocked(
-                res,
-                "REVOKED"
-            );
-        }
-
-        const loader = `
-local HttpService = game:GetService("HttpService")
-
-local API = "${DOMAIN}"
-
-local ID = "${script.id}"
-
-local function randomNonce()
-
-    local chars =
-        "abcdefghijklmnopqrstuvwxyz" ..
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ..
-        "0123456789"
-
-    local result = {}
-
-    for i = 1, 32 do
-
-        local n =
-            math.random(
-                1,
-                #chars
-            )
-
-        result[i] =
-            chars:sub(
-                n,
-                n
-            )
-    end
-
-    return table.concat(result)
-end
-
-local nonce =
-    randomNonce()
-
-local timestamp =
-    os.time()
-
-local response =
-    request({
-
-        Url =
-            API ..
-            "/api/challenge/" ..
-            ID,
-
-        Method =
-            "POST",
-
-        Headers = {
-
-            ["Content-Type"] =
-                "application/json",
-
-            ["X-Time"] =
-                tostring(
-                    timestamp
-                ),
-
-            ["X-Nonce"] =
-                nonce
-        },
-
-        Body =
-            "{}"
-    })
-
-if not response then
-
-    warn(
-        "LEXINX BLOCK"
-    )
-
-    return
-end
-
-if response.StatusCode ~= 200 then
-
-    warn(
-        "LEXINX BLOCK:",
-        response.StatusCode
-    )
-
-    return
-end
-
-local success,
-      challenge =
-    pcall(
-        function()
-
-            return
-                HttpService:
-                JSONDecode(
-                    response.Body
-                )
-
-        end
-    )
-
-if not success or
-   not challenge.ok then
-
-    warn(
-        "LEXINX AUTH FAILED"
-    )
-
-    return
-end
-
-local payloadResponse =
-    request({
-
-        Url =
-            API ..
-            "/api/payload/" ..
-            ID,
-
-        Method =
-            "POST",
-
-        Headers = {
-
-            ["Content-Type"] =
-                "application/json",
-
-            ["X-Session"] =
-                challenge.token
-        },
-
-        Body =
-            "{}"
-    })
-
-if not payloadResponse then
-
-    warn(
-        "LEXINX BLOCK"
-    )
-
-    return
-end
-
-if payloadResponse.StatusCode ~= 200 then
-
-    warn(
-        "LEXINX BLOCK:",
-        payloadResponse.StatusCode
-    )
-
-    return
-end
-
-local payload =
-    payloadResponse.Body
-
-if type(payload) ~= "string" or
-   #payload == 0 then
-
-    warn(
-        "LEXINX EMPTY PAYLOAD"
-    )
-
-    return
-end
-
-local fn,
-      err =
-    loadstring(
-        payload
-    )
-
-if not fn then
-
-    warn(
-        "LEXINX COMPILE ERROR:",
-        err
-    )
-
-    return
-end
-
-local ok,
-      runtimeError =
-    pcall(fn)
-
-if not ok then
-
-    warn(
-        "LEXINX RUNTIME ERROR:",
-        runtimeError
-    )
-
-end
-`;
+    if (!script) {
 
         return res
-            .status(200)
-            .type("text/plain")
-            .send(loader);
-    }
-);
-
-
-// ============================================================
-// CHALLENGE
-// ============================================================
-
-app.post(
-    "/api/challenge/:id",
-    (req, res) => {
-
-        if (isBrowser(req)) {
-
-            return blocked(
-                res,
-                "BROWSER"
-            );
-        }
-
-        const {
-            id
-        } = req.params;
-
-        const {
-            timestamp,
-            nonce
-        } = req.body || {};
-
-        if (
-            !timestamp ||
-            !nonce
-        ) {
-
-            return blocked(
-                res,
-                "INVALID REQUEST"
-            );
-        }
-
-        if (
-            typeof nonce !==
-            "string" ||
-            nonce.length < 16 ||
-            nonce.length > 128
-        ) {
-
-            return blocked(
-                res,
-                "INVALID NONCE"
-            );
-        }
-
-        const ts =
-            Number(timestamp);
-
-        if (
-            !Number.isFinite(ts)
-        ) {
-
-            return blocked(
-                res,
-                "INVALID TIME"
-            );
-        }
-
-        const now =
-            Math.floor(
-                Date.now() / 1000
-            );
-
-        if (
-            Math.abs(
-                now - ts
-            ) > 60
-        ) {
-
-            return blocked(
-                res,
-                "TIME CHECK FAILED"
-            );
-        }
-
-        const scripts =
-            readScripts();
-
-        const script =
-            scripts.find(
-                x =>
-                    x.id === id
-            );
-
-        if (!script) {
-
-            return blocked(
-                res,
-                "INVALID ID"
-            );
-        }
-
-        if (!script.active) {
-
-            return blocked(
-                res,
-                "REVOKED"
-            );
-        }
-
-        const token =
-            crypto.randomBytes(
-                32
-            ).toString("hex");
-
-        sessions.set(
-            token,
-            {
-
-                id,
-
-                nonce,
-
-                createdAt:
-                    Date.now(),
-
-                expiresAt:
-                    Date.now() +
-                    TOKEN_TTL,
-
-                used: false
-            }
-        );
-
-        return res.json({
-
-            ok: true,
-
-            token,
-
-            expiresIn:
-                TOKEN_TTL
-        });
-    }
-);
-
-
-// ============================================================
-// PAYLOAD
-// ============================================================
-
-app.post(
-    "/api/payload/:id",
-    (req, res) => {
-
-        if (isBrowser(req)) {
-
-            return blocked(
-                res,
-                "BROWSER"
-            );
-        }
-
-        const token =
-            req.header(
-                "X-Session"
-            );
-
-        if (!token) {
-
-            return blocked(
-                res,
-                "NO SESSION"
-            );
-        }
-
-        const session =
-            sessions.get(
-                token
-            );
-
-        if (!session) {
-
-            return blocked(
-                res,
-                "INVALID SESSION"
-            );
-        }
-
-        if (
-            session.used
-        ) {
-
-            sessions.delete(
-                token
-            );
-
-            return blocked(
-                res,
-                "TOKEN ALREADY USED"
-            );
-        }
-
-        if (
-            Date.now() >
-            session.expiresAt
-        ) {
-
-            sessions.delete(
-                token
-            );
-
-            return blocked(
-                res,
-                "TOKEN EXPIRED"
-            );
-        }
-
-        if (
-            session.id !==
-            req.params.id
-        ) {
-
-            return blocked(
-                res,
-                "ID MISMATCH"
-            );
-        }
-
-        const scripts =
-            readScripts();
-
-        const script =
-            scripts.find(
-                x =>
-                    x.id ===
-                    req.params.id
-            );
-
-        if (!script) {
-
-            sessions.delete(
-                token
-            );
-
-            return blocked(
-                res,
-                "INVALID SCRIPT"
-            );
-        }
-
-        if (!script.active) {
-
-            sessions.delete(
-                token
-            );
-
-            return blocked(
-                res,
-                "REVOKED"
-            );
-        }
-
-        // ONE-TIME TOKEN
-        session.used = true;
-
-        sessions.delete(
-            token
-        );
-
-        return res
-            .status(200)
+            .status(404)
             .type("text/plain")
             .send(
-                script.payload
+                "Blocked by LEXINX v50 protection"
             );
     }
-);
 
-
-// ============================================================
-// DIRECT API ACCESS
-// ============================================================
-
-app.get(
-    "/api/:id",
-    (req, res) => {
-
-        return blocked(
-            res,
-            "DIRECT ACCESS"
+    const filepath =
+        path.join(
+            SCRIPT_DIR,
+            script.filename
         );
+
+    if (!fs.existsSync(filepath)) {
+
+        return res
+            .status(404)
+            .type("text/plain")
+            .send("Payload unavailable");
     }
-);
 
-
-// ============================================================
-// 404
-// ============================================================
-
-app.use(
-    (req, res) => {
-
-        return blocked(
-            res,
-            "NOT FOUND"
-        );
-    }
-);
-
-
-// ============================================================
-// START
-// ============================================================
-
-app.listen(
-    PORT,
-    () => {
-
-        console.log(
-            "================================"
+    const payload =
+        fs.readFileSync(
+            filepath,
+            "utf8"
         );
 
-        console.log(
-            "LEXINX PROTECT ONLINE"
-        );
+    res
+        .status(200)
+        .type("text/plain")
+        .send(payload);
+});
 
-        console.log(
-            "================================"
-        );
+/*
+==================================================
+404
+==================================================
+*/
 
-        console.log(
-            "PORT:",
-            PORT
-        );
+app.use((req, res) => {
 
-        console.log(
-            "DOMAIN:",
-            DOMAIN
+    res
+        .status(404)
+        .type("text/plain")
+        .send(
+            "Blocked by LEXINX v50 protection"
         );
-    }
-);
+});
+
+/*
+==================================================
+ERROR HANDLER
+==================================================
+*/
+
+app.use((err, req, res, next) => {
+
+    console.error(err);
+
+    res.status(400).json({
+        error: err.message
+    });
+});
+
+/*
+==================================================
+START
+==================================================
+*/
+
+app.listen(PORT, () => {
+
+    console.log(
+        "LEXINX PROTECT running on port " +
+        PORT
+    );
+});
