@@ -1,431 +1,1066 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+<meta charset="UTF-8">
 
-    <title>LEXINX PROTECT</title>
+<meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0"
+>
 
-    <style>
-        * {
-            box-sizing: border-box;
-        }
+<title>LEXINX PROTECT</title>
 
-        body {
-            margin: 0;
-            background: #090909;
-            color: white;
-            font-family: Arial, sans-serif;
-        }
+<style>
 
-        .container {
-            width: min(1000px, 94%);
-            margin: 40px auto;
-        }
+* {
+    box-sizing: border-box;
+}
 
-        h1 {
-            margin-bottom: 5px;
-        }
+body {
+    margin: 0;
+    min-height: 100vh;
+    background: #080808;
+    color: white;
+    font-family: Arial, sans-serif;
+}
 
-        .sub {
-            color: #888;
-            margin-bottom: 25px;
-        }
+.container {
+    width: min(1050px, 94%);
+    margin: 40px auto;
+}
 
-        .card {
-            background: #111;
-            border: 1px solid #252525;
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
+.logo {
+    font-size: 30px;
+    font-weight: 900;
+    letter-spacing: 2px;
+}
 
-        input,
-        textarea {
-            width: 100%;
-            background: #080808;
-            border: 1px solid #303030;
-            color: white;
-            border-radius: 8px;
-            padding: 12px;
-            outline: none;
-        }
+.sub {
+    color: #777;
+    margin-top: 5px;
+    margin-bottom: 25px;
+}
 
-        input {
-            margin-bottom: 12px;
-        }
+.card {
+    background: #111;
+    border: 1px solid #292929;
+    border-radius: 14px;
+    padding: 22px;
+    margin-bottom: 18px;
+}
 
-        textarea {
-            min-height: 300px;
-            resize: vertical;
-            font-family: monospace;
-        }
+.hidden {
+    display: none !important;
+}
 
-        button {
-            border: 0;
-            border-radius: 8px;
-            padding: 11px 16px;
-            margin-top: 12px;
-            cursor: pointer;
-            background: white;
-            color: black;
-            font-weight: bold;
-        }
+input,
+textarea {
+    width: 100%;
+    padding: 13px;
+    margin-top: 10px;
 
-        button:hover {
-            opacity: .85;
-        }
+    background: #080808;
+    color: white;
 
-        .script {
-            border: 1px solid #282828;
-            border-radius: 10px;
-            padding: 15px;
-            margin-top: 12px;
-        }
+    border: 1px solid #303030;
+    border-radius: 8px;
 
-        .script-name {
-            font-weight: bold;
-            margin-bottom: 8px;
-        }
+    outline: none;
+}
 
-        .id {
-            color: #777;
-            font-size: 12px;
-            word-break: break-all;
-        }
+textarea {
+    min-height: 330px;
+    resize: vertical;
 
-        .loader {
-            margin-top: 10px;
-            background: #050505;
-            border: 1px solid #222;
-            padding: 10px;
-            border-radius: 7px;
-            font-family: monospace;
-            font-size: 13px;
-            word-break: break-all;
-        }
+    font-family:
+        Consolas,
+        monospace;
+}
 
-        .buttons {
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
+button {
+    margin-top: 12px;
+    padding: 11px 17px;
 
-        .message {
-            margin-top: 15px;
-            color: #aaa;
-        }
-    </style>
+    border: 0;
+    border-radius: 8px;
+
+    background: white;
+    color: black;
+
+    font-weight: bold;
+    cursor: pointer;
+}
+
+button:hover {
+    opacity: .8;
+}
+
+.tabs {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.status {
+    margin-top: 12px;
+    color: #aaa;
+    white-space: pre-wrap;
+}
+
+.script {
+    border: 1px solid #292929;
+    border-radius: 10px;
+    padding: 15px;
+    margin-top: 12px;
+}
+
+.script-name {
+    font-size: 17px;
+    font-weight: bold;
+}
+
+.script-id {
+    color: #666;
+    font-size: 12px;
+    margin-top: 5px;
+}
+
+.loader {
+    background: #050505;
+    border: 1px solid #222;
+    border-radius: 7px;
+
+    padding: 11px;
+    margin-top: 10px;
+
+    font-family: monospace;
+    font-size: 12px;
+
+    word-break: break-all;
+}
+
+.buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
+.buttons button {
+    margin-top: 8px;
+}
+
+.code {
+    font-size: 30px;
+    letter-spacing: 7px;
+    font-weight: bold;
+    margin-top: 15px;
+}
+
+</style>
 </head>
 
 <body>
 
 <div class="container">
 
-    <h1>LEXINX PROTECT</h1>
+<div class="logo">
+LEXINX PROTECT
+</div>
 
-    <div class="sub">
-        Lua Script Loader Manager
-    </div>
+<div class="sub">
+Lua Script Protection Panel
+</div>
 
-    <div class="card">
+<!-- AUTH -->
 
-        <h2>Create / Edit Script</h2>
+<div id="auth">
 
-        <input
-            id="name"
-            placeholder="Script name"
-        >
+<div class="card">
 
-        <textarea
-            id="source"
-            placeholder="Paste Lua source here..."
-        ></textarea>
+<h2>Register</h2>
 
-        <input
-            id="editId"
-            placeholder="Leave empty to create new script"
-        >
+<input
+    id="registerEmail"
+    type="email"
+    placeholder="Your Gmail address"
+>
 
-        <button onclick="saveScript()">
-            CREATE SCRIPT
-        </button>
+<button onclick="register()">
+CREATE ACCOUNT
+</button>
 
-        <div
-            id="message"
-            class="message"
-        ></div>
+<div
+    id="registerStatus"
+    class="status"
+></div>
 
-    </div>
+</div>
 
-    <div class="card">
+<div class="card">
 
-        <h2>Scripts</h2>
+<h2>Verify Gmail</h2>
 
-        <button onclick="loadScripts()">
-            REFRESH
-        </button>
+<input
+    id="verifyEmail"
+    type="email"
+    placeholder="Gmail"
+>
 
-        <div id="scripts"></div>
+<input
+    id="verifyCode"
+    maxlength="6"
+    inputmode="numeric"
+    placeholder="6-digit verification code"
+>
 
-    </div>
+<button onclick="verify()">
+VERIFY ACCOUNT
+</button>
+
+<div
+    id="verifyStatus"
+    class="status"
+></div>
+
+</div>
+
+<div class="card">
+
+<h2>Login</h2>
+
+<input
+    id="loginEmail"
+    type="email"
+    placeholder="Gmail"
+>
+
+<input
+    id="loginPassword"
+    type="password"
+    placeholder="Generated password"
+>
+
+<button onclick="login()">
+LOGIN
+</button>
+
+<div
+    id="loginStatus"
+    class="status"
+></div>
+
+</div>
+
+</div>
+
+<!-- PANEL -->
+
+<div
+    id="panel"
+    class="hidden"
+>
+
+<div class="card">
+
+<div>
+Logged in as:
+<strong id="currentEmail"></strong>
+</div>
+
+<button onclick="logout()">
+LOGOUT
+</button>
+
+</div>
+
+<div class="card">
+
+<h2>Create / Edit Script</h2>
+
+<input
+    id="scriptName"
+    placeholder="Script name"
+>
+
+<textarea
+    id="scriptSource"
+    placeholder="Paste Lua source here..."
+></textarea>
+
+<input
+    id="editId"
+    placeholder="Leave empty to create a new script"
+>
+
+<div class="buttons">
+
+<button onclick="saveScript()">
+SAVE SCRIPT
+</button>
+
+<button onclick="clearEditor()">
+CLEAR
+</button>
+
+</div>
+
+<div
+    id="scriptStatus"
+    class="status"
+></div>
+
+</div>
+
+<div class="card">
+
+<h2>Your Scripts</h2>
+
+<button onclick="loadScripts()">
+REFRESH
+</button>
+
+<div id="scripts"></div>
+
+</div>
+
+</div>
 
 </div>
 
 <script>
 
-async function saveScript() {
+let sessionToken =
+    localStorage.getItem(
+        "LEXINX_SESSION"
+    );
 
-    const name =
-        document.getElementById("name").value;
+/* =========================================================
+   API
+========================================================= */
 
-    const source =
-        document.getElementById("source").value;
+async function api(
+    url,
+    options = {}
+) {
 
-    const editId =
-        document.getElementById("editId").value.trim();
+    options.headers =
+        options.headers || {};
 
-    if (!source.trim()) {
-        showMessage(
-            "Please enter Lua source."
+    if (sessionToken) {
+        options.headers[
+            "X-Session-Token"
+        ] = sessionToken;
+    }
+
+    const response =
+        await fetch(
+            url,
+            options
         );
-        return;
+
+    let data;
+
+    try {
+        data =
+            await response.json();
+    } catch {
+        data = {
+            ok: false,
+            error:
+                await response.text()
+        };
     }
 
-    let url = "/api/create";
-    let method = "POST";
-
-    if (editId) {
-        url =
-            "/api/edit/" +
-            encodeURIComponent(editId);
-
-        method = "POST";
+    if (
+        response.status === 401
+    ) {
+        logoutLocal();
     }
+
+    return {
+        response,
+        data
+    };
+}
+
+/* =========================================================
+   REGISTER
+========================================================= */
+
+async function register() {
+
+    const email =
+        document.getElementById(
+            "registerEmail"
+        ).value.trim();
+
+    setStatus(
+        "registerStatus",
+        "Sending..."
+    );
 
     try {
 
-        const response =
-            await fetch(url, {
-                method,
+        const {
+            response,
+            data
+        } = await api(
+            "/api/register",
+            {
+                method: "POST",
+
                 headers: {
                     "Content-Type":
                         "application/json"
                 },
-                body: JSON.stringify({
-                    name,
-                    source
-                })
-            });
 
-        const data =
-            await response.json();
+                body:
+                    JSON.stringify({
+                        email
+                    })
+            }
+        );
 
-        if (!response.ok || !data.ok) {
-            showMessage(
+        if (
+            !response.ok ||
+            !data.ok
+        ) {
+            setStatus(
+                "registerStatus",
                 data.error ||
-                "Request failed."
+                "Registration failed"
             );
             return;
         }
 
-        showMessage(
-            editId
-                ? "Script updated."
-                : "Script created."
+        document.getElementById(
+            "verifyEmail"
+        ).value = email;
+
+        setStatus(
+            "registerStatus",
+            "Verification email sent. Check your Gmail."
         );
+
+    } catch (error) {
+
+        setStatus(
+            "registerStatus",
+            error.message
+        );
+    }
+}
+
+/* =========================================================
+   VERIFY
+========================================================= */
+
+async function verify() {
+
+    const email =
+        document.getElementById(
+            "verifyEmail"
+        ).value.trim();
+
+    const code =
+        document.getElementById(
+            "verifyCode"
+        ).value.trim();
+
+    setStatus(
+        "verifyStatus",
+        "Checking..."
+    );
+
+    try {
+
+        const {
+            response,
+            data
+        } = await api(
+            "/api/verify",
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
+
+                body:
+                    JSON.stringify({
+                        email,
+                        code
+                    })
+            }
+        );
+
+        if (
+            !response.ok ||
+            !data.ok
+        ) {
+            setStatus(
+                "verifyStatus",
+                data.error ||
+                "Verification failed"
+            );
+            return;
+        }
+
+        setStatus(
+            "verifyStatus",
+            "Verified successfully. You can now login."
+        );
+
+        document.getElementById(
+            "loginEmail"
+        ).value = email;
+
+    } catch (error) {
+
+        setStatus(
+            "verifyStatus",
+            error.message
+        );
+    }
+}
+
+/* =========================================================
+   LOGIN
+========================================================= */
+
+async function login() {
+
+    const email =
+        document.getElementById(
+            "loginEmail"
+        ).value.trim();
+
+    const password =
+        document.getElementById(
+            "loginPassword"
+        ).value;
+
+    setStatus(
+        "loginStatus",
+        "Logging in..."
+    );
+
+    try {
+
+        const {
+            response,
+            data
+        } = await api(
+            "/api/login",
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
+
+                body:
+                    JSON.stringify({
+                        email,
+                        password
+                    })
+            }
+        );
+
+        if (
+            !response.ok ||
+            !data.ok
+        ) {
+            setStatus(
+                "loginStatus",
+                data.error ||
+                "Login failed"
+            );
+            return;
+        }
+
+        sessionToken =
+            data.token;
+
+        localStorage.setItem(
+            "LEXINX_SESSION",
+            sessionToken
+        );
+
+        showPanel(
+            data.email
+        );
+
+    } catch (error) {
+
+        setStatus(
+            "loginStatus",
+            error.message
+        );
+    }
+}
+
+/* =========================================================
+   PANEL
+========================================================= */
+
+function showPanel(email) {
+
+    document
+        .getElementById("auth")
+        .classList.add("hidden");
+
+    document
+        .getElementById("panel")
+        .classList.remove("hidden");
+
+    document.getElementById(
+        "currentEmail"
+    ).textContent = email;
+
+    loadScripts();
+}
+
+async function checkSession() {
+
+    if (!sessionToken) {
+        return;
+    }
+
+    try {
+
+        const {
+            response,
+            data
+        } = await api(
+            "/api/me"
+        );
+
+        if (
+            response.ok &&
+            data.ok
+        ) {
+            showPanel(
+                data.email
+            );
+        }
+
+    } catch {
+        logoutLocal();
+    }
+}
+
+/* =========================================================
+   SAVE
+========================================================= */
+
+async function saveScript() {
+
+    const name =
+        document.getElementById(
+            "scriptName"
+        ).value.trim();
+
+    const source =
+        document.getElementById(
+            "scriptSource"
+        ).value;
+
+    const editId =
+        document.getElementById(
+            "editId"
+        ).value.trim();
+
+    if (!source.trim()) {
+
+        setStatus(
+            "scriptStatus",
+            "Script is empty."
+        );
+
+        return;
+    }
+
+    const url =
+        editId
+            ? "/api/edit/" +
+              encodeURIComponent(
+                  editId
+              )
+            : "/api/create";
+
+    try {
+
+        const {
+            response,
+            data
+        } = await api(
+            url,
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type":
+                        "application/json"
+                },
+
+                body:
+                    JSON.stringify({
+                        name,
+                        source
+                    })
+            }
+        );
+
+        if (
+            !response.ok ||
+            !data.ok
+        ) {
+            setStatus(
+                "scriptStatus",
+                data.error ||
+                "Save failed"
+            );
+            return;
+        }
 
         document.getElementById(
             "editId"
         ).value = data.id;
 
-        await loadScripts();
+        setStatus(
+            "scriptStatus",
+            "Saved successfully."
+        );
+
+        loadScripts();
 
     } catch (error) {
 
-        showMessage(
-            "Error: " + error.message
+        setStatus(
+            "scriptStatus",
+            error.message
         );
     }
 }
 
+/* =========================================================
+   SCRIPTS
+========================================================= */
+
 async function loadScripts() {
 
     const container =
-        document.getElementById("scripts");
+        document.getElementById(
+            "scripts"
+        );
 
     container.innerHTML =
         "Loading...";
 
     try {
 
-        const response =
-            await fetch("/api/scripts");
+        const {
+            response,
+            data
+        } = await api(
+            "/api/scripts"
+        );
 
-        const data =
-            await response.json();
-
-        if (!data.ok) {
+        if (
+            !response.ok ||
+            !data.ok
+        ) {
             container.innerHTML =
-                "Failed to load scripts.";
+                escapeHtml(
+                    data.error ||
+                    "Failed"
+                );
             return;
         }
 
-        if (!data.scripts.length) {
+        if (
+            data.scripts.length === 0
+        ) {
             container.innerHTML =
-                "No scripts yet.";
+                "No scripts.";
             return;
         }
 
         container.innerHTML = "";
 
-        data.scripts.forEach(script => {
+        data.scripts.forEach(
+            script => {
 
-            const div =
-                document.createElement("div");
+                const div =
+                    document.createElement(
+                        "div"
+                    );
 
-            div.className = "script";
+                div.className =
+                    "script";
 
-            div.innerHTML = `
+                div.innerHTML = `
 
-                <div class="script-name">
-                    ${escapeHtml(script.name)}
-                </div>
+<div class="script-name">
+    ${escapeHtml(script.name)}
+</div>
 
-                <div class="id">
-                    ID: ${escapeHtml(script.id)}
-                </div>
+<div class="script-id">
+    ID: ${escapeHtml(script.id)}
+</div>
 
-                <div class="loader">
-                    ${escapeHtml(script.loader)}
-                </div>
+<div class="loader">
+    ${escapeHtml(script.loader)}
+</div>
 
-                <div class="buttons">
+<div class="buttons">
 
-                    <button
-                        onclick='copyText(${JSON.stringify(script.loader)})'
-                    >
-                        COPY LOADER
-                    </button>
+<button>
+COPY LOADER
+</button>
 
-                    <button
-                        onclick='editScript(${JSON.stringify(script.id)}, ${JSON.stringify(script.name)})'
-                    >
-                        EDIT
-                    </button>
+<button>
+EDIT
+</button>
 
-                    <button
-                        onclick='deleteScript(${JSON.stringify(script.id)})'
-                    >
-                        DELETE
-                    </button>
+<button>
+DELETE
+</button>
 
-                </div>
-            `;
+</div>
+`;
 
-            container.appendChild(div);
-        });
+                const buttons =
+                    div.querySelectorAll(
+                        "button"
+                    );
+
+                buttons[0]
+                    .onclick =
+                    () => copyText(
+                        script.loader
+                    );
+
+                buttons[1]
+                    .onclick =
+                    () => editScript(
+                        script.id
+                    );
+
+                buttons[2]
+                    .onclick =
+                    () => deleteScript(
+                        script.id
+                    );
+
+                container.appendChild(
+                    div
+                );
+            }
+        );
 
     } catch (error) {
 
         container.innerHTML =
-            "Error: " +
-            escapeHtml(error.message);
+            escapeHtml(
+                error.message
+            );
     }
 }
 
-function editScript(id, name) {
+/* =========================================================
+   EDIT
+========================================================= */
+
+async function editScript(id) {
+
+    /*
+       Chỉ load metadata ở đây.
+       Source thật vẫn nằm trên server.
+    */
 
     document.getElementById(
         "editId"
     ).value = id;
 
-    document.getElementById(
-        "name"
-    ).value = name;
-
-    showMessage(
-        "Enter the new source and save."
+    setStatus(
+        "scriptStatus",
+        "Editing script " + id +
+        ". Paste the new source below."
     );
+
+    window.scrollTo({
+        top: 0,
+        behavior: "smooth"
+    });
 }
+
+/* =========================================================
+   DELETE
+========================================================= */
 
 async function deleteScript(id) {
 
-    if (!confirm(
-        "Delete this script?"
-    )) {
+    if (
+        !confirm(
+            "Delete this script?"
+        )
+    ) {
         return;
     }
 
-    try {
-
-        const response =
-            await fetch(
-                "/api/delete/" +
-                encodeURIComponent(id),
-                {
-                    method: "DELETE"
-                }
-            );
-
-        const data =
-            await response.json();
-
-        if (!data.ok) {
-            alert(
-                data.error ||
-                "Delete failed."
-            );
-            return;
+    const {
+        response,
+        data
+    } = await api(
+        "/api/delete/" +
+        encodeURIComponent(id),
+        {
+            method: "DELETE"
         }
+    );
 
-        await loadScripts();
-
-    } catch (error) {
-
-        alert(error.message);
+    if (
+        !response.ok ||
+        !data.ok
+    ) {
+        alert(
+            data.error ||
+            "Delete failed"
+        );
+        return;
     }
+
+    loadScripts();
 }
+
+/* =========================================================
+   COPY
+========================================================= */
 
 async function copyText(text) {
 
     try {
 
-        await navigator.clipboard.writeText(
-            text
-        );
+        await navigator
+            .clipboard
+            .writeText(text);
 
-        showMessage(
+        setStatus(
+            "scriptStatus",
             "Loader copied."
         );
 
     } catch {
 
-        alert(text);
+        prompt(
+            "Copy loader:",
+            text
+        );
     }
 }
 
-function showMessage(text) {
+/* =========================================================
+   LOGOUT
+========================================================= */
+
+async function logout() {
+
+    try {
+        await api(
+            "/api/logout",
+            {
+                method: "POST"
+            }
+        );
+    } catch {}
+
+    logoutLocal();
+}
+
+function logoutLocal() {
+
+    sessionToken = null;
+
+    localStorage.removeItem(
+        "LEXINX_SESSION"
+    );
+
+    document
+        .getElementById("panel")
+        .classList.add("hidden");
+
+    document
+        .getElementById("auth")
+        .classList.remove("hidden");
+}
+
+/* =========================================================
+   CLEAR
+========================================================= */
+
+function clearEditor() {
 
     document.getElementById(
-        "message"
+        "scriptName"
+    ).value = "";
+
+    document.getElementById(
+        "scriptSource"
+    ).value = "";
+
+    document.getElementById(
+        "editId"
+    ).value = "";
+}
+
+/* =========================================================
+   HELPERS
+========================================================= */
+
+function setStatus(
+    id,
+    text
+) {
+    document.getElementById(
+        id
     ).textContent = text;
 }
 
 function escapeHtml(text) {
 
     return String(text)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
+        .replace(
+            /&/g,
+            "&amp;"
+        )
+        .replace(
+            /</g,
+            "&lt;"
+        )
+        .replace(
+            />/g,
+            "&gt;"
+        )
+        .replace(
+            /"/g,
+            "&quot;"
+        )
+        .replace(
+            /'/g,
+            "&#039;"
+        );
 }
 
-loadScripts();
+/* =========================================================
+   START
+========================================================= */
+
+checkSession();
 
 </script>
 
