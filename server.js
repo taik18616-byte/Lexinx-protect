@@ -13,10 +13,12 @@ const DOMAIN =
 const DATA_DIR = path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "scripts.json");
 
-const SESSION_TTL = 2 * 60 * 1000;
-const TOKEN_TTL = 20 * 1000;
+const SESSION_TTL = 120000;
+const TOKEN_TTL = 30000;
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(DATA_DIR, {
+    recursive: true
+});
 
 if (!fs.existsSync(DB_FILE)) {
     fs.writeFileSync(DB_FILE, "{}", "utf8");
@@ -35,7 +37,10 @@ app.use(express.json({
 function readDB() {
     try {
         return JSON.parse(
-            fs.readFileSync(DB_FILE, "utf8")
+            fs.readFileSync(
+                DB_FILE,
+                "utf8"
+            )
         );
     } catch {
         return {};
@@ -60,8 +65,17 @@ function randomHex(bytes = 32) {
         .toString("hex");
 }
 
+function randomInt(min, max) {
+    return Math.floor(
+        Math.random() *
+        (max - min + 1)
+    ) + min;
+}
+
 function cleanName(name) {
-    return String(name || "Script")
+    return String(
+        name || "Script"
+    )
         .replace(/[^\w .-]/g, "_")
         .slice(0, 80);
 }
@@ -91,28 +105,39 @@ function blocked(res) {
 }
 
 /* =========================================================
-   BROWSER BLOCK
+   BROWSER DETECTION
 ========================================================= */
 
-function isBrowserNavigation(req) {
-    const accept =
-        String(req.headers.accept || "")
-            .toLowerCase();
+function isBrowser(req) {
 
-    const fetchMode =
+    const accept =
         String(
-            req.headers["sec-fetch-mode"] || ""
+            req.headers.accept || ""
         ).toLowerCase();
 
-    const fetchDest =
+    const mode =
         String(
-            req.headers["sec-fetch-dest"] || ""
+            req.headers[
+                "sec-fetch-mode"
+            ] || ""
+        ).toLowerCase();
+
+    const dest =
+        String(
+            req.headers[
+                "sec-fetch-dest"
+            ] || ""
         ).toLowerCase();
 
     return (
-        accept.includes("text/html") ||
-        fetchMode === "navigate" ||
-        fetchDest === "document"
+        mode === "navigate" ||
+        dest === "document" ||
+        (
+            accept.includes("text/html") &&
+            !req.headers["user-agent"]?.includes(
+                "Roblox"
+            )
+        )
     );
 }
 
@@ -122,28 +147,33 @@ function isBrowserNavigation(req) {
 
 const sessions = new Map();
 
-function newChallenge() {
-    return {
-        token: randomHex(32),
-        nonce: randomHex(16),
-        expiresAt:
-            Date.now() + TOKEN_TTL,
-        used: false
-    };
-}
-
 function createSession(scriptId) {
+
     const session = {
-        id: randomHex(32),
+
+        id:
+            randomHex(32),
 
         scriptId,
 
-        createdAt: Date.now(),
+        createdAt:
+            Date.now(),
 
         expiresAt:
-            Date.now() + SESSION_TTL,
+            Date.now() +
+            SESSION_TTL,
 
-        challenge: newChallenge()
+        token:
+            randomHex(32),
+
+        nonce:
+            randomHex(16),
+
+        tokenExpiresAt:
+            Date.now() +
+            TOKEN_TTL,
+
+        used: false
     };
 
     sessions.set(
@@ -155,140 +185,245 @@ function createSession(scriptId) {
 }
 
 function getSession(id) {
+
     if (
-        typeof id !== "string" ||
-        !id
+        typeof id !==
+        "string"
     ) {
         return null;
     }
 
-    const session =
+    const s =
         sessions.get(id);
 
-    if (!session) {
+    if (!s) {
         return null;
     }
 
     if (
         Date.now() >
-        session.expiresAt
+        s.expiresAt
     ) {
         sessions.delete(id);
         return null;
     }
 
-    return session;
+    return s;
 }
 
-function consumeChallenge(
-    challenge,
-    token,
-    nonce
-) {
-    if (!challenge) {
+function safeEqual(a, b) {
+
+    if (
+        typeof a !== "string" ||
+        typeof b !== "string"
+    ) {
         return false;
     }
 
-    if (challenge.used) {
+    const A =
+        Buffer.from(a);
+
+    const B =
+        Buffer.from(b);
+
+    if (
+        A.length !== B.length
+    ) {
         return false;
+    }
+
+    return crypto.timingSafeEqual(
+        A,
+        B
+    );
+}
+
+function verifySession(
+    sessionId,
+    token,
+    nonce
+) {
+
+    const s =
+        getSession(sessionId);
+
+    if (!s) {
+        return null;
+    }
+
+    if (s.used) {
+        return null;
     }
 
     if (
         Date.now() >
-        challenge.expiresAt
+        s.tokenExpiresAt
     ) {
-        return false;
+        sessions.delete(
+            sessionId
+        );
+
+        return null;
     }
 
     if (
-        typeof token !== "string" ||
-        typeof nonce !== "string"
-    ) {
-        return false;
-    }
-
-    if (
-        !crypto.timingSafeEqual(
-            Buffer.from(token),
-            Buffer.from(challenge.token)
+        !safeEqual(
+            token,
+            s.token
         )
     ) {
-        return false;
+        return null;
     }
 
     if (
-        !crypto.timingSafeEqual(
-            Buffer.from(nonce),
-            Buffer.from(challenge.nonce)
+        !safeEqual(
+            nonce,
+            s.nonce
         )
     ) {
-        return false;
+        return null;
     }
 
-    challenge.used = true;
+    s.used = true;
 
-    return true;
+    return s;
 }
 
 /* =========================================================
-   SIMPLE PAYLOAD ENCODING
+   LUA IDENTIFIER
 ========================================================= */
 
-function encodePayload(source) {
-    const compressed =
-        Buffer.from(
-            source,
-            "utf8"
+function luaName() {
+
+    const chars =
+        "abcdefghijklmnopqrstuvwxyz";
+
+    let result = "_";
+
+    for (
+        let i = 0;
+        i < 8;
+        i++
+    ) {
+        result +=
+            chars[
+                randomInt(
+                    0,
+                    chars.length - 1
+                )
+            ];
+    }
+
+    return result;
+}
+
+/* =========================================================
+   PAYLOAD OBFUSCATION
+========================================================= */
+
+function encodeSource(source) {
+
+    const bytes =
+        Array.from(
+            Buffer.from(
+                source,
+                "utf8"
+            )
         );
 
-    /*
-     * Server-side representation.
-     *
-     * Đây không phải mã hóa tuyệt đối.
-     * Client vẫn phải giải mã để thực thi.
-     */
+    const fragments = [];
 
-    const key =
-        crypto.randomBytes(32);
+    let position = 0;
 
-    const iv =
-        crypto.randomBytes(16);
+    while (
+        position <
+        bytes.length
+    ) {
 
-    const cipher =
-        crypto.createCipheriv(
-            "aes-256-ctr",
-            key,
-            iv
+        const size =
+            Math.min(
+                bytes.length -
+                position,
+
+                randomInt(
+                    4,
+                    10
+                )
+            );
+
+        const part =
+            bytes.slice(
+                position,
+                position + size
+            );
+
+        position += size;
+
+        fragments.push(part);
+    }
+
+    const xorKey =
+        randomInt(1, 255);
+
+    const addKey =
+        randomInt(1, 255);
+
+    const encoded =
+        fragments.map(
+            fragment =>
+                fragment.map(
+                    byte =>
+                        (
+                            (
+                                byte ^
+                                xorKey
+                            ) +
+                            addKey
+                        ) & 255
+                )
         );
 
-    const encrypted =
-        Buffer.concat([
-            cipher.update(compressed),
-            cipher.final()
-        ]);
+    const order =
+        encoded.map(
+            (_, i) => i
+        );
+
+    for (
+        let i =
+            order.length - 1;
+        i > 0;
+        i--
+    ) {
+
+        const j =
+            randomInt(0, i);
+
+        [
+            order[i],
+            order[j]
+        ] = [
+            order[j],
+            order[i]
+        ];
+    }
 
     return {
-        data:
-            encrypted.toString("base64"),
-
-        key:
-            key.toString("base64"),
-
-        iv:
-            iv.toString("base64")
+        fragments: encoded,
+        order,
+        xorKey,
+        addKey
     };
 }
 
 /* =========================================================
-   LUA NAME
+   LUA ARRAY
 ========================================================= */
 
-function luaName() {
+function luaArray(array) {
     return (
-        "_" +
-        crypto
-            .randomBytes(5)
-            .toString("hex")
+        "{" +
+        array.join(",") +
+        "}"
     );
 }
 
@@ -298,238 +433,286 @@ function luaName() {
 
 function buildLayer2(
     payloadUrl,
-    session,
-    token,
-    nonce,
-    payload
+    session
 ) {
-    const HttpService = "HttpService";
-    const Request = luaName();
-    const Decode = luaName();
-    const Response = luaName();
-    const Data = luaName();
-    const Result = luaName();
-    const Load = luaName();
 
-    /*
-     * Payload được chia thành nhiều phần
-     * để L2 không chứa trực tiếp Lua source.
-     */
+    const payload =
+        session.payload;
 
-    const chunks = [];
+    const Http =
+        luaName();
 
-    const chunkSize = 64;
+    const Request =
+        luaName();
 
-    for (
-        let i = 0;
-        i < payload.data.length;
-        i += chunkSize
-    ) {
-        chunks.push(
-            payload.data.slice(
-                i,
-                i + chunkSize
-            )
-        );
-    }
+    const Response =
+        luaName();
 
-    const luaChunks =
-        chunks
-            .map(
-                x =>
-                    JSON.stringify(x)
-            )
+    const Decode =
+        luaName();
+
+    const Parts =
+        luaName();
+
+    const Order =
+        luaName();
+
+    const Output =
+        luaName();
+
+    const XorKey =
+        luaName();
+
+    const AddKey =
+        luaName();
+
+    const Load =
+        luaName();
+
+    const Part =
+        luaName();
+
+    const Byte =
+        luaName();
+
+    const Decoded =
+        luaName();
+
+    const fragmentLua =
+        payload.fragments
+            .map(luaArray)
             .join(",");
 
+    const orderLua =
+        luaArray(
+            payload.order.map(
+                x => x + 1
+            )
+        );
+
+    /*
+     * L2 được sinh mới cho từng loader.
+     */
+
     return `
-local ${HttpService} =
+local ${Http} =
     game:GetService("HttpService")
 
-local ${Request} = request
+local ${Request} =
+    request or
+    http_request or
+    (syn and syn.request)
 
-local ${Decode} = function(url, body)
+if type(${Request}) ~= "function" then
+    error("LEXINX BLOCK: request unavailable")
+end
 
-    local ok, response =
-        pcall(function()
+local ${Response}
 
-            return ${Request}({
-                Url = url,
-                Method = "POST",
+local ok, result =
+    pcall(function()
 
-                Headers = {
-                    ["Content-Type"] =
-                        "application/json"
-                },
+        return ${Request}({
 
-                Body =
-                    ${HttpService}:JSONEncode(body)
-            })
+            Url =
+                ${JSON.stringify(
+                    payloadUrl
+                )},
 
-        end)
+            Method =
+                "POST",
 
-    if not ok or not response then
-        error("LEXINX BLOCK")
-    end
+            Headers = {
 
-    if response.StatusCode ~= 200 then
-        error(
-            "LEXINX BLOCK HTTP " ..
-            tostring(response.StatusCode)
+                ["Content-Type"] =
+                    "application/json",
+
+                ["Accept"] =
+                    "application/json"
+
+            },
+
+            Body =
+                ${Http}:JSONEncode({
+
+                    session =
+                        ${JSON.stringify(
+                            session.id
+                        )},
+
+                    token =
+                        ${JSON.stringify(
+                            session.token
+                        )},
+
+                    nonce =
+                        ${JSON.stringify(
+                            session.nonce
+                        )}
+
+                })
+
+        })
+
+    end)
+
+if not ok or not result then
+    error("LEXINX BLOCK")
+end
+
+if result.StatusCode ~= 200 then
+    error(
+        "LEXINX BLOCK HTTP " ..
+        tostring(
+            result.StatusCode
         )
-    end
+    )
+end
 
-    local success, data =
-        pcall(function()
+local parsedOk, data =
+    pcall(function()
 
-            return ${HttpService}:JSONDecode(
-                response.Body
+        return ${Http}:JSONDecode(
+            result.Body
+        )
+
+    end)
+
+if not parsedOk or
+   type(data) ~= "table" then
+
+    error("LEXINX BLOCK")
+
+end
+
+if data.ok ~= true or
+   data.stage ~= 2 then
+
+    error("LEXINX BLOCK")
+
+end
+
+local ${Parts} = {
+    ${fragmentLua}
+}
+
+local ${Order} =
+    ${orderLua}
+
+local ${XorKey} =
+    ${payload.xorKey}
+
+local ${AddKey} =
+    ${payload.addKey}
+
+local ${Output} = {}
+
+for i = 1,#${Order} do
+
+    local ${Part} =
+        ${Parts}[
+            ${Order}[i]
+        ]
+
+    for j = 1,#${Part} do
+
+        local ${Byte} =
+            ${Part}[j]
+
+        ${Byte} =
+            (
+                (
+                    ${Byte} -
+                    ${AddKey}
+                ) % 256
             )
 
-        end)
+        local x =
+            ${Byte}
 
-    if not success then
-        error("LEXINX BLOCK")
+        local y =
+            ${XorKey}
+
+        local out = 0
+        local bit = 1
+
+        while x > 0 or y > 0 do
+
+            local xb =
+                x % 2
+
+            local yb =
+                y % 2
+
+            if xb ~= yb then
+                out =
+                    out + bit
+            end
+
+            x =
+                math.floor(
+                    x / 2
+                )
+
+            y =
+                math.floor(
+                    y / 2
+                )
+
+            bit =
+                bit * 2
+
+        end
+
+        ${Output}[
+            #${Output} + 1
+        ] =
+            string.char(
+                out % 256
+            )
+
     end
-
-    if type(data) ~= "table" then
-        error("LEXINX BLOCK")
-    end
-
-    if data.ok ~= true then
-        error("LEXINX BLOCK")
-    end
-
-    return data
 end
 
-local ${Response} =
-    ${Decode}(
-        ${JSON.stringify(payloadUrl)},
-        {
-            session =
-                ${JSON.stringify(session)},
-
-            token =
-                ${JSON.stringify(token)},
-
-            nonce =
-                ${JSON.stringify(nonce)}
-        }
+local ${Decoded} =
+    table.concat(
+        ${Output}
     )
 
-if ${Response}.stage ~= 2 then
-    error("LEXINX BLOCK")
-end
-
-local ${Data} =
-    ${Response}.payload
-
-if type(${Data}) ~= "table" then
-    error("LEXINX BLOCK")
-end
-
-local ${Result} = table.concat({
-    ${luaChunks}
-})
-
-if ${Result} ~= ${Data}.data then
-    error("LEXINX BLOCK")
-end
-
-local function base64Decode(data)
-
-    local chars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ..
-        "abcdefghijklmnopqrstuvwxyz" ..
-        "0123456789+/"
-
-    data =
-        data:gsub(
-            "[^" .. chars .. "=]",
-            ""
-        )
-
-    local result = {}
-
-    local buffer = 0
-    local bits = 0
-
-    for i = 1, #data do
-
-        local c =
-            data:sub(i, i)
-
-        if c ~= "=" then
-
-            local p =
-                chars:find(c, 1, true)
-
-            if p then
-
-                buffer =
-                    buffer * 64 +
-                    (p - 1)
-
-                bits =
-                    bits + 6
-
-                if bits >= 8 then
-
-                    bits =
-                        bits - 8
-
-                    result[#result + 1] =
-                        string.char(
-                            math.floor(
-                                buffer /
-                                2^bits
-                            ) % 256
-                        )
-                end
-            end
-        end
-    end
-
-    return table.concat(result)
-end
+${Output} = nil
+${Parts} = nil
+${Order} = nil
 
 local ${Load} =
     loadstring or load
 
 if type(${Load}) ~= "function" then
-    error("LEXINX BLOCK: loadstring unavailable")
-end
-
-/*
- * Server payload hiện được truyền dưới
- * dạng base64. Đây là lớp vận chuyển,
- * không phải cơ chế giữ source tuyệt đối.
- */
-
-local decoded =
-    base64Decode(${Result})
-
-if type(decoded) ~= "string" then
-    error("LEXINX BLOCK")
+    error(
+        "LEXINX BLOCK: loadstring unavailable"
+    )
 end
 
 local fn, err =
-    ${Load}(decoded)
+    ${Load}(
+        ${Decoded}
+    )
 
-if not fn then
+${Decoded} = nil
+
+if type(fn) ~= "function" then
     error(
         "LEXINX COMPILE ERROR: " ..
         tostring(err)
     )
 end
 
-local ok, runtimeError =
+local runOk, runErr =
     pcall(fn)
 
-if not ok then
+if not runOk then
     error(
         "LEXINX RUNTIME ERROR: " ..
-        tostring(runtimeError)
+        tostring(runErr)
     )
 end
 `;
@@ -539,14 +722,22 @@ end
    HOME
 ========================================================= */
 
-app.get("/", (req, res) => {
-    res.sendFile(
-        path.join(__dirname, "public", "index.html")
-    );
-});
+app.get(
+    "/",
+    (req, res) => {
+
+        res.sendFile(
+            path.join(
+                __dirname,
+                "public",
+                "index.html"
+            )
+        );
+    }
+);
 
 /* =========================================================
-   CREATE
+   CREATE SCRIPT
 ========================================================= */
 
 app.post(
@@ -554,63 +745,69 @@ app.post(
     (req, res) => {
 
         const source =
-            typeof req.body?.source === "string"
+            typeof req.body?.source ===
+            "string"
                 ? req.body.source
                 : "";
 
         if (!source.trim()) {
-            return res.status(400).json({
-                ok: false,
-                error: "Script is empty"
-            });
+
+            return res
+                .status(400)
+                .json({
+                    ok: false,
+                    error:
+                        "Script is empty"
+                });
         }
-
-        const name =
-            cleanName(
-                req.body?.name
-            );
-
-        const id =
-            randomHex(12);
 
         const db =
             readDB();
 
+        const id =
+            randomHex(12);
+
         db[id] = {
+
             id,
-            name,
+
+            name:
+                cleanName(
+                    req.body?.name
+                ),
+
             source,
+
             createdAt:
                 Date.now(),
+
             updatedAt:
                 Date.now()
         };
 
         writeDB(db);
 
-        const loader =
+        const endpoint =
             `${DOMAIN}/api/loader/${id}`;
 
         secure(res).json({
+
             ok: true,
 
             id,
 
-            name,
-
-            endpoint:
-                loader,
+            endpoint,
 
             loader:
                 `loadstring(game:HttpGet(${JSON.stringify(
-                    loader
+                    endpoint
                 )}))()`
         });
     }
 );
 
 /* =========================================================
-   EDIT
+   EDIT SCRIPT
 ========================================================= */
 
 app.post(
@@ -624,10 +821,14 @@ app.post(
             db[req.params.id];
 
         if (!script) {
-            return res.status(404).json({
-                ok: false,
-                error: "Script not found"
-            });
+
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "Script not found"
+                });
         }
 
         if (
@@ -655,22 +856,29 @@ app.post(
 
         secure(res).json({
             ok: true,
-            id: script.id,
-            name: script.name
+            id:
+                script.id
         });
     }
 );
 
 /* =========================================================
-   L1 -> L2
+   L1
 ========================================================= */
 
 app.get(
     "/api/loader/:id",
     (req, res) => {
 
+        /*
+         * Browser navigation bị block.
+         *
+         * Không block chỉ dựa vào User-Agent,
+         * vì executor có thể không gửi User-Agent.
+         */
+
         if (
-            isBrowserNavigation(req)
+            isBrowser(req)
         ) {
             return blocked(res);
         }
@@ -690,103 +898,80 @@ app.get(
                 script.id
             );
 
-        /*
-         * Payload được tạo cho session này.
-         */
-
-        const payload =
-            encodePayload(
+        session.payload =
+            encodeSource(
                 script.source
             );
-
-        /*
-         * L1 chỉ chứa L2.
-         */
 
         const l2 =
             buildLayer2(
                 `${DOMAIN}/api/payload`,
-                session.id,
-                session.challenge.token,
-                session.challenge.nonce,
-                payload
+                session
             );
 
-        const l1 = `
-return function()
-
-    local ok, fn =
-        pcall(function()
-
-            return loadstring(
-                ${JSON.stringify(l2)}
-            )
-
-        end)
-
-    if not ok or type(fn) ~= "function" then
-        error("LEXINX BLOCK")
-    end
-
-    local success, err =
-        pcall(fn)
-
-    if not success then
-        error(err)
-    end
-
-end
-`;
-
         /*
-         * L1 phải tự gọi function,
-         * để loader ngoài cùng chạy được
-         * bằng loadstring(... )().
+         * L1 cực ngắn:
+         *
+         * loadstring(
+         *     HttpGet(...)
+         * )()
+         *
+         * Endpoint trả L2.
          */
 
-        const finalLoader = `
-local L1 = loadstring(
-${JSON.stringify(l2)}
-)
+        const loader = `
+local s =
+    game:HttpGet(
+        ${JSON.stringify(
+            `${DOMAIN}/api/loader/${script.id}`
+        )}
+    )
 
-if type(L1) ~= "function" then
+local f =
+    loadstring(s)
+
+if type(f) ~= "function" then
     error("LEXINX BLOCK")
 end
 
-local ok, err =
-    pcall(L1)
-
-if not ok then
-    error(err)
-end
+f()
 `;
+
+        /*
+         * Lưu ý:
+         * request /api/loader trực tiếp sẽ
+         * nhận L1 chứa L2.
+         */
 
         secure(res)
             .type("text/plain")
-            .send(finalLoader);
+            .send(loader);
     }
 );
 
 /* =========================================================
-   PAYLOAD
+   PAYLOAD GET = ALWAYS BLOCK
 ========================================================= */
 
 app.get(
     "/api/payload",
     (req, res) => {
+
         return blocked(res);
     }
 );
+
+/* =========================================================
+   PAYLOAD POST
+========================================================= */
 
 app.post(
     "/api/payload",
     (req, res) => {
 
-        if (
-            isBrowserNavigation(req)
-        ) {
-            return blocked(res);
-        }
+        /*
+         * Chỉ POST mới được xử lý.
+         */
 
         const {
             session,
@@ -795,21 +980,23 @@ app.post(
         } = req.body || {};
 
         const s =
-            getSession(session);
+            verifySession(
+                session,
+                token,
+                nonce
+            );
 
         if (!s) {
             return blocked(res);
         }
 
-        if (
-            !consumeChallenge(
-                s.challenge,
-                token,
-                nonce
-            )
-        ) {
-            return blocked(res);
-        }
+        /*
+         * Session one-time.
+         */
+
+        sessions.delete(
+            s.id
+        );
 
         const db =
             readDB();
@@ -818,40 +1005,51 @@ app.post(
             db[s.scriptId];
 
         if (!script) {
-            sessions.delete(
-                s.id
-            );
-
             return blocked(res);
         }
 
         /*
-         * Token dùng một lần.
-         */
-
-        sessions.delete(
-            s.id
-        );
-
-        /*
-         * Payload được tạo mới ở đây.
+         * Tạo payload mới.
          */
 
         const payload =
-            encodePayload(
+            encodeSource(
                 script.source
             );
 
         secure(res).json({
+
             ok: true,
 
             stage: 2,
 
             payload: {
-                data:
-                    payload.data
+
+                fragments:
+                    payload.fragments,
+
+                order:
+                    payload.order,
+
+                xorKey:
+                    payload.xorKey,
+
+                addKey:
+                    payload.addKey
             }
         });
+    }
+);
+
+/* =========================================================
+   DIRECT SOURCE = BLOCK
+========================================================= */
+
+app.get(
+    "/api/source/:id",
+    (req, res) => {
+
+        return blocked(res);
     }
 );
 
@@ -875,24 +1073,25 @@ app.get(
                         `${DOMAIN}/api/loader/${script.id}`;
 
                     return {
+
                         id:
                             script.id,
 
                         name:
                             script.name,
 
-                        createdAt:
-                            script.createdAt,
-
-                        updatedAt:
-                            script.updatedAt,
-
                         endpoint,
 
                         loader:
                             `loadstring(game:HttpGet(${JSON.stringify(
                                 endpoint
-                            )}))()`
+                            )}))()`,
+
+                        createdAt:
+                            script.createdAt,
+
+                        updatedAt:
+                            script.updatedAt
                     };
                 });
 
@@ -917,10 +1116,14 @@ app.delete(
         if (
             !db[req.params.id]
         ) {
-            return res.status(404).json({
-                ok: false,
-                error: "Script not found"
-            });
+
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "Script not found"
+                });
         }
 
         delete db[
@@ -942,6 +1145,7 @@ app.delete(
 app.use(
     "/api",
     (req, res) => {
+
         return blocked(res);
     }
 );
@@ -963,7 +1167,7 @@ app.use(
 );
 
 /* =========================================================
-   SESSION CLEANUP
+   CLEAN SESSION
 ========================================================= */
 
 setInterval(
@@ -973,20 +1177,25 @@ setInterval(
             Date.now();
 
         for (
-            const [id, session]
-            of sessions
+            const [
+                id,
+                session
+            ] of sessions
         ) {
 
             if (
                 now >
                 session.expiresAt
             ) {
-                sessions.delete(id);
+
+                sessions.delete(
+                    id
+                );
             }
         }
 
     },
-    30 * 1000
+    30000
 );
 
 /* =========================================================
@@ -996,10 +1205,6 @@ setInterval(
 app.listen(
     PORT,
     () => {
-
-        console.log(
-            "================================="
-        );
 
         console.log(
             "LEXINX PROTECT ONLINE"
@@ -1017,21 +1222,7 @@ app.listen(
 
         console.log(
             "FLOW:",
-            "L1 -> L2 -> PAYLOAD -> SOURCE"
-        );
-
-        console.log(
-            "SESSION TTL:",
-            SESSION_TTL
-        );
-
-        console.log(
-            "TOKEN TTL:",
-            TOKEN_TTL
-        );
-
-        console.log(
-            "================================="
+            "L1 -> L2 -> PAYLOAD"
         );
     }
 );
