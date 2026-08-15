@@ -2,11 +2,15 @@
 <html lang="vi">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LEXINX Lua Obfuscator V4</title>
+<meta name="viewport"
+      content="width=device-width,initial-scale=1">
+
+<title>LEXINX PROTECT</title>
 
 <style>
-*{box-sizing:border-box}
+*{
+    box-sizing:border-box
+}
 
 body{
     margin:0;
@@ -16,8 +20,8 @@ body{
 }
 
 .wrap{
-    width:min(1250px,94%);
-    margin:24px auto
+    width:min(1000px,94%);
+    margin:30px auto
 }
 
 h1{
@@ -25,108 +29,85 @@ h1{
 }
 
 .sub{
-    color:#888;
-    margin-bottom:18px
-}
-
-.options{
-    display:flex;
-    flex-wrap:wrap;
-    gap:14px;
-    margin-bottom:14px
-}
-
-.options label{
-    display:flex;
-    align-items:center;
-    gap:7px;
-    color:#bbb
-}
-
-.grid{
-    display:grid;
-    grid-template-columns:1fr 1fr;
-    gap:14px
+    color:#777;
+    margin-bottom:20px
 }
 
 .panel{
     background:#111;
     border:1px solid #292929;
     border-radius:12px;
-    padding:14px
+    padding:16px;
+    margin-bottom:15px
 }
 
-.panel-title{
+label{
+    display:block;
     color:#aaa;
-    margin-bottom:8px
+    margin-bottom:7px
+}
+
+input,
+textarea{
+    width:100%;
+    background:#050505;
+    color:#eee;
+    border:1px solid #333;
+    border-radius:8px;
+    padding:12px;
+    outline:none;
+    font-family:Consolas,monospace
+}
+
+input{
+    margin-bottom:15px
 }
 
 textarea{
-    width:100%;
-    height:510px;
-    resize:vertical;
-    border:1px solid #303030;
-    border-radius:8px;
-    outline:0;
-    padding:13px;
-    background:#050505;
-    color:#ddd;
-    font:13px/1.5 Consolas,monospace
-}
-
-textarea:focus{
-    border-color:#666
-}
-
-.buttons{
-    display:flex;
-    flex-wrap:wrap;
-    gap:9px;
-    margin-top:14px
+    min-height:300px;
+    resize:vertical
 }
 
 button{
     border:0;
     border-radius:8px;
-    padding:11px 16px;
-    font-weight:bold;
+    padding:11px 18px;
     cursor:pointer;
+    font-weight:bold;
+    margin-right:7px;
+    margin-top:10px
+}
+
+.primary{
     background:#eee;
     color:#111
 }
 
-button.secondary{
-    background:#202020;
+.secondary{
+    background:#222;
     color:#eee;
     border:1px solid #333
 }
 
-button:hover{
-    opacity:.85
-}
-
-button:disabled{
-    opacity:.5;
-    cursor:not-allowed
-}
-
 .status{
-    margin-top:14px;
+    margin-top:15px;
     padding:12px;
-    border-radius:8px;
+    background:#0d0d0d;
     border:1px solid #292929;
-    background:#111;
-    color:#aaa;
+    border-radius:8px;
     white-space:pre-wrap
 }
 
-.ok{color:#8cff9b}
-.err{color:#ff7777}
+.ok{
+    color:#8cff9b
+}
 
-@media(max-width:800px){
-    .grid{
-        grid-template-columns:1fr
-    }
+.err{
+    color:#ff7777
+}
+
+.loader{
+    margin-top:15px
 }
 </style>
 </head>
@@ -135,1163 +116,120 @@ button:disabled{
 
 <div class="wrap">
 
-<h1>LEXINX Lua Obfuscator V4</h1>
+<h1>LEXINX PROTECT</h1>
 
 <div class="sub">
-Fragmented strings · per-entry keys · randomized pool · server payload
-</div>
-
-<div class="options">
-
-<label>
-<input id="strings" type="checkbox" checked>
-String packing
-</label>
-
-<label>
-<input id="fragments" type="checkbox" checked>
-Fragment strings
-</label>
-
-<label>
-<input id="shuffle" type="checkbox" checked>
-Shuffle fragments
-</label>
-
-<label>
-<input id="stage2" type="checkbox" checked>
-Second encoding stage
-</label>
-
-<label>
-<input id="delay" type="checkbox" checked>
-4s delay
-</label>
-
-<label>
-<input id="comments" type="checkbox">
-Strip comments
-</label>
-
-</div>
-
-<div class="grid">
-
-<div class="panel">
-
-<div class="panel-title">
-Lua / Luau source
-</div>
-
-<textarea
-id="input"
-spellcheck="false"
-placeholder="Paste Lua / Luau source..."
-></textarea>
-
+Server-side script delivery
 </div>
 
 <div class="panel">
 
-<div class="panel-title">
-Generated output / Server payload
-</div>
+<label>Script name</label>
+
+<input
+    id="name"
+    placeholder="My Script"
+>
+
+<label>Lua / Luau source</label>
 
 <textarea
-id="output"
-readonly
-spellcheck="false"
-placeholder="Generated Lua..."
+    id="source"
+    placeholder="Paste Lua source here..."
 ></textarea>
 
-</div>
-
-</div>
-
-<div class="buttons">
-
-<button onclick="build()">
-OBFUSCATE
+<button
+    class="primary"
+    onclick="createScript()">
+    CREATE
 </button>
 
-<button id="createBtn" onclick="createPayload()">
-CREATE
+<button
+    class="secondary"
+    onclick="clearAll()">
+    CLEAR
 </button>
 
-<button class="secondary" onclick="validate()">
-VALIDATE
-</button>
-
-<button class="secondary" onclick="copyResult()">
-COPY
-</button>
-
-<button class="secondary" onclick="downloadResult()">
-DOWNLOAD
-</button>
-
-<button class="secondary" onclick="clearAll()">
-CLEAR
-</button>
-
-</div>
-
-<div id="status" class="status">
+<div
+    id="status"
+    class="status">
 Ready.
+</div>
+
+<div
+    id="loaderBox"
+    class="loader"
+    style="display:none">
+
+<label>Generated loader</label>
+
+<textarea
+    id="loader"
+    readonly
+    style="min-height:100px">
+</textarea>
+
+<button
+    class="secondary"
+    onclick="copyLoader()">
+    COPY LOADER
+</button>
+
+</div>
+
+</div>
+
+<div class="panel">
+
+<h3>Scripts</h3>
+
+<div id="scripts">
+Loading...
+</div>
+
 </div>
 
 </div>
 
 <script>
 
-/* =========================================================
-   RANDOM
-========================================================= */
-
-function rnd(min,max){
-
-    return Math.floor(
-        Math.random()*(max-min+1)
-    )+min;
-}
-
-function name8(){
-
-    const chars=
-        "abcdefghijklmnopqrstuvwxyz";
-
-    let s="_";
-
-    for(let i=0;i<8;i++){
-
-        s+=chars[
-            rnd(0,chars.length-1)
-        ];
-    }
-
-    return s;
-}
-
-function randomByte(){
-
-    if(
-        typeof crypto !== "undefined" &&
-        crypto.getRandomValues
-    ){
-
-        const a=
-            new Uint8Array(1);
-
-        crypto.getRandomValues(a);
-
-        return a[0];
-    }
-
-    return rnd(1,255);
-}
-
-/* =========================================================
-   BYTE HELPERS
-========================================================= */
-
-function bytesOf(text){
-
-    return Array.from(
-        new TextEncoder().encode(text)
-    );
-}
-
-function xor(a,k){
-
-    const out=
-        new Array(a.length);
-
-    for(let i=0;i<a.length;i++){
-
-        out[i]=
-            (a[i]^k)&255;
-    }
-
-    return out;
-}
-
-function addTransform(a,k){
-
-    return a.map(
-        x=>(x+k)&255
-    );
-}
-
-function luaArray(a){
-
-    return "{"+a.join(",")+"}";
-}
-
-/* =========================================================
-   ESCAPES
-========================================================= */
-
-function decodeLuaEscapes(s){
-
-    return s.replace(
-        /\\(\\|'|"|n|r|t|b|f|v|a|x[0-9a-fA-F]{2}|\d{1,3})/g,
-        (full,x)=>{
-
-            if(x==="\\")return "\\";
-            if(x==="'")return "'";
-            if(x==='"')return '"';
-
-            if(x==="n")return "\n";
-            if(x==="r")return "\r";
-            if(x==="t")return "\t";
-            if(x==="b")return "\b";
-            if(x==="f")return "\f";
-            if(x==="v")return "\v";
-            if(x==="a")return "\x07";
-
-            if(x[0]==="x"){
-
-                return String.fromCharCode(
-                    parseInt(
-                        x.slice(1),
-                        16
-                    )
-                );
-            }
-
-            if(/^\d+$/.test(x)){
-
-                return String.fromCharCode(
-                    parseInt(x,10)
-                );
-            }
-
-            return full;
-        }
-    );
-}
-
-/* =========================================================
-   COMMENT STRIP
-========================================================= */
-
-function stripCommentsSafe(source){
-
-    let out="";
-    let i=0;
-    let quote=null;
-    let escaped=false;
-
-    while(i<source.length){
-
-        const c=source[i];
-
-        if(quote){
-
-            out+=c;
-
-            if(escaped){
-
-                escaped=false;
-
-            }else if(c==="\\"){
-
-                escaped=true;
-
-            }else if(c===quote){
-
-                quote=null;
-            }
-
-            i++;
-            continue;
-        }
-
-        if(c==="\""||c==="'"){
-
-            quote=c;
-            out+=c;
-            i++;
-
-            continue;
-        }
-
-        if(
-            c==="-" &&
-            source[i+1]==="-"
-        ){
-
-            if(
-                source[i+2]==="[" &&
-                source[i+3]==="["
-            ){
-
-                const end=
-                    source.indexOf(
-                        "]]",
-                        i+4
-                    );
-
-                if(end!==-1){
-
-                    i=end+2;
-                    continue;
-                }
-            }
-
-            while(
-                i<source.length &&
-                source[i]!=="\n"
-            ){
-
-                i++;
-            }
-
-            continue;
-        }
-
-        out+=c;
-        i++;
-    }
-
-    return out;
-}
-
-/* =========================================================
-   TOKENIZE STRINGS
-========================================================= */
-
-function tokenizeStrings(source){
-
-    const strings=[];
-    let out="";
-    let i=0;
-
-    while(i<source.length){
-
-        const c=source[i];
-
-        if(
-            c==="-" &&
-            source[i+1]==="-"
-        ){
-
-            const start=i;
-
-            i+=2;
-
-            while(
-                i<source.length &&
-                source[i]!=="\n"
-            ){
-
-                i++;
-            }
-
-            out+=source.slice(
-                start,
-                i
-            );
-
-            continue;
-        }
-
-        if(
-            c==="[" &&
-            source[i+1]==="["
-        ){
-
-            const end=
-                source.indexOf(
-                    "]]",
-                    i+2
-                );
-
-            if(end!==-1){
-
-                const value=
-                    source.slice(
-                        i+2,
-                        end
-                    );
-
-                strings.push(value);
-
-                out+=
-                    "__LXSTR_" +
-                    strings.length +
-                    "__";
-
-                i=end+2;
-
-                continue;
-            }
-        }
-
-        if(
-            c==="\"" ||
-            c==="'"
-        ){
-
-            const quote=c;
-
-            let j=i+1;
-            let escaped=false;
-
-            while(j<source.length){
-
-                const x=source[j];
-
-                if(escaped){
-
-                    escaped=false;
-                    j++;
-
-                    continue;
-                }
-
-                if(x==="\\"){
-
-                    escaped=true;
-                    j++;
-
-                    continue;
-                }
-
-                if(x===quote){
-
-                    break;
-                }
-
-                j++;
-            }
-
-            if(j>=source.length){
-
-                throw new Error(
-                    "Unclosed string at position "+i
-                );
-            }
-
-            strings.push(
-                source.slice(i+1,j)
-            );
-
-            out+=
-                "__LXSTR_" +
-                strings.length +
-                "__";
-
-            i=j+1;
-
-            continue;
-        }
-
-        out+=c;
-        i++;
-    }
-
-    return {
-        source:out,
-        strings
-    };
-}
-
-/* =========================================================
-   FRAGMENTATION
-========================================================= */
-
-function splitFragments(bytes){
-
-    const result=[];
-    let p=0;
-
-    while(p<bytes.length){
-
-        const size=
-            Math.min(
-                bytes.length-p,
-                rnd(4,10)
-            );
-
-        result.push(
-            bytes.slice(
-                p,
-                p+size
-            )
+async function createScript(){
+
+    const name =
+        document.getElementById(
+            "name"
+        ).value;
+
+    const source =
+        document.getElementById(
+            "source"
+        ).value;
+
+    const status =
+        document.getElementById(
+            "status"
         );
-
-        p+=size;
-    }
-
-    return result;
-}
-
-function shuffle(a){
-
-    const x=a.slice();
-
-    for(
-        let i=x.length-1;
-        i>0;
-        i--
-    ){
-
-        const j=rnd(0,i);
-
-        [
-            x[i],
-            x[j]
-        ]=[
-            x[j],
-            x[i]
-        ];
-    }
-
-    return x;
-}
-
-/* =========================================================
-   HASH
-========================================================= */
-
-function hashText(text){
-
-    let h=
-        2166136261>>>0;
-
-    for(
-        let i=0;
-        i<text.length;
-        i++
-    ){
-
-        h^=
-            text.charCodeAt(i);
-
-        h=
-            Math.imul(
-                h,
-                16777619
-            )>>>0;
-    }
-
-    return h.toString(16);
-}
-
-/* =========================================================
-   DECODER
-========================================================= */
-
-function makeDecoder(){
-
-    const fn=name8();
-    const input=name8();
-    const result=name8();
-    const index=name8();
-    const value=name8();
-
-    const code=`
-
-local ${fn}=function(${input},k)
-
-    local ${result}={}
-
-    for ${index}=1,#${input} do
-
-        local ${value}=${input}[${index}]
-
-        local x=${value}
-        local y=k
-        local o=0
-        local bit=1
-
-        while x>0 or y>0 do
-
-            local xb=x%2
-            local yb=y%2
-
-            if xb~=yb then
-                o=o+bit
-            end
-
-            x=math.floor(x/2)
-            y=math.floor(y/2)
-            bit=bit*2
-        end
-
-        ${result}[${index}]=
-            string.char(o%256)
-    end
-
-    return table.concat(${result})
-end
-
-`;
-
-    return {
-        name:fn,
-        code
-    };
-}
-
-/* =========================================================
-   BUILD POOL
-========================================================= */
-
-function makePool(strings,options){
-
-    const decoder=
-        makeDecoder();
-
-    const poolName=
-        name8();
-
-    const entries=[];
-
-    for(
-        let i=0;
-        i<strings.length;
-        i++
-    ){
-
-        const original=
-            decodeLuaEscapes(
-                strings[i]
-            );
-
-        let data=
-            bytesOf(original);
-
-        const xorKey=
-            randomByte()||137;
-
-        const addKey=
-            options.stage2
-            ? randomByte()
-            : 0;
-
-        data=
-            xor(
-                data,
-                xorKey
-            );
-
-        if(options.stage2){
-
-            data=
-                addTransform(
-                    data,
-                    addKey
-                );
-        }
-
-        let fragments;
-
-        if(options.fragments){
-
-            fragments=
-                splitFragments(
-                    data
-                );
-
-        }else{
-
-            fragments=[
-                data
-            ];
-        }
-
-        let order=
-            fragments.map(
-                (_,n)=>n
-            );
-
-        if(options.shuffle){
-
-            order=
-                shuffle(order);
-        }
-
-        entries.push({
-
-            fragments,
-            order,
-            xorKey,
-            addKey
-        });
-    }
-
-    const poolParts=[];
-
-    for(
-        let i=0;
-        i<entries.length;
-        i++
-    ){
-
-        const e=entries[i];
-
-        const fragmentParts=
-            e.fragments.map(
-                luaArray
-            );
-
-        poolParts.push(`
-[${i+1}]={
-    f={${fragmentParts.join(",")}},
-    o=${luaArray(
-        e.order.map(
-            n=>n+1
-        )
-    )},
-    x=${e.xorKey},
-    a=${e.addKey}
-}
-`);
-    }
-
-    const pool=`
-
-local ${poolName}={
-${poolParts.join(",")}
-}
-
-`;
-
-    const getter=name8();
-    const entry=name8();
-    const parts=name8();
-    const order=name8();
-    const output=name8();
-    const part=name8();
-    const byte=name8();
-    const xkey=name8();
-    const akey=name8();
-    const decoded=name8();
-    const index=name8();
-
-    const reconstruct=`
-
-local ${getter}=function(id)
-
-    local ${entry}=
-        ${poolName}[id]
-
-    if not ${entry} then
-        return nil
-    end
-
-    local ${parts}=
-        ${entry}.f
-
-    local ${order}=
-        ${entry}.o
-
-    local ${output}={}
-
-    local ${xkey}=
-        ${entry}.x
-
-    local ${akey}=
-        ${entry}.a
-
-    for ${index}=1,#${order} do
-
-        local ${part}=
-            ${parts}[${order}[${index}]]
-
-        for j=1,#${part} do
-
-            local ${byte}=
-                ${part}[j]
-
-            if ${akey}~=0 then
-
-                ${byte}=
-                    (${byte}-${akey})%256
-
-            end
-
-            ${output}[#${output}+1]=
-                ${byte}
-        end
-    end
-
-    local ${decoded}=
-        ${decoder.name}(
-            ${output},
-            ${xkey}
-        )
-
-    return ${decoded}
-end
-
-`;
-
-    return {
-
-        code:
-            decoder.code+
-            pool+
-            reconstruct,
-
-        getter,
-
-        count:
-            strings.length
-    };
-}
-
-/* =========================================================
-   REPLACE MARKERS
-========================================================= */
-
-function replaceMarkers(
-    source,
-    getter,
-    count
-){
-
-    for(
-        let i=1;
-        i<=count;
-        i++
-    ){
-
-        const marker=
-            "__LXSTR_"+i+"__";
-
-        source=
-            source.split(
-                marker
-            ).join(
-                getter+"("+i+")"
-            );
-    }
-
-    return source;
-}
-
-/* =========================================================
-   VALIDATOR
-========================================================= */
-
-function validateGenerated(source){
-
-    const errors=[];
 
     if(!source.trim()){
 
-        errors.push(
-            "Output is empty."
-        );
-
-        return errors;
-    }
-
-    if(
-        /__LXSTR_\d+__/.test(
-            source
-        )
-    ){
-
-        errors.push(
-            "Unresolved string marker."
-        );
-    }
-
-    if(
-        !/string\.char/.test(
-            source
-        )
-    ){
-
-        errors.push(
-            "Decoder missing string.char."
-        );
-    }
-
-    if(
-        !/table\.concat/.test(
-            source
-        )
-    ){
-
-        errors.push(
-            "Decoder missing table.concat."
-        );
-    }
-
-    if(
-        !/while x>0 or y>0/.test(
-            source
-        )
-    ){
-
-        errors.push(
-            "Decoder body missing."
-        );
-    }
-
-    if(
-        !/local\s+_[a-z]{8}\s*=\s*function/.test(
-            source
-        )
-    ){
-
-        errors.push(
-            "Generated helper missing."
-        );
-    }
-
-    return errors;
-}
-
-/* =========================================================
-   BUILD LOCAL
-========================================================= */
-
-function build(){
-
-    const input=
-        document.getElementById(
-            "input"
-        ).value;
-
-    const status=
-        document.getElementById(
-            "status"
-        );
-
-    if(!input.trim()){
-
-        status.className=
+        status.className =
             "status err";
 
-        status.textContent=
-            "Input is empty.";
+        status.textContent =
+            "Script is empty.";
 
         return;
     }
 
-    try{
-
-        let source=input;
-
-        if(
-            document.getElementById(
-                "comments"
-            ).checked
-        ){
-
-            source=
-                stripCommentsSafe(
-                    source
-                );
-        }
-
-        const useStrings=
-            document.getElementById(
-                "strings"
-            ).checked;
-
-        let pool={
-            code:"",
-            getter:null,
-            count:0
-        };
-
-        if(useStrings){
-
-            const tokenized=
-                tokenizeStrings(
-                    source
-                );
-
-            source=
-                tokenized.source;
-
-            pool=
-                makePool(
-                    tokenized.strings,
-                    {
-                        fragments:
-                            document.getElementById(
-                                "fragments"
-                            ).checked,
-
-                        shuffle:
-                            document.getElementById(
-                                "shuffle"
-                            ).checked,
-
-                        stage2:
-                            document.getElementById(
-                                "stage2"
-                            ).checked
-                    }
-                );
-
-            source=
-                replaceMarkers(
-                    source,
-                    pool.getter,
-                    pool.count
-                );
-        }
-
-        let delay="";
-
-        if(
-            document.getElementById(
-                "delay"
-            ).checked
-        ){
-
-            delay=`
-task.wait(4)
-`;
-        }
-
-        const hash=
-            hashText(source);
-
-        const output=
-`-- LEXINX Lua Packed V4
--- Generated: ${new Date().toISOString()}
--- Strings: ${pool.count}
--- Fragmentation: ${
-    document.getElementById(
-        "fragments"
-    ).checked
-    ? "enabled"
-    : "disabled"
-}
--- Shuffle: ${
-    document.getElementById(
-        "shuffle"
-    ).checked
-    ? "enabled"
-    : "disabled"
-}
--- Stage2: ${
-    document.getElementById(
-        "stage2"
-    ).checked
-    ? "enabled"
-    : "disabled"
-}
--- Delay: ${
-    document.getElementById(
-        "delay"
-    ).checked
-    ? "4s"
-    : "off"
-}
--- Integrity: ${hash}
-
-${pool.code}
-
-${delay}
-
-${source}
-`;
-
-        const errors=
-            validateGenerated(
-                output
-            );
-
-        if(errors.length){
-
-            status.className=
-                "status err";
-
-            status.textContent=
-                "Generated output failed validation:\n\n"+
-                errors.join("\n");
-
-            return;
-        }
-
-        document.getElementById(
-            "output"
-        ).value=
-            output;
-
-        status.className=
-            "status ok";
-
-        status.textContent=
-            "BUILD SUCCESS\n\n"+
-            "Strings packed: "+
-            pool.count+
-            "\n"+
-            "Validation: PASS";
-
-    }catch(e){
-
-        console.error(e);
-
-        status.className=
-            "status err";
-
-        status.textContent=
-            "BUILD ERROR:\n\n"+
-            e.message;
-    }
-}
-
-/* =========================================================
-   CREATE FROM SERVER
-========================================================= */
-
-async function createPayload(){
-
-    const input=
-        document.getElementById(
-            "input"
-        ).value.trim();
-
-    const output=
-        document.getElementById(
-            "output"
-        );
-
-    const status=
-        document.getElementById(
-            "status"
-        );
-
-    const button=
-        document.getElementById(
-            "createBtn"
-        );
-
-    if(!input){
-
-        status.className=
-            "status err";
-
-        status.textContent=
-            "Input is empty.";
-
-        return;
-    }
-
-    button.disabled=true;
-    button.textContent="CREATING...";
-
-    status.className=
+    status.className =
         "status";
 
-    status.textContent=
-        "Sending source to server...";
+    status.textContent =
+        "Creating...";
 
     try{
 
-        const response=
+        const response =
             await fetch(
                 "/api/create",
                 {
@@ -1302,303 +240,210 @@ async function createPayload(){
                             "application/json"
                     },
 
-                    body:
-                        JSON.stringify({
-                            source:input,
-
-                            options:{
-                                strings:
-                                    document.getElementById(
-                                        "strings"
-                                    ).checked,
-
-                                fragments:
-                                    document.getElementById(
-                                        "fragments"
-                                    ).checked,
-
-                                shuffle:
-                                    document.getElementById(
-                                        "shuffle"
-                                    ).checked,
-
-                                stage2:
-                                    document.getElementById(
-                                        "stage2"
-                                    ).checked,
-
-                                delay:
-                                    document.getElementById(
-                                        "delay"
-                                    ).checked,
-
-                                comments:
-                                    document.getElementById(
-                                        "comments"
-                                    ).checked
-                            }
-                        })
+                    body:JSON.stringify({
+                        name,
+                        source
+                    })
                 }
             );
 
-        let data;
+        const data =
+            await response.json();
 
-        try{
-
-            data=
-                await response.json();
-
-        }catch{
-
-            throw new Error(
-                "Server returned invalid JSON."
-            );
-        }
-
-        if(!response.ok){
-
+        if(!response.ok || !data.ok){
             throw new Error(
                 data.error ||
-                "HTTP "+response.status
+                "Create failed"
             );
         }
 
-        if(!data.success){
+        document.getElementById(
+            "loader"
+        ).value =
+            data.loader;
 
-            throw new Error(
-                data.error ||
-                "CREATE failed."
-            );
-        }
+        document.getElementById(
+            "loaderBox"
+        ).style.display =
+            "block";
 
-        const payload=
-            data.payload ||
-            data.code ||
-            data.result;
-
-        if(
-            typeof payload!=="string" ||
-            !payload.length
-        ){
-
-            throw new Error(
-                "Server did not return payload."
-            );
-        }
-
-        output.value=
-            payload;
-
-        status.className=
+        status.className =
             "status ok";
 
-        status.textContent=
-            "CREATE SUCCESS\n\n"+
-            "Payload received from server.\n"+
-            "Length: "+
-            payload.length;
+        status.textContent =
+            "Created successfully.\n\n"+
+            "ID: "+
+            data.id;
+
+        loadScripts();
 
     }catch(error){
 
-        console.error(
-            "CREATE ERROR:",
-            error
-        );
-
-        status.className=
+        status.className =
             "status err";
 
-        status.textContent=
-            "CREATE ERROR:\n\n"+
+        status.textContent =
             error.message;
-
-    }finally{
-
-        button.disabled=false;
-        button.textContent="CREATE";
     }
 }
 
-/* =========================================================
-   VALIDATE
-========================================================= */
+async function loadScripts(){
 
-function validate(){
-
-    const output=
+    const box =
         document.getElementById(
-            "output"
+            "scripts"
+        );
+
+    try{
+
+        const response =
+            await fetch(
+                "/api/scripts"
+            );
+
+        const data =
+            await response.json();
+
+        if(!data.ok){
+            throw new Error(
+                "Failed"
+            );
+        }
+
+        if(!data.scripts.length){
+
+            box.innerHTML =
+                "<span style='color:#777'>No scripts.</span>";
+
+            return;
+        }
+
+        box.innerHTML =
+            data.scripts.map(
+                script => `
+<div style="
+    padding:12px;
+    border:1px solid #292929;
+    border-radius:8px;
+    margin-bottom:8px;
+">
+    <b>${escapeHTML(script.name)}</b>
+
+    <div style="
+        color:#777;
+        font-size:12px;
+        margin-top:5px;
+    ">
+        ID: ${escapeHTML(script.id)}
+    </div>
+
+    <button
+        class="secondary"
+        onclick="copyText('${escapeJS(script.loader)}')">
+        COPY LOADER
+    </button>
+</div>
+`
+            ).join("");
+
+    }catch(error){
+
+        box.textContent =
+            "Failed to load scripts.";
+    }
+}
+
+async function copyLoader(){
+
+    const loader =
+        document.getElementById(
+            "loader"
         ).value;
 
-    const status=
-        document.getElementById(
-            "status"
-        );
-
-    const errors=
-        validateGenerated(
-            output
-        );
-
-    if(errors.length){
-
-        status.className=
-            "status err";
-
-        status.textContent=
-            "VALIDATION FAILED:\n\n"+
-            errors.join("\n");
-
-    }else{
-
-        status.className=
-            "status ok";
-
-        status.textContent=
-            "VALIDATION PASS";
-    }
+    await copyText(loader);
 }
 
-/* =========================================================
-   COPY
-========================================================= */
-
-async function copyResult(){
-
-    const output=
-        document.getElementById(
-            "output"
-        );
-
-    const status=
-        document.getElementById(
-            "status"
-        );
-
-    if(!output.value){
-
-        status.className=
-            "status err";
-
-        status.textContent=
-            "Nothing to copy.";
-
-        return;
-    }
+async function copyText(text){
 
     try{
 
         await navigator.clipboard.writeText(
-            output.value
+            text
         );
 
     }catch{
 
-        output.select();
+        const area =
+            document.createElement(
+                "textarea"
+            );
+
+        area.value = text;
+
+        document.body.appendChild(
+            area
+        );
+
+        area.select();
 
         document.execCommand(
             "copy"
         );
+
+        area.remove();
     }
-
-    status.className=
-        "status ok";
-
-    status.textContent=
-        "Copied.";
 }
 
-/* =========================================================
-   DOWNLOAD
-========================================================= */
+function escapeHTML(text){
 
-function downloadResult(){
-
-    const output=
-        document.getElementById(
-            "output"
-        ).value;
-
-    const status=
-        document.getElementById(
-            "status"
-        );
-
-    if(!output){
-
-        status.className=
-            "status err";
-
-        status.textContent=
-            "Nothing to download.";
-
-        return;
-    }
-
-    const blob=
-        new Blob(
-            [output],
-            {
-                type:
-                    "text/plain;charset=utf-8"
-            }
-        );
-
-    const url=
-        URL.createObjectURL(
-            blob
-        );
-
-    const a=
-        document.createElement(
-            "a"
-        );
-
-    a.href=url;
-
-    a.download=
-        "lexinx_v4.lua";
-
-    document.body.appendChild(a);
-
-    a.click();
-
-    a.remove();
-
-    URL.revokeObjectURL(url);
-
-    status.className=
-        "status ok";
-
-    status.textContent=
-        "Downloaded.";
+    return String(text)
+        .replace(/&/g,"&amp;")
+        .replace(/</g,"&lt;")
+        .replace(/>/g,"&gt;")
+        .replace(/"/g,"&quot;")
+        .replace(/'/g,"&#039;");
 }
 
-/* =========================================================
-   CLEAR
-========================================================= */
+function escapeJS(text){
+
+    return String(text)
+        .replace(/\\/g,"\\\\")
+        .replace(/'/g,"\\'")
+        .replace(/\n/g,"\\n")
+        .replace(/\r/g,"\\r");
+}
 
 function clearAll(){
 
     document.getElementById(
-        "input"
-    ).value="";
+        "name"
+    ).value = "";
 
     document.getElementById(
-        "output"
-    ).value="";
+        "source"
+    ).value = "";
 
-    const status=
-        document.getElementById(
-            "status"
-        );
+    document.getElementById(
+        "loader"
+    ).value = "";
 
-    status.className=
+    document.getElementById(
+        "loaderBox"
+    ).style.display =
+        "none";
+
+    document.getElementById(
+        "status"
+    ).className =
         "status";
 
-    status.textContent=
+    document.getElementById(
+        "status"
+    ).textContent =
         "Ready.";
 }
+
+loadScripts();
 
 </script>
 
