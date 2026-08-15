@@ -5,70 +5,37 @@ const path = require("path");
 
 const app = express();
 
-const PORT = Number(process.env.PORT || 3000);
+const PORT = process.env.PORT || 3000;
 const DOMAIN =
     process.env.DOMAIN ||
     "https://Lexinx-protect.onrender.com";
 
 const DATA_DIR = path.join(__dirname, "data");
 const DB_FILE = path.join(DATA_DIR, "scripts.json");
-const PUBLIC_DIR = path.join(__dirname, "public");
 
 const SESSION_TTL = 2 * 60 * 1000;
 const TOKEN_TTL = 20 * 1000;
 
-const MASTER_KEY_HEX =
-    process.env.LEXINX_MASTER_KEY || "";
-
-if (!/^[0-9a-fA-F]{64}$/.test(MASTER_KEY_HEX)) {
-    console.error(
-        "LEXINX_MASTER_KEY must be exactly 64 hexadecimal characters."
-    );
-    process.exit(1);
-}
-
-const MASTER_KEY =
-    Buffer.from(MASTER_KEY_HEX, "hex");
-
-fs.mkdirSync(DATA_DIR, {
-    recursive: true
-});
-
-fs.mkdirSync(PUBLIC_DIR, {
-    recursive: true
-});
+fs.mkdirSync(DATA_DIR, { recursive: true });
 
 if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(
-        DB_FILE,
-        "{}",
-        "utf8"
-    );
+    fs.writeFileSync(DB_FILE, "{}", "utf8");
 }
 
 app.disable("x-powered-by");
 
-app.use(
-    express.json({
-        limit: "25mb"
-    })
-);
+app.use(express.json({
+    limit: "25mb"
+}));
 
-app.use(
-    express.static(PUBLIC_DIR)
-);
-
-/* ========================================================
+/* =========================================================
    DATABASE
-======================================================== */
+========================================================= */
 
 function readDB() {
     try {
         return JSON.parse(
-            fs.readFileSync(
-                DB_FILE,
-                "utf8"
-            )
+            fs.readFileSync(DB_FILE, "utf8")
         );
     } catch {
         return {};
@@ -76,28 +43,16 @@ function readDB() {
 }
 
 function writeDB(db) {
-    const tmp =
-        DB_FILE + ".tmp";
-
     fs.writeFileSync(
-        tmp,
-        JSON.stringify(
-            db,
-            null,
-            2
-        ),
+        DB_FILE,
+        JSON.stringify(db, null, 2),
         "utf8"
-    );
-
-    fs.renameSync(
-        tmp,
-        DB_FILE
     );
 }
 
-/* ========================================================
-   HELPERS
-======================================================== */
+/* =========================================================
+   RANDOM
+========================================================= */
 
 function randomHex(bytes = 32) {
     return crypto
@@ -106,171 +61,14 @@ function randomHex(bytes = 32) {
 }
 
 function cleanName(name) {
-    return String(
-        name || "Script"
-    )
-        .replace(
-            /[^\w .-]/g,
-            "_"
-        )
+    return String(name || "Script")
+        .replace(/[^\w .-]/g, "_")
         .slice(0, 80);
 }
 
-function safeEqual(a, b) {
-    if (
-        typeof a !== "string" ||
-        typeof b !== "string"
-    ) {
-        return false;
-    }
-
-    const aa = Buffer.from(a);
-    const bb = Buffer.from(b);
-
-    if (aa.length !== bb.length) {
-        return false;
-    }
-
-    return crypto.timingSafeEqual(
-        aa,
-        bb
-    );
-}
-
-/* ========================================================
-   AES-256-GCM
-======================================================== */
-
-function encryptSource(source) {
-    const iv =
-        crypto.randomBytes(12);
-
-    const cipher =
-        crypto.createCipheriv(
-            "aes-256-gcm",
-            MASTER_KEY,
-            iv
-        );
-
-    const encrypted =
-        Buffer.concat([
-            cipher.update(
-                Buffer.from(
-                    source,
-                    "utf8"
-                )
-            ),
-            cipher.final()
-        ]);
-
-    const tag =
-        cipher.getAuthTag();
-
-    return {
-        algorithm: "aes-256-gcm",
-        iv: iv.toString("base64"),
-        tag: tag.toString("base64"),
-        data: encrypted.toString("base64")
-    };
-}
-
-function decryptSource(record) {
-    if (
-        !record ||
-        record.algorithm !== "aes-256-gcm"
-    ) {
-        throw new Error(
-            "Invalid encrypted source"
-        );
-    }
-
-    const iv =
-        Buffer.from(
-            record.iv,
-            "base64"
-        );
-
-    const tag =
-        Buffer.from(
-            record.tag,
-            "base64"
-        );
-
-    const data =
-        Buffer.from(
-            record.data,
-            "base64"
-        );
-
-    const decipher =
-        crypto.createDecipheriv(
-            "aes-256-gcm",
-            MASTER_KEY,
-            iv
-        );
-
-    decipher.setAuthTag(tag);
-
-    const plain =
-        Buffer.concat([
-            decipher.update(data),
-            decipher.final()
-        ]);
-
-    return plain.toString("utf8");
-}
-
-/* ========================================================
-   L2 PACKER
-
-   Chỉ dùng để đóng gói L2.
-   Không chứa source.
-======================================================== */
-
-function createL2Payload() {
-    const nonce = randomHex(16);
-
-    const payload = [
-        "local HttpService=game:GetService(\"HttpService\")",
-        `local DOMAIN=${JSON.stringify(DOMAIN)}`,
-        "return function(session,token,nonce)",
-        "local r=request({",
-        "Url=DOMAIN..\"/api/stage/2\",",
-        "Method=\"POST\",",
-        "Headers={[\"Content-Type\"]=\"application/json\"},",
-        "Body=HttpService:JSONEncode({session=session,token=token,nonce=nonce})",
-        "})",
-        "if not r or r.StatusCode~=200 then error(\"LEXINX BLOCK\") end",
-        "local ok,d=pcall(function() return HttpService:JSONDecode(r.Body) end)",
-        "if not ok or type(d)~=\"table\" or d.ok~=true or d.stage~=2 then error(\"LEXINX BLOCK\") end",
-        "return d",
-        "end"
-    ].join("\n");
-
-    const encoded =
-        Buffer.from(
-            payload,
-            "utf8"
-        ).toString("base64");
-
-    const checksum =
-        crypto
-            .createHash("sha256")
-            .update(encoded)
-            .digest("hex");
-
-    return {
-        version: 1,
-        nonce,
-        encoding: "base64",
-        checksum,
-        payload: encoded
-    };
-}
-
-/* ========================================================
-   SECURITY HEADERS
-======================================================== */
+/* =========================================================
+   RESPONSE
+========================================================= */
 
 function secure(res) {
     return res
@@ -278,49 +76,49 @@ function secure(res) {
             "Cache-Control",
             "no-store, no-cache, must-revalidate"
         )
-        .set(
-            "Pragma",
-            "no-cache"
-        )
+        .set("Pragma", "no-cache")
         .set(
             "X-Content-Type-Options",
             "nosniff"
         );
 }
 
-function block(res) {
+function blocked(res) {
     return secure(res)
         .status(403)
         .type("text/plain")
         .send("LEXINX BLOCK");
 }
 
+/* =========================================================
+   BROWSER BLOCK
+========================================================= */
+
 function isBrowserNavigation(req) {
     const accept =
-        String(
-            req.headers.accept || ""
-        ).toLowerCase();
+        String(req.headers.accept || "")
+            .toLowerCase();
 
-    const mode =
+    const fetchMode =
         String(
             req.headers["sec-fetch-mode"] || ""
         ).toLowerCase();
 
-    const dest =
+    const fetchDest =
         String(
             req.headers["sec-fetch-dest"] || ""
         ).toLowerCase();
 
     return (
         accept.includes("text/html") ||
-        mode === "navigate" ||
-        dest === "document"
+        fetchMode === "navigate" ||
+        fetchDest === "document"
     );
 }
 
-/* ========================================================
-   SESSIONS
-======================================================== */
+/* =========================================================
+   SESSION
+========================================================= */
 
 const sessions = new Map();
 
@@ -329,28 +127,23 @@ function newChallenge() {
         token: randomHex(32),
         nonce: randomHex(16),
         expiresAt:
-            Date.now() +
-            TOKEN_TTL,
+            Date.now() + TOKEN_TTL,
         used: false
     };
 }
 
-function createSession(scriptID) {
+function createSession(scriptId) {
     const session = {
         id: randomHex(32),
-        scriptID,
+
+        scriptId,
+
         createdAt: Date.now(),
+
         expiresAt:
-            Date.now() +
-            SESSION_TTL,
-        stage: 1,
-        challenges: {
-            1: newChallenge(),
-            2: null,
-            3: null,
-            4: null,
-            5: null
-        }
+            Date.now() + SESSION_TTL,
+
+        challenge: newChallenge()
     };
 
     sessions.set(
@@ -363,7 +156,8 @@ function createSession(scriptID) {
 
 function getSession(id) {
     if (
-        typeof id !== "string"
+        typeof id !== "string" ||
+        !id
     ) {
         return null;
     }
@@ -407,18 +201,25 @@ function consumeChallenge(
     }
 
     if (
-        !safeEqual(
-            token,
-            challenge.token
+        typeof token !== "string" ||
+        typeof nonce !== "string"
+    ) {
+        return false;
+    }
+
+    if (
+        !crypto.timingSafeEqual(
+            Buffer.from(token),
+            Buffer.from(challenge.token)
         )
     ) {
         return false;
     }
 
     if (
-        !safeEqual(
-            nonce,
-            challenge.nonce
+        !crypto.timingSafeEqual(
+            Buffer.from(nonce),
+            Buffer.from(challenge.nonce)
         )
     ) {
         return false;
@@ -429,66 +230,337 @@ function consumeChallenge(
     return true;
 }
 
-function nextStage(
-    session,
-    expected,
-    next
-) {
-    if (
-        session.stage !==
-        expected
-    ) {
-        return null;
-    }
+/* =========================================================
+   SIMPLE PAYLOAD ENCODING
+========================================================= */
 
-    const challenge =
-        newChallenge();
+function encodePayload(source) {
+    const compressed =
+        Buffer.from(
+            source,
+            "utf8"
+        );
 
-    session.challenges[next] =
-        challenge;
+    /*
+     * Server-side representation.
+     *
+     * Đây không phải mã hóa tuyệt đối.
+     * Client vẫn phải giải mã để thực thi.
+     */
 
-    session.stage = next;
+    const key =
+        crypto.randomBytes(32);
 
-    return challenge;
+    const iv =
+        crypto.randomBytes(16);
+
+    const cipher =
+        crypto.createCipheriv(
+            "aes-256-ctr",
+            key,
+            iv
+        );
+
+    const encrypted =
+        Buffer.concat([
+            cipher.update(compressed),
+            cipher.final()
+        ]);
+
+    return {
+        data:
+            encrypted.toString("base64"),
+
+        key:
+            key.toString("base64"),
+
+        iv:
+            iv.toString("base64")
+    };
 }
 
-/* ========================================================
-   HOME
-======================================================== */
+/* =========================================================
+   LUA NAME
+========================================================= */
 
-app.get(
-    "/",
-    (req, res) => {
-        res.sendFile(
-            path.join(
-                PUBLIC_DIR,
-                "index.html"
+function luaName() {
+    return (
+        "_" +
+        crypto
+            .randomBytes(5)
+            .toString("hex")
+    );
+}
+
+/* =========================================================
+   BUILD L2
+========================================================= */
+
+function buildLayer2(
+    payloadUrl,
+    session,
+    token,
+    nonce,
+    payload
+) {
+    const HttpService = "HttpService";
+    const Request = luaName();
+    const Decode = luaName();
+    const Response = luaName();
+    const Data = luaName();
+    const Result = luaName();
+    const Load = luaName();
+
+    /*
+     * Payload được chia thành nhiều phần
+     * để L2 không chứa trực tiếp Lua source.
+     */
+
+    const chunks = [];
+
+    const chunkSize = 64;
+
+    for (
+        let i = 0;
+        i < payload.data.length;
+        i += chunkSize
+    ) {
+        chunks.push(
+            payload.data.slice(
+                i,
+                i + chunkSize
             )
         );
     }
-);
 
-/* ========================================================
-   CREATE SCRIPT
-======================================================== */
+    const luaChunks =
+        chunks
+            .map(
+                x =>
+                    JSON.stringify(x)
+            )
+            .join(",");
+
+    return `
+local ${HttpService} =
+    game:GetService("HttpService")
+
+local ${Request} = request
+
+local ${Decode} = function(url, body)
+
+    local ok, response =
+        pcall(function()
+
+            return ${Request}({
+                Url = url,
+                Method = "POST",
+
+                Headers = {
+                    ["Content-Type"] =
+                        "application/json"
+                },
+
+                Body =
+                    ${HttpService}:JSONEncode(body)
+            })
+
+        end)
+
+    if not ok or not response then
+        error("LEXINX BLOCK")
+    end
+
+    if response.StatusCode ~= 200 then
+        error(
+            "LEXINX BLOCK HTTP " ..
+            tostring(response.StatusCode)
+        )
+    end
+
+    local success, data =
+        pcall(function()
+
+            return ${HttpService}:JSONDecode(
+                response.Body
+            )
+
+        end)
+
+    if not success then
+        error("LEXINX BLOCK")
+    end
+
+    if type(data) ~= "table" then
+        error("LEXINX BLOCK")
+    end
+
+    if data.ok ~= true then
+        error("LEXINX BLOCK")
+    end
+
+    return data
+end
+
+local ${Response} =
+    ${Decode}(
+        ${JSON.stringify(payloadUrl)},
+        {
+            session =
+                ${JSON.stringify(session)},
+
+            token =
+                ${JSON.stringify(token)},
+
+            nonce =
+                ${JSON.stringify(nonce)}
+        }
+    )
+
+if ${Response}.stage ~= 2 then
+    error("LEXINX BLOCK")
+end
+
+local ${Data} =
+    ${Response}.payload
+
+if type(${Data}) ~= "table" then
+    error("LEXINX BLOCK")
+end
+
+local ${Result} = table.concat({
+    ${luaChunks}
+})
+
+if ${Result} ~= ${Data}.data then
+    error("LEXINX BLOCK")
+end
+
+local function base64Decode(data)
+
+    local chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ..
+        "abcdefghijklmnopqrstuvwxyz" ..
+        "0123456789+/"
+
+    data =
+        data:gsub(
+            "[^" .. chars .. "=]",
+            ""
+        )
+
+    local result = {}
+
+    local buffer = 0
+    local bits = 0
+
+    for i = 1, #data do
+
+        local c =
+            data:sub(i, i)
+
+        if c ~= "=" then
+
+            local p =
+                chars:find(c, 1, true)
+
+            if p then
+
+                buffer =
+                    buffer * 64 +
+                    (p - 1)
+
+                bits =
+                    bits + 6
+
+                if bits >= 8 then
+
+                    bits =
+                        bits - 8
+
+                    result[#result + 1] =
+                        string.char(
+                            math.floor(
+                                buffer /
+                                2^bits
+                            ) % 256
+                        )
+                end
+            end
+        end
+    end
+
+    return table.concat(result)
+end
+
+local ${Load} =
+    loadstring or load
+
+if type(${Load}) ~= "function" then
+    error("LEXINX BLOCK: loadstring unavailable")
+end
+
+/*
+ * Server payload hiện được truyền dưới
+ * dạng base64. Đây là lớp vận chuyển,
+ * không phải cơ chế giữ source tuyệt đối.
+ */
+
+local decoded =
+    base64Decode(${Result})
+
+if type(decoded) ~= "string" then
+    error("LEXINX BLOCK")
+end
+
+local fn, err =
+    ${Load}(decoded)
+
+if not fn then
+    error(
+        "LEXINX COMPILE ERROR: " ..
+        tostring(err)
+    )
+end
+
+local ok, runtimeError =
+    pcall(fn)
+
+if not ok then
+    error(
+        "LEXINX RUNTIME ERROR: " ..
+        tostring(runtimeError)
+    )
+end
+`;
+}
+
+/* =========================================================
+   HOME
+========================================================= */
+
+app.get("/", (req, res) => {
+    res.send("LEXINX PROTECT ONLINE");
+});
+
+/* =========================================================
+   CREATE
+========================================================= */
 
 app.post(
     "/api/create",
     (req, res) => {
+
         const source =
-            typeof req.body?.source ===
-            "string"
+            typeof req.body?.source === "string"
                 ? req.body.source
                 : "";
 
         if (!source.trim()) {
-            return res
-                .status(400)
-                .json({
-                    ok: false,
-                    error:
-                        "Script is empty"
-                });
+            return res.status(400).json({
+                ok: false,
+                error: "Script is empty"
+            });
         }
 
         const name =
@@ -505,89 +577,63 @@ app.post(
         db[id] = {
             id,
             name,
-            source:
-                encryptSource(
-                    source
-                ),
-
-            l2:
-                createL2Payload(),
-
+            source,
             createdAt:
                 Date.now(),
-
             updatedAt:
                 Date.now()
         };
 
         writeDB(db);
 
-        const endpoint =
+        const loader =
             `${DOMAIN}/api/loader/${id}`;
 
         secure(res).json({
             ok: true,
+
             id,
+
             name,
-            endpoint,
+
+            endpoint:
+                loader,
+
             loader:
                 `loadstring(game:HttpGet(${JSON.stringify(
-                    endpoint
+                    loader
                 )}))()`
         });
     }
 );
 
-/* ========================================================
-   EDIT SCRIPT
-
-   Khi edit source, L2 cũng được tạo lại.
-======================================================== */
+/* =========================================================
+   EDIT
+========================================================= */
 
 app.post(
     "/api/edit/:id",
     (req, res) => {
+
         const db =
             readDB();
 
         const script =
-            db[
-                req.params.id
-            ];
+            db[req.params.id];
 
         if (!script) {
-            return res
-                .status(404)
-                .json({
-                    ok: false,
-                    error:
-                        "Script not found"
-                });
+            return res.status(404).json({
+                ok: false,
+                error: "Script not found"
+            });
         }
 
         if (
             typeof req.body?.source ===
             "string"
         ) {
-            if (
-                !req.body.source.trim()
-            ) {
-                return res
-                    .status(400)
-                    .json({
-                        ok: false,
-                        error:
-                            "Script is empty"
-                    });
-            }
-
             script.source =
-                encryptSource(
-                    req.body.source
-                );
-
-            script.l2 =
-                createL2Payload();
+                req.body.source;
         }
 
         if (
@@ -605,48 +651,36 @@ app.post(
 
         writeDB(db);
 
-        const endpoint =
-            `${DOMAIN}/api/loader/${script.id}`;
-
         secure(res).json({
             ok: true,
             id: script.id,
-            name: script.name,
-            endpoint,
-            loader:
-                `loadstring(game:HttpGet(${JSON.stringify(
-                    endpoint
-                )}))()`
+            name: script.name
         });
     }
 );
 
-/* ========================================================
+/* =========================================================
    L1 -> L2
-
-   Browser navigation => 403.
-   Roblox loader => Lua L1.
-======================================================== */
+========================================================= */
 
 app.get(
     "/api/loader/:id",
     (req, res) => {
+
         if (
             isBrowserNavigation(req)
         ) {
-            return block(res);
+            return blocked(res);
         }
 
         const db =
             readDB();
 
         const script =
-            db[
-                req.params.id
-            ];
+            db[req.params.id];
 
         if (!script) {
-            return block(res);
+            return blocked(res);
         }
 
         const session =
@@ -654,225 +688,102 @@ app.get(
                 script.id
             );
 
-        const l2 =
-            script.l2 ||
-            createL2Payload();
-
         /*
-         * L1 chỉ chứa loader.
-         * L2 payload được encode base64.
+         * Payload được tạo cho session này.
          */
 
-        const lua = `
-local HttpService=game:GetService("HttpService")
+        const payload =
+            encodePayload(
+                script.source
+            );
 
-local B64=${JSON.stringify(
-            l2.payload
-        )}
+        /*
+         * L1 chỉ chứa L2.
+         */
 
-local CHECK=${JSON.stringify(
-            l2.checksum
-        )}
+        const l2 =
+            buildLayer2(
+                `${DOMAIN}/api/payload`,
+                session.id,
+                session.challenge.token,
+                session.challenge.nonce,
+                payload
+            );
 
-local function decodeBase64(s)
-    local chars="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-    local out={}
-    local buffer=0
-    local bits=0
+        const l1 = `
+return function()
 
-    for i=1,#s do
-        local c=s:sub(i,i)
-        if c~="=" then
-            local p=chars:find(c,1,true)
-            if p then
-                buffer=buffer*64+(p-1)
-                bits=bits+6
+    local ok, fn =
+        pcall(function()
 
-                if bits>=8 then
-                    bits=bits-8
-                    local b=math.floor(buffer/2^bits)%256
-                    out[#out+1]=string.char(b)
-                end
-            end
-        end
-    end
+            return loadstring(
+                ${JSON.stringify(l2)}
+            )
 
-    return table.concat(out)
-end
+        end)
 
-local L2=decodeBase64(B64)
-
-local DOMAIN=${JSON.stringify(
-            DOMAIN
-        )}
-
-local SESSION=${JSON.stringify(
-            session.id
-        )}
-
-local TOKEN=${JSON.stringify(
-            session.challenges[1].token
-        )}
-
-local NONCE=${JSON.stringify(
-            session.challenges[1].nonce
-        )}
-
-local response=request({
-    Url=DOMAIN.."/api/stage/2",
-    Method="POST",
-    Headers={
-        ["Content-Type"]="application/json"
-    },
-    Body=HttpService:JSONEncode({
-        session=SESSION,
-        token=TOKEN,
-        nonce=NONCE
-    })
-})
-
-if not response or response.StatusCode~=200 then
-    error("LEXINX BLOCK")
-end
-
-local ok,data=pcall(function()
-    return HttpService:JSONDecode(
-        response.Body
-    )
-end)
-
-if not ok or type(data)~="table" then
-    error("LEXINX BLOCK")
-end
-
-if data.ok~=true or data.stage~=2 then
-    error("LEXINX BLOCK")
-end
-
-local function post(path,body)
-    local r=request({
-        Url=DOMAIN..path,
-        Method="POST",
-        Headers={
-            ["Content-Type"]="application/json"
-        },
-        Body=HttpService:JSONEncode(body)
-    })
-
-    if not r or r.StatusCode~=200 then
+    if not ok or type(fn) ~= "function" then
         error("LEXINX BLOCK")
     end
 
-    local success,result=pcall(function()
-        return HttpService:JSONDecode(
-            r.Body
-        )
-    end)
+    local success, err =
+        pcall(fn)
 
-    if not success or type(result)~="table" then
-        error("LEXINX BLOCK")
+    if not success then
+        error(err)
     end
 
-    if result.ok~=true then
-        error("LEXINX BLOCK")
-    end
-
-    return result
 end
+`;
 
-local L3=post(
-    "/api/stage/3",
-    {
-        session=data.session,
-        token=data.token,
-        nonce=data.nonce
-    }
+        /*
+         * L1 phải tự gọi function,
+         * để loader ngoài cùng chạy được
+         * bằng loadstring(... )().
+         */
+
+        const finalLoader = `
+local L1 = loadstring(
+${JSON.stringify(l2)}
 )
 
-if L3.stage~=3 then
+if type(L1) ~= "function" then
     error("LEXINX BLOCK")
 end
 
-local L4=post(
-    "/api/stage/4",
-    {
-        session=L3.session,
-        token=L3.token,
-        nonce=L3.nonce
-    }
-)
+local ok, err =
+    pcall(L1)
 
-if L4.stage~=4 then
-    error("LEXINX BLOCK")
-end
-
-local L5=post(
-    "/api/stage/5",
-    {
-        session=L4.session,
-        token=L4.token,
-        nonce=L4.nonce
-    }
-)
-
-if L5.stage~=5 then
-    error("LEXINX BLOCK")
-end
-
-local source=post(
-    "/api/source",
-    {
-        session=L5.session,
-        token=L5.token,
-        nonce=L5.nonce
-    }
-)
-
-if type(source.code)~="string" then
-    error("LEXINX BLOCK")
-end
-
-local fn,err=loadstring(source.code)
-
-if not fn then
-    error(
-        "LEXINX COMPILE ERROR: "
-        ..tostring(err)
-    )
-end
-
-local success,runtimeErr=pcall(fn)
-
-if not success then
-    error(
-        "LEXINX RUNTIME ERROR: "
-        ..tostring(runtimeErr)
-    )
+if not ok then
+    error(err)
 end
 `;
 
         secure(res)
             .type("text/plain")
-            .send(lua);
+            .send(finalLoader);
     }
 );
 
-/* ========================================================
-   STAGE 2
-======================================================== */
+/* =========================================================
+   PAYLOAD
+========================================================= */
 
 app.get(
-    "/api/stage/2",
-    (req, res) => block(res)
+    "/api/payload",
+    (req, res) => {
+        return blocked(res);
+    }
 );
 
 app.post(
-    "/api/stage/2",
+    "/api/payload",
     (req, res) => {
+
         if (
             isBrowserNavigation(req)
         ) {
-            return block(res);
+            return blocked(res);
         }
 
         const {
@@ -882,333 +793,74 @@ app.post(
         } = req.body || {};
 
         const s =
-            getSession(
-                session
-            );
+            getSession(session);
 
-        if (!s || s.stage !== 1) {
-            return block(res);
+        if (!s) {
+            return blocked(res);
         }
 
         if (
             !consumeChallenge(
-                s.challenges[1],
+                s.challenge,
                 token,
                 nonce
             )
         ) {
-            return block(res);
-        }
-
-        const next =
-            nextStage(
-                s,
-                1,
-                2
-            );
-
-        if (!next) {
-            return block(res);
-        }
-
-        secure(res).json({
-            ok: true,
-            stage: 2,
-            session: s.id,
-            token: next.token,
-            nonce: next.nonce
-        });
-    }
-);
-
-/* ========================================================
-   STAGE 3
-======================================================== */
-
-app.get(
-    "/api/stage/3",
-    (req, res) => block(res)
-);
-
-app.post(
-    "/api/stage/3",
-    (req, res) => {
-        if (
-            isBrowserNavigation(req)
-        ) {
-            return block(res);
-        }
-
-        const {
-            session,
-            token,
-            nonce
-        } = req.body || {};
-
-        const s =
-            getSession(
-                session
-            );
-
-        if (!s || s.stage !== 2) {
-            return block(res);
-        }
-
-        if (
-            !consumeChallenge(
-                s.challenges[2],
-                token,
-                nonce
-            )
-        ) {
-            return block(res);
-        }
-
-        const next =
-            nextStage(
-                s,
-                2,
-                3
-            );
-
-        if (!next) {
-            return block(res);
-        }
-
-        secure(res).json({
-            ok: true,
-            stage: 3,
-            session: s.id,
-            token: next.token,
-            nonce: next.nonce
-        });
-    }
-);
-
-/* ========================================================
-   STAGE 4
-======================================================== */
-
-app.get(
-    "/api/stage/4",
-    (req, res) => block(res)
-);
-
-app.post(
-    "/api/stage/4",
-    (req, res) => {
-        if (
-            isBrowserNavigation(req)
-        ) {
-            return block(res);
-        }
-
-        const {
-            session,
-            token,
-            nonce
-        } = req.body || {};
-
-        const s =
-            getSession(
-                session
-            );
-
-        if (!s || s.stage !== 3) {
-            return block(res);
-        }
-
-        if (
-            !consumeChallenge(
-                s.challenges[3],
-                token,
-                nonce
-            )
-        ) {
-            return block(res);
-        }
-
-        const next =
-            nextStage(
-                s,
-                3,
-                4
-            );
-
-        if (!next) {
-            return block(res);
-        }
-
-        secure(res).json({
-            ok: true,
-            stage: 4,
-            session: s.id,
-            token: next.token,
-            nonce: next.nonce
-        });
-    }
-);
-
-/* ========================================================
-   STAGE 5
-======================================================== */
-
-app.get(
-    "/api/stage/5",
-    (req, res) => block(res)
-);
-
-app.post(
-    "/api/stage/5",
-    (req, res) => {
-        if (
-            isBrowserNavigation(req)
-        ) {
-            return block(res);
-        }
-
-        const {
-            session,
-            token,
-            nonce
-        } = req.body || {};
-
-        const s =
-            getSession(
-                session
-            );
-
-        if (!s || s.stage !== 4) {
-            return block(res);
-        }
-
-        if (
-            !consumeChallenge(
-                s.challenges[4],
-                token,
-                nonce
-            )
-        ) {
-            return block(res);
-        }
-
-        const next =
-            nextStage(
-                s,
-                4,
-                5
-            );
-
-        if (!next) {
-            return block(res);
-        }
-
-        secure(res).json({
-            ok: true,
-            stage: 5,
-            session: s.id,
-            token: next.token,
-            nonce: next.nonce
-        });
-    }
-);
-
-/* ========================================================
-   SOURCE
-======================================================== */
-
-app.get(
-    "/api/source",
-    (req, res) => block(res)
-);
-
-app.post(
-    "/api/source",
-    (req, res) => {
-        if (
-            isBrowserNavigation(req)
-        ) {
-            return block(res);
-        }
-
-        const {
-            session,
-            token,
-            nonce
-        } = req.body || {};
-
-        const s =
-            getSession(
-                session
-            );
-
-        if (!s || s.stage !== 5) {
-            return block(res);
-        }
-
-        if (
-            !consumeChallenge(
-                s.challenges[5],
-                token,
-                nonce
-            )
-        ) {
-            return block(res);
+            return blocked(res);
         }
 
         const db =
             readDB();
 
         const script =
-            db[
-                s.scriptID
-            ];
+            db[s.scriptId];
 
         if (!script) {
             sessions.delete(
                 s.id
             );
 
-            return block(res);
-        }
-
-        let source;
-
-        try {
-            source =
-                decryptSource(
-                    script.source
-                );
-        } catch {
-            sessions.delete(
-                s.id
-            );
-
-            return block(res);
+            return blocked(res);
         }
 
         /*
-         * One-time session destroyed.
+         * Token dùng một lần.
          */
 
         sessions.delete(
             s.id
         );
 
+        /*
+         * Payload được tạo mới ở đây.
+         */
+
+        const payload =
+            encodePayload(
+                script.source
+            );
+
         secure(res).json({
             ok: true,
-            code: source
+
+            stage: 2,
+
+            payload: {
+                data:
+                    payload.data
+            }
         });
     }
 );
 
-/* ========================================================
-   LIST
-======================================================== */
+/* =========================================================
+   SCRIPT LIST
+========================================================= */
 
 app.get(
     "/api/scripts",
     (req, res) => {
+
         const db =
             readDB();
 
@@ -1216,6 +868,7 @@ app.get(
             Object.values(db)
                 .reverse()
                 .map(script => {
+
                     const endpoint =
                         `${DOMAIN}/api/loader/${script.id}`;
 
@@ -1248,28 +901,24 @@ app.get(
     }
 );
 
-/* ========================================================
+/* =========================================================
    DELETE
-======================================================== */
+========================================================= */
 
 app.delete(
     "/api/delete/:id",
     (req, res) => {
+
         const db =
             readDB();
 
         if (
-            !db[
-                req.params.id
-            ]
+            !db[req.params.id]
         ) {
-            return res
-                .status(404)
-                .json({
-                    ok: false,
-                    error:
-                        "Script not found"
-                });
+            return res.status(404).json({
+                ok: false,
+                error: "Script not found"
+            });
         }
 
         delete db[
@@ -1284,23 +933,24 @@ app.delete(
     }
 );
 
-/* ========================================================
+/* =========================================================
    UNKNOWN API
-======================================================== */
+========================================================= */
 
 app.use(
     "/api",
     (req, res) => {
-        block(res);
+        return blocked(res);
     }
 );
 
-/* ========================================================
+/* =========================================================
    404
-======================================================== */
+========================================================= */
 
 app.use(
     (req, res) => {
+
         secure(res)
             .status(404)
             .type("text/plain")
@@ -1310,21 +960,21 @@ app.use(
     }
 );
 
-/* ========================================================
-   CLEAN EXPIRED SESSIONS
-======================================================== */
+/* =========================================================
+   SESSION CLEANUP
+========================================================= */
 
 setInterval(
     () => {
+
         const now =
             Date.now();
 
         for (
-            const [
-                id,
-                session
-            ] of sessions
+            const [id, session]
+            of sessions
         ) {
+
             if (
                 now >
                 session.expiresAt
@@ -1332,19 +982,21 @@ setInterval(
                 sessions.delete(id);
             }
         }
+
     },
     30 * 1000
 );
 
-/* ========================================================
+/* =========================================================
    START
-======================================================== */
+========================================================= */
 
 app.listen(
     PORT,
     () => {
+
         console.log(
-            "======================================"
+            "================================="
         );
 
         console.log(
@@ -1352,27 +1004,32 @@ app.listen(
         );
 
         console.log(
-            "Domain:",
+            "DOMAIN:",
             DOMAIN
         );
 
         console.log(
-            "Port:",
+            "PORT:",
             PORT
         );
 
         console.log(
-            "Flow:",
-            "L1 -> L2(encoded) -> L3 -> L4 -> L5 -> SOURCE"
+            "FLOW:",
+            "L1 -> L2 -> PAYLOAD -> SOURCE"
         );
 
         console.log(
-            "Encryption:",
-            "AES-256-GCM"
+            "SESSION TTL:",
+            SESSION_TTL
         );
 
         console.log(
-            "======================================"
+            "TOKEN TTL:",
+            TOKEN_TTL
+        );
+
+        console.log(
+            "================================="
         );
     }
 );
