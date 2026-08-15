@@ -9,30 +9,59 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || "0.0.0.0";
 
-const PAYLOAD_TTL = 10 * 60 * 1000;
-const TOKEN_TTL = 60 * 1000;
-const RATE_WINDOW = 60 * 1000;
-const RATE_LIMIT = 60;
+const PUBLIC_DIR = path.join(__dirname, "public");
+
 const MAX_PAYLOAD_SIZE = 5 * 1024 * 1024;
 
-app.disable("x-powered-by");
+const PAYLOAD_TTL =
+    30 * 60 * 1000;
 
-app.use(express.json({
-    limit: "6mb"
-}));
+const TOKEN_TTL =
+    5 * 60 * 1000;
 
-app.use(express.urlencoded({
-    extended: true,
-    limit: "6mb"
-}));
+const RATE_WINDOW =
+    60 * 1000;
+
+const RATE_LIMIT =
+    120;
 
 /* =========================================================
    STORAGE
 ========================================================= */
 
-const payloads = new Map();
-const tokens = new Map();
-const rates = new Map();
+const payloadStore = new Map();
+const tokenStore = new Map();
+const rateStore = new Map();
+
+/* =========================================================
+   EXPRESS
+========================================================= */
+
+app.disable("x-powered-by");
+
+app.use(
+    express.json({
+        limit: "6mb"
+    })
+);
+
+app.use(
+    express.urlencoded({
+        extended: true,
+        limit: "6mb"
+    })
+);
+
+/* =========================================================
+   STATIC
+========================================================= */
+
+app.use(
+    express.static(PUBLIC_DIR, {
+        index: "index.html",
+        extensions: ["html"]
+    })
+);
 
 /* =========================================================
    HELPERS
@@ -42,16 +71,16 @@ function now() {
     return Date.now();
 }
 
-function randomHex(bytes = 16) {
+function randomHex(bytes) {
     return crypto
         .randomBytes(bytes)
         .toString("hex");
 }
 
-function sha256(data) {
+function sha256(value) {
     return crypto
         .createHash("sha256")
-        .update(data)
+        .update(value, "utf8")
         .digest("hex");
 }
 
@@ -61,6 +90,7 @@ function getIP(req) {
         req.headers["x-forwarded-for"];
 
     if (forwarded) {
+
         return String(forwarded)
             .split(",")[0]
             .trim();
@@ -79,28 +109,39 @@ function getIP(req) {
 function rateLimit(req, res, next) {
 
     const ip = getIP(req);
-    const time = now();
+    const current = now();
 
-    let entry = rates.get(ip);
+    let item =
+        rateStore.get(ip);
 
-    if (!entry) {
+    if (!item) {
 
-        entry = {
+        item = {
             count: 0,
-            reset: time + RATE_WINDOW
+            reset:
+                current +
+                RATE_WINDOW
         };
 
-        rates.set(ip, entry);
+        rateStore.set(
+            ip,
+            item
+        );
     }
 
-    if (time >= entry.reset) {
+    if (
+        current >=
+        item.reset
+    ) {
 
-        entry.count = 0;
-        entry.reset =
-            time + RATE_WINDOW;
+        item.count = 0;
+
+        item.reset =
+            current +
+            RATE_WINDOW;
     }
 
-    entry.count++;
+    item.count++;
 
     res.setHeader(
         "X-RateLimit-Limit",
@@ -111,16 +152,23 @@ function rateLimit(req, res, next) {
         "X-RateLimit-Remaining",
         Math.max(
             0,
-            RATE_LIMIT - entry.count
+            RATE_LIMIT -
+            item.count
         )
     );
 
-    if (entry.count > RATE_LIMIT) {
+    if (
+        item.count >
+        RATE_LIMIT
+    ) {
 
-        return res.status(429).json({
-            ok: false,
-            error: "rate_limited"
-        });
+        return res
+            .status(429)
+            .json({
+                ok: false,
+                error:
+                    "rate_limited"
+            });
     }
 
     next();
@@ -132,46 +180,84 @@ app.use(rateLimit);
    HEALTH
 ========================================================= */
 
-app.get("/health", (req, res) => {
+app.get(
+    "/health",
+    (req, res) => {
 
-    res.json({
-        ok: true,
-        service: "LEXINX PROTECT",
-        version: "V60",
-        uptime: process.uptime(),
-        payloads: payloads.size,
-        tokens: tokens.size,
-        time: new Date().toISOString()
-    });
-});
+        res.json({
+
+            ok: true,
+
+            service:
+                "LEXINX V4 PAYLOAD SERVER",
+
+            version:
+                "1.0.0",
+
+            uptime:
+                process.uptime(),
+
+            payloads:
+                payloadStore.size,
+
+            tokens:
+                tokenStore.size,
+
+            time:
+                new Date()
+                    .toISOString()
+
+        });
+    }
+);
 
 /* =========================================================
    CREATE
 ========================================================= */
 
-app.post("/create", (req, res) => {
+async function createPayload(
+    req,
+    res
+) {
 
     try {
 
         const payload =
-            req.body?.payload;
+            req.body &&
+            req.body.payload;
 
         if (
-            typeof payload !== "string"
+            typeof payload !==
+            "string"
         ) {
 
-            return res.status(400).json({
-                ok: false,
-                error: "payload_required"
-            });
+            return res
+                .status(400)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "payload_required"
+
+                });
         }
 
-        if (!payload.trim()) {
+        if (
+            payload.trim()
+                .length === 0
+        ) {
 
-            return res.status(400).json({
-                ok: false,
-                error: "payload_empty"
-            });
+            return res
+                .status(400)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "payload_empty"
+
+                });
         }
 
         const size =
@@ -181,17 +267,35 @@ app.post("/create", (req, res) => {
             );
 
         if (
-            size > MAX_PAYLOAD_SIZE
+            size >
+            MAX_PAYLOAD_SIZE
         ) {
 
-            return res.status(413).json({
-                ok: false,
-                error: "payload_too_large"
-            });
+            return res
+                .status(413)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "payload_too_large",
+
+                    maxBytes:
+                        MAX_PAYLOAD_SIZE
+
+                });
         }
+
+        /*
+         * ID công khai.
+         */
 
         const id =
             randomHex(16);
+
+        /*
+         * Token bí mật dùng để lấy payload.
+         */
 
         const token =
             randomHex(32);
@@ -203,216 +307,158 @@ app.post("/create", (req, res) => {
             createdAt +
             PAYLOAD_TTL;
 
+        const tokenExpiresAt =
+            createdAt +
+            TOKEN_TTL;
+
         const hash =
             sha256(payload);
 
-        payloads.set(id, {
+        /*
+         * Lưu NGUYÊN payload V4.
+         */
 
+        payloadStore.set(
             id,
-            payload,
-            hash,
-            createdAt,
-            expiresAt
+            {
 
-        });
+                id,
 
-        tokens.set(token, {
+                payload,
 
+                hash,
+
+                size,
+
+                createdAt,
+
+                expiresAt
+
+            }
+        );
+
+        tokenStore.set(
             token,
-            payloadId: id,
-            createdAt,
-            expiresAt:
-                createdAt +
-                TOKEN_TTL,
-            used: false
+            {
 
-        });
+                token,
 
-        return res.status(201).json({
+                payloadId:
+                    id,
 
-            ok: true,
+                createdAt,
 
-            id,
+                expiresAt:
+                    tokenExpiresAt,
 
-            token,
+                used: false
 
-            hash,
+            }
+        );
 
-            createdAt,
+        return res
+            .status(201)
+            .json({
 
-            expiresAt,
+                ok: true,
 
-            payloadUrl:
-                `/payload/${id}?token=${token}`
+                id,
 
-        });
+                token,
+
+                hash,
+
+                size,
+
+                createdAt,
+
+                expiresAt,
+
+                tokenExpiresAt,
+
+                payloadUrl:
+                    `/payload/${id}?token=${token}`,
+
+                apiPayloadUrl:
+                    `/api/payload/${id}?token=${token}`
+
+            });
 
     } catch (error) {
 
         console.error(
-            "[CREATE]",
+            "[CREATE ERROR]",
             error
         );
 
-        res.status(500).json({
-            ok: false,
-            error: "internal_error"
-        });
+        return res
+            .status(500)
+            .json({
+
+                ok: false,
+
+                error:
+                    "internal_error"
+
+            });
     }
-});
+}
+
+/*
+ * Hai endpoint để tránh frontend/loader cũ
+ * gọi nhầm /create hoặc /api/create.
+ */
+
+app.post(
+    "/create",
+    createPayload
+);
+
+app.post(
+    "/api/create",
+    createPayload
+);
 
 /* =========================================================
    GET PAYLOAD
 ========================================================= */
 
-app.get(
-    "/payload/:id",
-    (req, res) => {
+async function sendPayload(
+    req,
+    res
+) {
 
-        try {
+    try {
 
-            const id =
-                req.params.id;
+        const id =
+            req.params.id;
 
-            const token =
-                req.query.token;
+        const token =
+            req.query.token;
 
-            if (
-                typeof token !== "string"
-            ) {
+        if (
+            typeof token !==
+            "string" ||
+            !token
+        ) {
 
-                return res.status(401).send(
+            return res
+                .status(401)
+                .send(
                     "LEXINX PROTECT: TOKEN REQUIRED"
                 );
-            }
-
-            const record =
-                payloads.get(id);
-
-            if (!record) {
-
-                return res.status(404).send(
-                    "LEXINX PROTECT: PAYLOAD NOT FOUND"
-                );
-            }
-
-            if (
-                now() >=
-                record.expiresAt
-            ) {
-
-                payloads.delete(id);
-
-                return res.status(410).send(
-                    "LEXINX PROTECT: PAYLOAD EXPIRED"
-                );
-            }
-
-            const tokenData =
-                tokens.get(token);
-
-            if (!tokenData) {
-
-                return res.status(403).send(
-                    "LEXINX PROTECT: INVALID TOKEN"
-                );
-            }
-
-            if (
-                tokenData.payloadId !== id
-            ) {
-
-                return res.status(403).send(
-                    "LEXINX PROTECT: TOKEN MISMATCH"
-                );
-            }
-
-            if (
-                now() >=
-                tokenData.expiresAt
-            ) {
-
-                tokens.delete(token);
-
-                return res.status(410).send(
-                    "LEXINX PROTECT: TOKEN EXPIRED"
-                );
-            }
-
-            if (tokenData.used) {
-
-                return res.status(403).send(
-                    "LEXINX PROTECT: TOKEN ALREADY USED"
-                );
-            }
-
-            /*
-             * One-time token.
-             */
-            tokenData.used = true;
-
-            /*
-             * Trả nguyên payload V4.
-             * Server không decode/re-obfuscate.
-             */
-
-            res.setHeader(
-                "Content-Type",
-                "text/plain; charset=utf-8"
-            );
-
-            res.setHeader(
-                "Cache-Control",
-                "no-store, no-cache, must-revalidate"
-            );
-
-            res.setHeader(
-                "Pragma",
-                "no-cache"
-            );
-
-            res.setHeader(
-                "X-Lexinx-Payload-Hash",
-                record.hash
-            );
-
-            return res.send(
-                record.payload
-            );
-
-        } catch (error) {
-
-            console.error(
-                "[PAYLOAD]",
-                error
-            );
-
-            return res.status(500).send(
-                "LEXINX PROTECT: INTERNAL ERROR"
-            );
         }
-    }
-);
-
-/* =========================================================
-   PAYLOAD INFO
-========================================================= */
-
-app.get(
-    "/api/payload/:id",
-    (req, res) => {
 
         const record =
-            payloads.get(
-                req.params.id
-            );
+            payloadStore.get(id);
 
         if (!record) {
 
-            return res.status(404).json({
-                ok: false,
-                error: "payload_not_found"
-            });
+            return res
+                .status(404)
+                .send(
+                    "LEXINX PROTECT: PAYLOAD NOT FOUND"
+                );
         }
 
         if (
@@ -420,23 +466,197 @@ app.get(
             record.expiresAt
         ) {
 
-            payloads.delete(
+            payloadStore.delete(id);
+
+            return res
+                .status(410)
+                .send(
+                    "LEXINX PROTECT: PAYLOAD EXPIRED"
+                );
+        }
+
+        const tokenRecord =
+            tokenStore.get(token);
+
+        if (!tokenRecord) {
+
+            return res
+                .status(403)
+                .send(
+                    "LEXINX PROTECT: INVALID TOKEN"
+                );
+        }
+
+        if (
+            tokenRecord.payloadId !==
+            id
+        ) {
+
+            return res
+                .status(403)
+                .send(
+                    "LEXINX PROTECT: TOKEN MISMATCH"
+                );
+        }
+
+        if (
+            now() >=
+            tokenRecord.expiresAt
+        ) {
+
+            tokenStore.delete(token);
+
+            return res
+                .status(410)
+                .send(
+                    "LEXINX PROTECT: TOKEN EXPIRED"
+                );
+        }
+
+        /*
+         * Token one-time.
+         */
+
+        if (
+            tokenRecord.used
+        ) {
+
+            return res
+                .status(403)
+                .send(
+                    "LEXINX PROTECT: TOKEN ALREADY USED"
+                );
+        }
+
+        tokenRecord.used = true;
+
+        /*
+         * Không cache.
+         */
+
+        res.setHeader(
+            "Content-Type",
+            "text/plain; charset=utf-8"
+        );
+
+        res.setHeader(
+            "Cache-Control",
+            "no-store, no-cache, must-revalidate, proxy-revalidate"
+        );
+
+        res.setHeader(
+            "Pragma",
+            "no-cache"
+        );
+
+        res.setHeader(
+            "Expires",
+            "0"
+        );
+
+        res.setHeader(
+            "X-Lexinx-Payload-Hash",
+            record.hash
+        );
+
+        res.setHeader(
+            "X-Lexinx-Payload-ID",
+            record.id
+        );
+
+        /*
+         * Trả nguyên V4.
+         */
+
+        return res.send(
+            record.payload
+        );
+
+    } catch (error) {
+
+        console.error(
+            "[PAYLOAD ERROR]",
+            error
+        );
+
+        return res
+            .status(500)
+            .send(
+                "LEXINX PROTECT: INTERNAL ERROR"
+            );
+    }
+}
+
+app.get(
+    "/payload/:id",
+    sendPayload
+);
+
+app.get(
+    "/api/payload/:id",
+    sendPayload
+);
+
+/* =========================================================
+   PAYLOAD INFO
+========================================================= */
+
+app.get(
+    "/api/info/:id",
+    (req, res) => {
+
+        const record =
+            payloadStore.get(
                 req.params.id
             );
 
-            return res.status(410).json({
-                ok: false,
-                error: "payload_expired"
-            });
+        if (!record) {
+
+            return res
+                .status(404)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "payload_not_found"
+
+                });
+        }
+
+        if (
+            now() >=
+            record.expiresAt
+        ) {
+
+            payloadStore.delete(
+                req.params.id
+            );
+
+            return res
+                .status(410)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "payload_expired"
+
+                });
         }
 
         return res.json({
 
             ok: true,
 
-            id: record.id,
+            id:
+                record.id,
 
-            hash: record.hash,
+            hash:
+                record.hash,
+
+            size:
+                record.size,
 
             createdAt:
                 record.createdAt,
@@ -449,41 +669,49 @@ app.get(
 );
 
 /* =========================================================
-   DELETE
+   DELETE PAYLOAD
 ========================================================= */
 
 app.delete(
-    "/payload/:id",
+    "/api/payload/:id",
     (req, res) => {
 
         const id =
             req.params.id;
 
-        if (!payloads.has(id)) {
+        const existed =
+            payloadStore.has(id);
 
-            return res.status(404).json({
-                ok: false,
-                error: "payload_not_found"
-            });
-        }
-
-        payloads.delete(id);
+        payloadStore.delete(id);
 
         for (
-            const [token, data]
-            of tokens
+            const [
+                token,
+                record
+            ]
+            of tokenStore
         ) {
 
             if (
-                data.payloadId === id
+                record.payloadId ===
+                id
             ) {
-                tokens.delete(token);
+
+                tokenStore.delete(
+                    token
+                );
             }
         }
 
         return res.json({
+
             ok: true,
-            deleted: id
+
+            deleted:
+                existed,
+
+            id
+
         });
     }
 );
@@ -492,57 +720,81 @@ app.delete(
    FRONTEND
 ========================================================= */
 
-app.get("/", (req, res) => {
+app.get(
+    "/",
+    (req, res) => {
 
-    res.sendFile(
-        path.join(
-            __dirname,
-            "index.html"
-        )
-    );
-});
+        res.sendFile(
+            path.join(
+                PUBLIC_DIR,
+                "index.html"
+            )
+        );
+    }
+);
 
 /* =========================================================
    404
 ========================================================= */
 
-app.use((req, res) => {
+app.use(
+    (req, res) => {
 
-    res.status(404).json({
+        res
+            .status(404)
+            .json({
 
-        ok: false,
+                ok: false,
 
-        error: "not_found",
+                error:
+                    "not_found",
 
-        method:
-            req.method,
+                method:
+                    req.method,
 
-        path:
-            req.originalUrl
+                path:
+                    req.originalUrl
 
-    });
-});
+            });
+    }
+);
 
 /* =========================================================
-   ERROR
+   ERROR HANDLER
 ========================================================= */
 
 app.use(
-    (error, req, res, next) => {
+    (
+        error,
+        req,
+        res,
+        next
+    ) => {
 
         console.error(
-            "[ERROR]",
+            "[SERVER ERROR]",
             error
         );
 
-        if (res.headersSent) {
-            return next(error);
+        if (
+            res.headersSent
+        ) {
+
+            return next(
+                error
+            );
         }
 
-        res.status(500).json({
-            ok: false,
-            error: "internal_error"
-        });
+        return res
+            .status(500)
+            .json({
+
+                ok: false,
+
+                error:
+                    "internal_error"
+
+            });
     }
 );
 
@@ -550,53 +802,72 @@ app.use(
    CLEANUP
 ========================================================= */
 
-setInterval(() => {
+setInterval(
+    () => {
 
-    const time = now();
+        const current =
+            now();
 
-    for (
-        const [id, data]
-        of payloads
-    ) {
-
-        if (
-            time >=
-            data.expiresAt
+        for (
+            const [
+                id,
+                record
+            ]
+            of payloadStore
         ) {
 
-            payloads.delete(id);
+            if (
+                current >=
+                record.expiresAt
+            ) {
+
+                payloadStore.delete(
+                    id
+                );
+            }
         }
-    }
 
-    for (
-        const [token, data]
-        of tokens
-    ) {
-
-        if (
-            time >=
-            data.expiresAt
+        for (
+            const [
+                token,
+                record
+            ]
+            of tokenStore
         ) {
 
-            tokens.delete(token);
+            if (
+                current >=
+                record.expiresAt
+            ) {
+
+                tokenStore.delete(
+                    token
+                );
+            }
         }
-    }
 
-    for (
-        const [ip, data]
-        of rates
-    ) {
-
-        if (
-            time >=
-            data.reset
+        for (
+            const [
+                ip,
+                record
+            ]
+            of rateStore
         ) {
 
-            rates.delete(ip);
-        }
-    }
+            if (
+                current >=
+                record.reset
+            ) {
 
-}, 30 * 1000);
+                rateStore.delete(
+                    ip
+                );
+            }
+        }
+
+    },
+    30 * 1000
+);
 
 /* =========================================================
    START
@@ -609,30 +880,36 @@ app.listen(
 
         console.log("");
         console.log(
-            "======================================"
+            "=========================================="
         );
         console.log(
-            "       LEXINX PROTECT V60"
+            "       LEXINX V4 PAYLOAD SERVER"
         );
         console.log(
-            "======================================"
+            "=========================================="
         );
         console.log(
-            `PORT: ${PORT}`
+            "Host : " + HOST
         );
         console.log(
-            `CREATE: POST /create`
+            "Port : " + PORT
         );
         console.log(
-            `PAYLOAD: GET /payload/:id`
+            "Web  : http://localhost:" +
+            PORT
         );
         console.log(
-            `HEALTH: GET /health`
+            "Create : POST /create"
         );
         console.log(
-            "======================================"
+            "Payload: GET /payload/:id"
+        );
+        console.log(
+            "Health : GET /health"
+        );
+        console.log(
+            "=========================================="
         );
         console.log("");
-
     }
 );
