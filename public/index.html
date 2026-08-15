@@ -1,103 +1,175 @@
-<!DOCTYPE html>
-<html lang="en">
+<!doctype html>
+<html lang="vi">
 
 <head>
 
-<meta charset="UTF-8">
+<meta charset="utf-8">
 
 <meta
     name="viewport"
     content="width=device-width,initial-scale=1"
 >
 
-<title>LEXINX PROTECT</title>
+<title>LEXINX Lua Obfuscator V4</title>
 
 <style>
 
-* {
-    box-sizing: border-box;
+*{
+    box-sizing:border-box
 }
 
-body {
-    margin: 0;
-    background: #050505;
-    color: white;
-    font-family: Arial, sans-serif;
+body{
+    margin:0;
+    background:#070707;
+    color:#eee;
+    font-family:Arial,sans-serif
 }
 
-.container {
-    width: min(1000px, 94%);
-    margin: 30px auto;
+.wrap{
+    width:min(1250px,94%);
+    margin:24px auto
 }
 
-.card {
-    background: #101010;
-    border: 1px solid #292929;
-    border-radius: 14px;
-    padding: 20px;
-    margin-bottom: 20px;
+h1{
+    margin:0 0 5px
 }
 
-input,
-textarea {
-    width: 100%;
-    background: #080808;
-    color: white;
-    border: 1px solid #333;
-    border-radius: 8px;
-    padding: 12px;
-    margin-bottom: 10px;
-    outline: none;
+.sub{
+    color:#888;
+    margin-bottom:18px
 }
 
-textarea {
-    min-height: 350px;
-    resize: vertical;
-    font-family: Consolas, monospace;
+.options{
+    display:flex;
+    flex-wrap:wrap;
+    gap:14px;
+    margin-bottom:14px
 }
 
-button {
-    border: 0;
-    border-radius: 7px;
-    padding: 10px 15px;
-    margin: 3px;
-    cursor: pointer;
-    font-weight: bold;
+.options label{
+    display:flex;
+    align-items:center;
+    gap:7px;
+    color:#bbb
 }
 
-.primary {
-    background: white;
-    color: black;
+.grid{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:14px
 }
 
-.danger {
-    background: #351010;
-    color: #ff7777;
+.panel{
+    background:#111;
+    border:1px solid #292929;
+    border-radius:12px;
+    padding:14px
 }
 
-.script {
-    background: #080808;
-    border: 1px solid #292929;
-    border-radius: 10px;
-    padding: 15px;
-    margin-top: 12px;
+.panel-title{
+    color:#aaa;
+    margin-bottom:8px
 }
 
-.id {
-    color: #777;
-    font-size: 12px;
-    margin: 8px 0;
-    word-break: break-all;
+textarea{
+    width:100%;
+    height:510px;
+    resize:vertical;
+    border:1px solid #303030;
+    border-radius:8px;
+    outline:0;
+    padding:13px;
+    background:#050505;
+    color:#ddd;
+    font:13px/1.5 Consolas,monospace
 }
 
-pre {
-    white-space: pre-wrap;
-    word-break: break-all;
-    background: #030303;
-    border: 1px solid #222;
-    padding: 12px;
-    border-radius: 8px;
-    overflow: auto;
+textarea:focus{
+    border-color:#666
+}
+
+.buttons{
+    display:flex;
+    flex-wrap:wrap;
+    gap:9px;
+    margin-top:14px
+}
+
+button{
+    border:0;
+    border-radius:8px;
+    padding:11px 16px;
+    font-weight:bold;
+    cursor:pointer;
+    background:#eee;
+    color:#111
+}
+
+button.secondary{
+    background:#202020;
+    color:#eee;
+    border:1px solid #333
+}
+
+button.create{
+    background:#65ff88;
+    color:#061008
+}
+
+button:hover{
+    opacity:.85
+}
+
+.status{
+    margin-top:14px;
+    padding:12px;
+    border-radius:8px;
+    border:1px solid #292929;
+    background:#111;
+    color:#aaa;
+    white-space:pre-wrap;
+    word-break:break-word
+}
+
+.ok{
+    color:#8cff9b
+}
+
+.err{
+    color:#ff7777
+}
+
+.info{
+    margin-top:14px;
+    background:#111;
+    border:1px solid #292929;
+    border-radius:10px;
+    padding:14px;
+    display:none
+}
+
+.info-row{
+    margin:8px 0;
+    word-break:break-all
+}
+
+.info-label{
+    color:#777;
+    display:block;
+    margin-bottom:4px
+}
+
+.info-value{
+    color:#ddd;
+    font-family:Consolas,monospace
+}
+
+@media(max-width:800px){
+
+    .grid{
+        grid-template-columns:1fr
+    }
+
 }
 
 </style>
@@ -106,62 +178,209 @@ pre {
 
 <body>
 
-<div class="container">
+<div class="wrap">
 
-<div class="card">
+<h1>LEXINX Lua Obfuscator V4</h1>
 
-<h1>LEXINX PROTECT</h1>
+<div class="sub">
+Fragmented strings · per-entry keys · randomized pool · integrity metadata · server payload
+</div>
 
-<p>Script Source</p>
+<div class="options">
 
+<label>
 <input
-    id="name"
-    placeholder="Script name"
+    id="strings"
+    type="checkbox"
+    checked
 >
+String packing
+</label>
+
+<label>
+<input
+    id="fragments"
+    type="checkbox"
+    checked
+>
+Fragment strings
+</label>
+
+<label>
+<input
+    id="shuffle"
+    type="checkbox"
+    checked
+>
+Shuffle fragments
+</label>
+
+<label>
+<input
+    id="stage2"
+    type="checkbox"
+    checked
+>
+Second encoding stage
+</label>
+
+<label>
+<input
+    id="delay"
+    type="checkbox"
+    checked
+>
+4s delay
+</label>
+
+<label>
+<input
+    id="comments"
+    type="checkbox"
+>
+Strip comments
+</label>
+
+</div>
+
+<div class="grid">
+
+<div class="panel">
+
+<div class="panel-title">
+Lua / Luau source
+</div>
 
 <textarea
-    id="source"
-    placeholder="Paste Lua source here..."
+    id="input"
+    spellcheck="false"
+    placeholder="Paste Lua / Luau source..."
 ></textarea>
 
-<input
-    id="editID"
-    type="hidden"
->
+</div>
+
+<div class="panel">
+
+<div class="panel-title">
+Generated V4 output
+</div>
+
+<textarea
+    id="output"
+    readonly
+    spellcheck="false"
+    placeholder="Generated Lua V4..."
+></textarea>
+
+</div>
+
+</div>
+
+<div class="buttons">
+
+<button onclick="build()">
+OBFUSCATE
+</button>
 
 <button
-    class="primary"
-    onclick="createScript()"
+    class="create"
+    onclick="createPayload()"
 >
 CREATE
 </button>
 
 <button
-    onclick="saveEdit()"
+    class="secondary"
+    onclick="validate()"
 >
-SAVE EDIT
+VALIDATE
 </button>
 
 <button
-    onclick="clearEditor()"
+    class="secondary"
+    onclick="copyResult()"
+>
+COPY
+</button>
+
+<button
+    class="secondary"
+    onclick="downloadResult()"
+>
+DOWNLOAD
+</button>
+
+<button
+    class="secondary"
+    onclick="clearAll()"
 >
 CLEAR
 </button>
 
-<p id="message"></p>
+</div>
+
+<div
+    id="status"
+    class="status"
+>
+Ready.
+</div>
+
+<div
+    id="serverInfo"
+    class="info"
+>
+
+<div class="info-row">
+
+<span class="info-label">
+Payload ID
+</span>
+
+<span
+    id="payloadId"
+    class="info-value"
+></span>
 
 </div>
 
-<div class="card">
+<div class="info-row">
 
-<h2>Scripts</h2>
+<span class="info-label">
+Token
+</span>
 
-<button onclick="loadScripts()">
-REFRESH
-</button>
+<span
+    id="payloadToken"
+    class="info-value"
+></span>
 
-<div id="scripts">
-Loading...
+</div>
+
+<div class="info-row">
+
+<span class="info-label">
+Payload URL
+</span>
+
+<span
+    id="payloadUrl"
+    class="info-value"
+></span>
+
+</div>
+
+<div class="info-row">
+
+<span class="info-label">
+SHA-256
+</span>
+
+<span
+    id="payloadHash"
+    class="info-value"
+></span>
+
 </div>
 
 </div>
@@ -170,361 +389,1680 @@ Loading...
 
 <script>
 
-function escapeHTML(value) {
+/* =========================================================
+   RANDOM
+========================================================= */
 
-    return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;");
+function rnd(min,max){
 
+    return Math.floor(
+        Math.random()*
+        (max-min+1)
+    )+min;
 }
 
-async function copyText(text) {
+function name8(){
 
-    try {
+    const chars=
+        "abcdefghijklmnopqrstuvwxyz";
 
-        await navigator.clipboard.writeText(text);
+    let s="_";
 
-        alert("Copied!");
+    for(
+        let i=0;
+        i<8;
+        i++
+    ){
 
-    } catch {
-
-        const area =
-            document.createElement("textarea");
-
-        area.value = text;
-
-        document.body.appendChild(area);
-
-        area.select();
-
-        document.execCommand("copy");
-
-        area.remove();
-
-        alert("Copied!");
-
+        s+=chars[
+            rnd(
+                0,
+                chars.length-1
+            )
+        ];
     }
 
+    return s;
 }
 
-async function createScript() {
+function randomByte(){
 
-    const name =
-        document.getElementById("name").value;
+    if(
+        typeof crypto !==
+        "undefined" &&
+        crypto.getRandomValues
+    ){
 
-    const source =
-        document.getElementById("source").value;
+        const a=
+            new Uint8Array(1);
 
-    if (!source.trim()) {
+        crypto.getRandomValues(a);
 
-        alert("Script is empty.");
-
-        return;
-
+        return a[0];
     }
 
-    const response =
-        await fetch("/api/create", {
+    return rnd(1,255);
+}
 
-            method: "POST",
+/* =========================================================
+   BYTE HELPERS
+========================================================= */
 
-            headers: {
-                "Content-Type":
-                    "application/json"
-            },
+function bytesOf(text){
 
-            body: JSON.stringify({
-                name,
-                source
-            })
-
-        });
-
-    const data =
-        await response.json();
-
-    if (!data.ok) {
-
-        alert(
-            data.error ||
-            "Create failed"
-        );
-
-        return;
-
-    }
-
-    /*
-        SERVER ĐÃ TỰ TẠO:
-
-        Layer 2
-
-        và
-
-        Layer 1
-
-        Web chỉ copy Layer 1.
-    */
-
-    await copyText(
-        data.loader
+    return Array.from(
+        new TextEncoder()
+            .encode(text)
     );
-
-    document.getElementById("message")
-        .textContent =
-        "Created. Loader copied.";
-
-    clearEditor();
-
-    loadScripts();
-
 }
 
-async function saveEdit() {
+function xor(a,k){
 
-    const id =
-        document.getElementById("editID").value;
+    const out=
+        new Array(a.length);
 
-    if (!id) {
+    for(
+        let i=0;
+        i<a.length;
+        i++
+    ){
 
-        alert(
-            "Choose EDIT first."
-        );
-
-        return;
-
+        out[i]=
+            (a[i]^k)&255;
     }
 
-    const name =
-        document.getElementById("name").value;
+    return out;
+}
 
-    const source =
-        document.getElementById("source").value;
+function addTransform(a,k){
 
-    const response =
-        await fetch(
-            "/api/edit/" +
-            encodeURIComponent(id),
-            {
+    return a.map(
+        x=>
+            (x+k)&255
+    );
+}
 
-                method: "POST",
+function subTransform(a,k){
 
-                headers: {
-                    "Content-Type":
-                        "application/json"
-                },
+    return a.map(
+        x=>
+            (x-k+256)&255
+    );
+}
 
-                body: JSON.stringify({
-                    name,
-                    source
-                })
+function luaArray(a){
 
+    return "{"+
+        a.join(",")+
+        "}";
+}
+
+/* =========================================================
+   ESCAPES
+========================================================= */
+
+function decodeLuaEscapes(s){
+
+    return s.replace(
+        /\\(\\|'|"|n|r|t|b|f|v|a|x[0-9a-fA-F]{2}|\d{1,3})/g,
+        (full,x)=>{
+
+            if(
+                x==="\\"
+            )
+                return "\\";
+
+            if(
+                x==="'"
+            )
+                return "'";
+
+            if(
+                x==='"'
+            )
+                return '"';
+
+            if(
+                x==="n"
+            )
+                return "\n";
+
+            if(
+                x==="r"
+            )
+                return "\r";
+
+            if(
+                x==="t"
+            )
+                return "\t";
+
+            if(
+                x==="b"
+            )
+                return "\b";
+
+            if(
+                x==="f"
+            )
+                return "\f";
+
+            if(
+                x==="v"
+            )
+                return "\v";
+
+            if(
+                x==="a"
+            )
+                return "\x07";
+
+            if(
+                x[0]==="x"
+            ){
+
+                return String.fromCharCode(
+                    parseInt(
+                        x.slice(1),
+                        16
+                    )
+                );
             }
-        );
 
-    const data =
-        await response.json();
+            if(
+                /^\d+$/.test(x)
+            ){
 
-    if (!data.ok) {
+                return String.fromCharCode(
+                    parseInt(
+                        x,
+                        10
+                    )
+                );
+            }
 
-        alert(
-            data.error ||
-            "Edit failed"
-        );
-
-        return;
-
-    }
-
-    await copyText(
-        data.loader
-    );
-
-    document.getElementById("message")
-        .textContent =
-        "Updated. Loader copied.";
-
-    clearEditor();
-
-    loadScripts();
-
-}
-
-async function editScript(id) {
-
-    const response =
-        await fetch(
-            "/api/source/" +
-            encodeURIComponent(id)
-        );
-
-    const data =
-        await response.json();
-
-    if (!data.ok) {
-
-        alert(data.error);
-
-        return;
-
-    }
-
-    document.getElementById("editID")
-        .value = data.id;
-
-    document.getElementById("name")
-        .value = data.name;
-
-    document.getElementById("source")
-        .value = data.source;
-
-    window.scrollTo({
-        top: 0,
-        behavior: "smooth"
-    });
-
-}
-
-async function deleteScript(id) {
-
-    if (
-        !confirm(
-            "Delete this script?"
-        )
-    ) {
-        return;
-    }
-
-    await fetch(
-        "/api/delete/" +
-        encodeURIComponent(id),
-        {
-            method: "DELETE"
+            return full;
         }
     );
-
-    loadScripts();
-
 }
 
-async function loadScripts() {
+/* =========================================================
+   COMMENT STRIP
+========================================================= */
 
-    const box =
-        document.getElementById("scripts");
+function stripCommentsSafe(source){
 
-    box.innerHTML = "Loading...";
+    let out="";
+    let i=0;
+    let quote=null;
+    let escaped=false;
 
-    try {
+    while(
+        i<source.length
+    ){
 
-        const response =
-            await fetch("/api/scripts");
+        const c=
+            source[i];
 
-        const data =
-            await response.json();
+        if(quote){
 
-        if (!data.ok) {
+            out+=c;
 
-            box.innerHTML =
-                escapeHTML(data.error);
+            if(escaped){
 
-            return;
+                escaped=false;
 
+            }else if(
+                c==="\\"
+            ){
+
+                escaped=true;
+
+            }else if(
+                c===quote
+            ){
+
+                quote=null;
+            }
+
+            i++;
+
+            continue;
         }
 
-        if (!data.scripts.length) {
+        if(
+            c==="\"" ||
+            c==="'"
+        ){
 
-            box.innerHTML =
-                "No scripts.";
+            quote=c;
 
-            return;
+            out+=c;
 
+            i++;
+
+            continue;
         }
 
-        box.innerHTML = "";
+        if(
+            c==="-" &&
+            source[i+1]==="-"
+        ){
 
-        data.scripts.forEach(script => {
+            if(
+                source[i+2]==="[" &&
+                source[i+3]==="["
+            ){
 
-            const div =
-                document.createElement("div");
+                const end=
+                    source.indexOf(
+                        "]]",
+                        i+4
+                    );
 
-            div.className =
-                "script";
+                if(
+                    end!==-1
+                ){
 
-            div.innerHTML = `
+                    i=end+2;
 
-<strong>
-${escapeHTML(script.name)}
-</strong>
+                    continue;
+                }
+            }
 
-<div class="id">
-ID: ${escapeHTML(script.id)}
-</div>
+            while(
+                i<source.length &&
+                source[i]!=="\n"
+            ){
 
-<button
-    class="primary"
-    onclick='copyText(${JSON.stringify(script.loader)})'
->
-COPY LOADER
-</button>
+                i++;
+            }
 
-<button
-    onclick='editScript(${JSON.stringify(script.id)})'
->
-EDIT
-</button>
+            continue;
+        }
 
-<button
-    class="danger"
-    onclick='deleteScript(${JSON.stringify(script.id)})'
->
-DELETE
-</button>
+        out+=c;
 
-<details>
+        i++;
+    }
 
-<summary>
-SHOW LOADER
-</summary>
+    return out;
+}
 
-<pre>
-${escapeHTML(script.loader)}
-</pre>
+/* =========================================================
+   TOKENIZE STRINGS
+========================================================= */
 
-</details>
+function tokenizeStrings(source){
+
+    const strings=[];
+
+    let out="";
+
+    let i=0;
+
+    while(
+        i<source.length
+    ){
+
+        const c=
+            source[i];
+
+        if(
+            c==="-" &&
+            source[i+1]==="-"
+        ){
+
+            const start=i;
+
+            i+=2;
+
+            while(
+                i<source.length &&
+                source[i]!=="\n"
+            ){
+
+                i++;
+            }
+
+            out+=
+                source.slice(
+                    start,
+                    i
+                );
+
+            continue;
+        }
+
+        if(
+            c==="[" &&
+            source[i+1]==="["
+        ){
+
+            const end=
+                source.indexOf(
+                    "]]",
+                    i+2
+                );
+
+            if(
+                end!==-1
+            ){
+
+                const value=
+                    source.slice(
+                        i+2,
+                        end
+                    );
+
+                strings.push(
+                    value
+                );
+
+                out+=
+                    "__LXSTR_"+
+                    strings.length+
+                    "__";
+
+                i=end+2;
+
+                continue;
+            }
+        }
+
+        if(
+            c==="\"" ||
+            c==="'"
+        ){
+
+            const quote=c;
+
+            let j=i+1;
+
+            let escaped=false;
+
+            while(
+                j<source.length
+            ){
+
+                const x=
+                    source[j];
+
+                if(escaped){
+
+                    escaped=false;
+
+                    j++;
+
+                    continue;
+                }
+
+                if(
+                    x==="\\"
+                ){
+
+                    escaped=true;
+
+                    j++;
+
+                    continue;
+                }
+
+                if(
+                    x===quote
+                ){
+
+                    break;
+                }
+
+                j++;
+            }
+
+            if(
+                j>=source.length
+            ){
+
+                throw new Error(
+                    "Unclosed string at position "+
+                    i
+                );
+            }
+
+            strings.push(
+                source.slice(
+                    i+1,
+                    j
+                )
+            );
+
+            out+=
+                "__LXSTR_"+
+                strings.length+
+                "__";
+
+            i=j+1;
+
+            continue;
+        }
+
+        out+=c;
+
+        i++;
+    }
+
+    return {
+        source:out,
+        strings
+    };
+}
+
+/* =========================================================
+   FRAGMENTATION
+========================================================= */
+
+function splitFragments(bytes){
+
+    const result=[];
+
+    let p=0;
+
+    while(
+        p<bytes.length
+    ){
+
+        const size=
+            Math.min(
+                bytes.length-p,
+                rnd(4,10)
+            );
+
+        result.push(
+            bytes.slice(
+                p,
+                p+size
+            )
+        );
+
+        p+=size;
+    }
+
+    return result;
+}
+
+function shuffle(a){
+
+    const x=
+        a.slice();
+
+    for(
+        let i=x.length-1;
+        i>0;
+        i--
+    ){
+
+        const j=
+            rnd(0,i);
+
+        [
+            x[i],
+            x[j]
+        ]=[
+            x[j],
+            x[i]
+        ];
+    }
+
+    return x;
+}
+
+/* =========================================================
+   FNV HASH
+========================================================= */
+
+function hashText(text){
+
+    let h=
+        2166136261>>>0;
+
+    for(
+        let i=0;
+        i<text.length;
+        i++
+    ){
+
+        h^=
+            text.charCodeAt(i);
+
+        h=
+            Math.imul(
+                h,
+                16777619
+            )>>>0;
+    }
+
+    return h.toString(16);
+}
+
+/* =========================================================
+   DECODER
+========================================================= */
+
+function makeDecoder(){
+
+    const fn=
+        name8();
+
+    const input=
+        name8();
+
+    const result=
+        name8();
+
+    const index=
+        name8();
+
+    const value=
+        name8();
+
+    const code=`
+
+local ${fn}=function(${input},k)
+
+    local ${result}={}
+
+    for ${index}=1,#${input} do
+
+        local ${value}=
+            ${input}[${index}]
+
+        local x=${value}
+        local y=k
+        local o=0
+        local bit=1
+
+        while x>0 or y>0 do
+
+            local xb=x%2
+            local yb=y%2
+
+            if xb~=yb then
+
+                o=o+bit
+
+            end
+
+            x=math.floor(x/2)
+            y=math.floor(y/2)
+            bit=bit*2
+
+        end
+
+        ${result}[${index}]=
+            string.char(o%256)
+
+    end
+
+    return table.concat(${result})
+
+end
 
 `;
 
-            box.appendChild(div);
+    return {
+        name:fn,
+        code
+    };
+}
+
+/* =========================================================
+   BUILD POOL
+========================================================= */
+
+function makePool(
+    strings,
+    options
+){
+
+    const decoder=
+        makeDecoder();
+
+    const poolName=
+        name8();
+
+    const entries=[];
+
+    for(
+        let i=0;
+        i<strings.length;
+        i++
+    ){
+
+        const original=
+            decodeLuaEscapes(
+                strings[i]
+            );
+
+        let data=
+            bytesOf(original);
+
+        const xorKey=
+            randomByte()||137;
+
+        const addKey=
+            options.stage2
+            ? randomByte()
+            : 0;
+
+        data=
+            xor(
+                data,
+                xorKey
+            );
+
+        if(
+            options.stage2
+        ){
+
+            data=
+                addTransform(
+                    data,
+                    addKey
+                );
+        }
+
+        let fragments;
+
+        if(
+            options.fragments
+        ){
+
+            fragments=
+                splitFragments(
+                    data
+                );
+
+        }else{
+
+            fragments=[
+                data
+            ];
+        }
+
+        let order=
+            fragments.map(
+                (_,n)=>n
+            );
+
+        if(
+            options.shuffle
+        ){
+
+            order=
+                shuffle(order);
+        }
+
+        entries.push({
+
+            fragments,
+
+            order,
+
+            xorKey,
+
+            addKey
 
         });
-
-    } catch (error) {
-
-        box.innerHTML =
-            "Failed to load scripts.";
-
-        console.error(error);
-
     }
 
+    const poolParts=[];
+
+    for(
+        let i=0;
+        i<entries.length;
+        i++
+    ){
+
+        const e=
+            entries[i];
+
+        const fragmentParts=
+            e.fragments.map(
+                luaArray
+            );
+
+        poolParts.push(`
+
+[${i+1}]={
+    f={${fragmentParts.join(",")}},
+    o=${luaArray(
+        e.order.map(
+            n=>n+1
+        )
+    )},
+    x=${e.xorKey},
+    a=${e.addKey}
 }
 
-function clearEditor() {
+`);
+    }
 
-    document.getElementById("name")
-        .value = "";
+    const pool=`
 
-    document.getElementById("source")
-        .value = "";
+local ${poolName}={
 
-    document.getElementById("editID")
-        .value = "";
+${poolParts.join(",")}
 
 }
 
-loadScripts();
+`;
+
+    const getter=
+        name8();
+
+    const entry=
+        name8();
+
+    const parts=
+        name8();
+
+    const order=
+        name8();
+
+    const output=
+        name8();
+
+    const part=
+        name8();
+
+    const byte=
+        name8();
+
+    const xkey=
+        name8();
+
+    const akey=
+        name8();
+
+    const decoded=
+        name8();
+
+    const index=
+        name8();
+
+    const reconstruct=`
+
+local ${getter}=function(id)
+
+    local ${entry}=
+        ${poolName}[id]
+
+    if not ${entry} then
+
+        return nil
+
+    end
+
+    local ${parts}=
+        ${entry}.f
+
+    local ${order}=
+        ${entry}.o
+
+    local ${output}={}
+
+    local ${xkey}=
+        ${entry}.x
+
+    local ${akey}=
+        ${entry}.a
+
+    for ${index}=1,#${order} do
+
+        local ${part}=
+            ${parts}[${order}[${index}]]
+
+        for j=1,#${part} do
+
+            local ${byte}=
+                ${part}[j]
+
+            if ${akey}~=0 then
+
+                ${byte}=
+                    (${byte}-${akey})%256
+
+            end
+
+            ${output}[#${output}+1]=
+                ${byte}
+
+        end
+
+    end
+
+    local ${decoded}=
+        ${decoder.name}(
+            ${output},
+            ${xkey}
+        )
+
+    return ${decoded}
+
+end
+
+`;
+
+    return {
+
+        code:
+            decoder.code+
+            pool+
+            reconstruct,
+
+        getter,
+
+        count:
+            strings.length
+
+    };
+}
+
+/* =========================================================
+   REPLACE MARKERS
+========================================================= */
+
+function replaceMarkers(
+    source,
+    getter,
+    count
+){
+
+    for(
+        let i=1;
+        i<=count;
+        i++
+    ){
+
+        const marker=
+            "__LXSTR_"+
+            i+
+            "__";
+
+        source=
+            source
+                .split(marker)
+                .join(
+                    getter+
+                    "("+i+")"
+                );
+    }
+
+    return source;
+}
+
+/* =========================================================
+   VALIDATOR
+========================================================= */
+
+function validateGenerated(
+    source
+){
+
+    const errors=[];
+
+    if(
+        !source.trim()
+    ){
+
+        errors.push(
+            "Output is empty."
+        );
+
+        return errors;
+    }
+
+    if(
+        /__LXSTR_\d+__/
+            .test(source)
+    ){
+
+        errors.push(
+            "Unresolved string marker."
+        );
+    }
+
+    if(
+        !/string\.char/
+            .test(source)
+    ){
+
+        errors.push(
+            "Decoder missing string.char."
+        );
+    }
+
+    if(
+        !/table\.concat/
+            .test(source)
+    ){
+
+        errors.push(
+            "Decoder missing table.concat."
+        );
+    }
+
+    if(
+        !/while x>0 or y>0/
+            .test(source)
+    ){
+
+        errors.push(
+            "Decoder body missing."
+        );
+    }
+
+    if(
+        !/local\s+_[a-z]{8}\s*=\s*function/
+            .test(source)
+    ){
+
+        errors.push(
+            "Generated helper missing."
+        );
+    }
+
+    return errors;
+}
+
+/* =========================================================
+   BUILD
+========================================================= */
+
+function build(){
+
+    const input=
+        document
+            .getElementById("input")
+            .value;
+
+    const status=
+        document
+            .getElementById("status");
+
+    if(
+        !input.trim()
+    ){
+
+        status.className=
+            "status err";
+
+        status.textContent=
+            "Input is empty.";
+
+        return;
+    }
+
+    try{
+
+        let source=
+            input;
+
+        if(
+            document
+                .getElementById(
+                    "comments"
+                )
+                .checked
+        ){
+
+            source=
+                stripCommentsSafe(
+                    source
+                );
+        }
+
+        const useStrings=
+            document
+                .getElementById(
+                    "strings"
+                )
+                .checked;
+
+        let pool={
+
+            code:"",
+
+            getter:null,
+
+            count:0
+
+        };
+
+        if(
+            useStrings
+        ){
+
+            const tokenized=
+                tokenizeStrings(
+                    source
+                );
+
+            source=
+                tokenized.source;
+
+            pool=
+                makePool(
+                    tokenized.strings,
+                    {
+
+                        fragments:
+                            document
+                                .getElementById(
+                                    "fragments"
+                                )
+                                .checked,
+
+                        shuffle:
+                            document
+                                .getElementById(
+                                    "shuffle"
+                                )
+                                .checked,
+
+                        stage2:
+                            document
+                                .getElementById(
+                                    "stage2"
+                                )
+                                .checked
+
+                    }
+                );
+
+            source=
+                replaceMarkers(
+                    source,
+                    pool.getter,
+                    pool.count
+                );
+        }
+
+        let delay="";
+
+        if(
+            document
+                .getElementById(
+                    "delay"
+                )
+                .checked
+        ){
+
+            delay=`
+
+task.wait(4)
+
+`;
+        }
+
+        const hash=
+            hashText(source);
+
+        const output=
+
+`-- LEXINX Lua Packed V4
+-- Generated: ${new Date().toISOString()}
+-- Strings: ${pool.count}
+-- Fragmentation: ${
+    document
+        .getElementById(
+            "fragments"
+        )
+        .checked
+        ? "enabled"
+        : "disabled"
+}
+-- Shuffle: ${
+    document
+        .getElementById(
+            "shuffle"
+        )
+        .checked
+        ? "enabled"
+        : "disabled"
+}
+-- Stage2: ${
+    document
+        .getElementById(
+            "stage2"
+        )
+        .checked
+        ? "enabled"
+        : "disabled"
+}
+-- Delay: ${
+    document
+        .getElementById(
+            "delay"
+        )
+        .checked
+        ? "4s"
+        : "off"
+}
+-- Integrity: ${hash}
+
+${pool.code}
+
+${delay}
+
+${source}
+`;
+
+        const errors=
+            validateGenerated(
+                output
+            );
+
+        if(
+            errors.length
+        ){
+
+            status.className=
+                "status err";
+
+            status.textContent=
+                "Generated output failed validation:\n\n"+
+                errors.join("\n");
+
+            return;
+        }
+
+        document
+            .getElementById(
+                "output"
+            )
+            .value=
+                output;
+
+        status.className=
+            "status ok";
+
+        status.textContent=
+
+            "BUILD SUCCESS\n\n"+
+
+            "Strings packed: "+
+            pool.count+
+
+            "\n"+
+
+            "Fragmentation: "+
+            (
+                document
+                    .getElementById(
+                        "fragments"
+                    )
+                    .checked
+                    ? "ON"
+                    : "OFF"
+            )+
+
+            "\n"+
+
+            "Shuffle: "+
+            (
+                document
+                    .getElementById(
+                        "shuffle"
+                    )
+                    .checked
+                    ? "ON"
+                    : "OFF"
+            )+
+
+            "\n"+
+
+            "Second encoding: "+
+            (
+                document
+                    .getElementById(
+                        "stage2"
+                    )
+                    .checked
+                    ? "ON"
+                    : "OFF"
+            )+
+
+            "\n"+
+
+            "Delay: "+
+            (
+                document
+                    .getElementById(
+                        "delay"
+                    )
+                    .checked
+                    ? "4 seconds"
+                    : "OFF"
+            )+
+
+            "\n"+
+
+            "Validation: PASS";
+
+    }
+    catch(e){
+
+        console.error(e);
+
+        status.className=
+            "status err";
+
+        status.textContent=
+            "BUILD ERROR:\n\n"+
+            e.message;
+    }
+}
+
+/* =========================================================
+   CREATE PAYLOAD
+========================================================= */
+
+async function createPayload(){
+
+    const output=
+        document
+            .getElementById(
+                "output"
+            )
+            .value;
+
+    const status=
+        document
+            .getElementById(
+                "status"
+            );
+
+    const info=
+        document
+            .getElementById(
+                "serverInfo"
+            );
+
+    if(
+        !output.trim()
+    ){
+
+        status.className=
+            "status err";
+
+        status.textContent=
+            "Generate V4 first.";
+
+        return;
+    }
+
+    const errors=
+        validateGenerated(
+            output
+        );
+
+    if(
+        errors.length
+    ){
+
+        status.className=
+            "status err";
+
+        status.textContent=
+            "CREATE BLOCKED:\n\n"+
+            errors.join("\n");
+
+        return;
+    }
+
+    try{
+
+        status.className=
+            "status";
+
+        status.textContent=
+            "Uploading V4 payload...";
+
+        info.style.display=
+            "none";
+
+        /*
+         * Vì index.html được serve
+         * trực tiếp từ server.js,
+         * fetch("/create") luôn đi
+         * tới đúng server.
+         */
+
+        const response=
+            await fetch(
+                "/create",
+                {
+
+                    method:
+                        "POST",
+
+                    headers:{
+                        "Content-Type":
+                            "application/json"
+                    },
+
+                    body:
+                        JSON.stringify({
+                            payload:
+                                output
+                        })
+
+                }
+            );
+
+        let data;
+
+        try{
+
+            data=
+                await response.json();
+
+        }
+        catch{
+
+            throw new Error(
+                "Server returned invalid JSON ("+
+                response.status+
+                ")"
+            );
+        }
+
+        if(
+            !response.ok ||
+            !data.ok
+        ){
+
+            throw new Error(
+                data.error ||
+                "CREATE FAILED"
+            );
+        }
+
+        document
+            .getElementById(
+                "payloadId"
+            )
+            .textContent=
+                data.id;
+
+        document
+            .getElementById(
+                "payloadToken"
+            )
+            .textContent=
+                data.token;
+
+        document
+            .getElementById(
+                "payloadUrl"
+            )
+            .textContent=
+                location.origin+
+                data.payloadUrl;
+
+        document
+            .getElementById(
+                "payloadHash"
+            )
+            .textContent=
+                data.hash;
+
+        info.style.display=
+            "block";
+
+        status.className=
+            "status ok";
+
+        status.textContent=
+
+            "CREATE SUCCESS\n\n"+
+
+            "Payload V4 đã được lưu trên server.\n\n"+
+
+            "ID: "+
+            data.id+
+
+            "\n\n"+
+
+            "Expires: "+
+            new Date(
+                data.expiresAt
+            ).toLocaleString();
+
+    }
+    catch(error){
+
+        console.error(
+            error
+        );
+
+        status.className=
+            "status err";
+
+        status.textContent=
+            "CREATE ERROR:\n\n"+
+            error.message;
+    }
+}
+
+/* =========================================================
+   VALIDATE
+========================================================= */
+
+function validate(){
+
+    const output=
+        document
+            .getElementById(
+                "output"
+            )
+            .value;
+
+    const status=
+        document
+            .getElementById(
+                "status"
+            );
+
+    const errors=
+        validateGenerated(
+            output
+        );
+
+    if(
+        errors.length
+    ){
+
+        status.className=
+            "status err";
+
+        status.textContent=
+            "VALIDATION FAILED:\n\n"+
+            errors.join("\n");
+
+    }
+    else{
+
+        status.className=
+            "status ok";
+
+        status.textContent=
+            "VALIDATION PASS";
+    }
+}
+
+/* =========================================================
+   COPY
+========================================================= */
+
+async function copyResult(){
+
+    const output=
+        document
+            .getElementById(
+                "output"
+            );
+
+    if(
+        !output.value
+    )
+        return;
+
+    try{
+
+        await navigator
+            .clipboard
+            .writeText(
+                output.value
+            );
+
+    }
+    catch{
+
+        output.select();
+
+        document.execCommand(
+            "copy"
+        );
+    }
+
+    document
+        .getElementById(
+            "status"
+        )
+        .textContent=
+            "Copied.";
+}
+
+/* =========================================================
+   DOWNLOAD
+========================================================= */
+
+function downloadResult(){
+
+    const output=
+        document
+            .getElementById(
+                "output"
+            )
+            .value;
+
+    if(
+        !output
+    )
+        return;
+
+    const errors=
+        validateGenerated(
+            output
+        );
+
+    if(
+        errors.length
+    ){
+
+        document
+            .getElementById(
+                "status"
+            )
+            .textContent=
+                "Download blocked:\n"+
+                errors.join("\n");
+
+        return;
+    }
+
+    const blob=
+        new Blob(
+            [output],
+            {
+                type:
+                    "text/plain;charset=utf-8"
+            }
+        );
+
+    const url=
+        URL.createObjectURL(
+            blob
+        );
+
+    const a=
+        document.createElement(
+            "a"
+        );
+
+    a.href=url;
+
+    a.download=
+        "lexinx_v4.lua";
+
+    document
+        .body
+        .appendChild(a);
+
+    a.click();
+
+    a.remove();
+
+    URL.revokeObjectURL(
+        url
+    );
+
+    document
+        .getElementById(
+            "status"
+        )
+        .textContent=
+            "Downloaded.";
+}
+
+/* =========================================================
+   CLEAR
+========================================================= */
+
+function clearAll(){
+
+    document
+        .getElementById(
+            "input"
+        )
+        .value="";
+
+    document
+        .getElementById(
+            "output"
+        )
+        .value="";
+
+    document
+        .getElementById(
+            "serverInfo"
+        )
+        .style.display=
+            "none";
+
+    const status=
+        document
+            .getElementById(
+                "status"
+            );
+
+    status.className=
+        "status";
+
+    status.textContent=
+        "Ready.";
+}
 
 </script>
 
