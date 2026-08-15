@@ -540,7 +540,9 @@ end
 ========================================================= */
 
 app.get("/", (req, res) => {
-    res.send("LEXINX PROTECT ONLINE");
+    res.sendFile(
+        path.join(__dirname, "public", "index.html")
+    );
 });
 
 /* =========================================================
