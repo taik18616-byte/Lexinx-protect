@@ -1,3 +1,36 @@
+/*
+============================================================
+ LEXINX PROTECT SERVER V5
+ Layer 2 Payload Delivery
+============================================================
+
+ FLOW:
+
+    Lua source
+        ↓
+    LEXINX Lua Obfuscator V4
+        ↓
+    Obfuscated Lua
+        ↓
+    POST /api/payload/upload
+        ↓
+    Server stores payload
+        ↓
+    Loader requests challenge
+        ↓
+    Loader sends signed request
+        ↓
+    Server verifies
+        ↓
+    One-time token
+        ↓
+    Server returns obfuscated Lua
+
+============================================================
+*/
+
+"use strict";
+
 const express = require("express");
 const crypto = require("crypto");
 const fs = require("fs");
@@ -5,213 +38,134 @@ const path = require("path");
 
 const app = express();
 
-const PORT = process.env.PORT || 3000;
-const DOMAIN =
-    process.env.DOMAIN ||
-    "https://Lexinx-protect.onrender.com";
+/* =========================================================
+   CONFIG
+========================================================= */
 
-const DATA_DIR = path.join(__dirname, "data");
-const DB_FILE = path.join(DATA_DIR, "scripts.json");
+const PORT =
+    Number(process.env.PORT) || 3000;
 
-const SESSION_TTL = 120000;
-const TOKEN_TTL = 30000;
+const HOST =
+    process.env.HOST || "0.0.0.0";
 
-fs.mkdirSync(DATA_DIR, {
-    recursive: true
-});
+/*
+ * Đổi secret này.
+ *
+ * KHÔNG commit secret thật lên GitHub.
+ */
+const MASTER_SECRET =
+    process.env.MASTER_SECRET ||
+    "CHANGE_THIS_LEXINX_SECRET_2026";
 
-if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, "{}", "utf8");
-}
+/*
+ * Admin key dùng để upload payload.
+ */
+const ADMIN_KEY =
+    process.env.ADMIN_KEY ||
+    "CHANGE_THIS_ADMIN_KEY";
+
+/*
+ * Payload mặc định.
+ *
+ * Có thể thay bằng file payload.lua.
+ */
+const PAYLOAD_FILE =
+    path.join(
+        __dirname,
+        "payload.lua"
+    );
+
+/*
+ * Token sống trong bao lâu.
+ */
+const TOKEN_TTL =
+    60 * 1000;
+
+/*
+ * Challenge sống trong bao lâu.
+ */
+const CHALLENGE_TTL =
+    30 * 1000;
+
+/*
+ * Rate limit.
+ */
+const RATE_WINDOW =
+    60 * 1000;
+
+const RATE_LIMIT =
+    30;
+
+/* =========================================================
+   EXPRESS
+========================================================= */
 
 app.disable("x-powered-by");
 
-app.use(express.json({
-    limit: "25mb"
-}));
+app.use(
+    express.json({
+        limit: "2mb"
+    })
+);
+
+app.use(
+    express.urlencoded({
+        extended: false,
+        limit: "2mb"
+    })
+);
 
 /* =========================================================
-   DATABASE
+   STORAGE
 ========================================================= */
 
-function readDB() {
-    try {
-        return JSON.parse(
-            fs.readFileSync(
-                DB_FILE,
-                "utf8"
-            )
-        );
-    } catch {
-        return {};
-    }
-}
+const dataDir =
+    path.join(
+        __dirname,
+        "data"
+    );
 
-function writeDB(db) {
-    fs.writeFileSync(
-        DB_FILE,
-        JSON.stringify(db, null, 2),
-        "utf8"
+if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(
+        dataDir,
+        {
+            recursive: true
+        }
     );
 }
 
+const payloadStore =
+    path.join(
+        dataDir,
+        "payload.lua"
+    );
+
+const metaStore =
+    path.join(
+        dataDir,
+        "meta.json"
+    );
+
 /* =========================================================
-   RANDOM
+   HELPERS
 ========================================================= */
 
-function randomHex(bytes = 32) {
+function randomId(bytes = 18) {
+
     return crypto
         .randomBytes(bytes)
         .toString("hex");
 }
 
-function randomInt(min, max) {
-    return Math.floor(
-        Math.random() *
-        (max - min + 1)
-    ) + min;
+function now() {
+
+    return Date.now();
 }
 
-function cleanName(name) {
-    return String(
-        name || "Script"
-    )
-        .replace(/[^\w .-]/g, "_")
-        .slice(0, 80);
-}
-
-/* =========================================================
-   RESPONSE
-========================================================= */
-
-function secure(res) {
-    return res
-        .set(
-            "Cache-Control",
-            "no-store, no-cache, must-revalidate"
-        )
-        .set("Pragma", "no-cache")
-        .set(
-            "X-Content-Type-Options",
-            "nosniff"
-        );
-}
-
-function blocked(res) {
-    return secure(res)
-        .status(403)
-        .type("text/plain")
-        .send("LEXINX BLOCK");
-}
-
-/* =========================================================
-   BROWSER DETECTION
-========================================================= */
-
-function isBrowser(req) {
-
-    const accept =
-        String(
-            req.headers.accept || ""
-        ).toLowerCase();
-
-    const mode =
-        String(
-            req.headers[
-                "sec-fetch-mode"
-            ] || ""
-        ).toLowerCase();
-
-    const dest =
-        String(
-            req.headers[
-                "sec-fetch-dest"
-            ] || ""
-        ).toLowerCase();
-
-    return (
-        mode === "navigate" ||
-        dest === "document" ||
-        (
-            accept.includes("text/html") &&
-            !req.headers["user-agent"]?.includes(
-                "Roblox"
-            )
-        )
-    );
-}
-
-/* =========================================================
-   SESSION
-========================================================= */
-
-const sessions = new Map();
-
-function createSession(scriptId) {
-
-    const session = {
-
-        id:
-            randomHex(32),
-
-        scriptId,
-
-        createdAt:
-            Date.now(),
-
-        expiresAt:
-            Date.now() +
-            SESSION_TTL,
-
-        token:
-            randomHex(32),
-
-        nonce:
-            randomHex(16),
-
-        tokenExpiresAt:
-            Date.now() +
-            TOKEN_TTL,
-
-        used: false
-    };
-
-    sessions.set(
-        session.id,
-        session
-    );
-
-    return session;
-}
-
-function getSession(id) {
-
-    if (
-        typeof id !==
-        "string"
-    ) {
-        return null;
-    }
-
-    const s =
-        sessions.get(id);
-
-    if (!s) {
-        return null;
-    }
-
-    if (
-        Date.now() >
-        s.expiresAt
-    ) {
-        sessions.delete(id);
-        return null;
-    }
-
-    return s;
-}
-
-function safeEqual(a, b) {
+function timingSafeEqualString(
+    a,
+    b
+) {
 
     if (
         typeof a !== "string" ||
@@ -220,933 +174,984 @@ function safeEqual(a, b) {
         return false;
     }
 
-    const A =
+    const aa =
         Buffer.from(a);
 
-    const B =
+    const bb =
         Buffer.from(b);
 
-    if (
-        A.length !== B.length
-    ) {
+    if (aa.length !== bb.length) {
         return false;
     }
 
     return crypto.timingSafeEqual(
-        A,
-        B
+        aa,
+        bb
     );
 }
 
-function verifySession(
-    sessionId,
-    token,
-    nonce
+function sha256(value) {
+
+    return crypto
+        .createHash("sha256")
+        .update(value)
+        .digest("hex");
+}
+
+function hmac(
+    value
 ) {
 
-    const s =
-        getSession(sessionId);
-
-    if (!s) {
-        return null;
-    }
-
-    if (s.used) {
-        return null;
-    }
-
-    if (
-        Date.now() >
-        s.tokenExpiresAt
-    ) {
-        sessions.delete(
-            sessionId
-        );
-
-        return null;
-    }
-
-    if (
-        !safeEqual(
-            token,
-            s.token
+    return crypto
+        .createHmac(
+            "sha256",
+            MASTER_SECRET
         )
-    ) {
-        return null;
-    }
+        .update(value)
+        .digest("hex");
+}
 
-    if (
-        !safeEqual(
-            nonce,
-            s.nonce
+function getIP(req) {
+
+    const forwarded =
+        req.headers["x-forwarded-for"];
+
+    if (forwarded) {
+
+        return String(
+            forwarded
         )
-    ) {
-        return null;
+        .split(",")[0]
+        .trim();
     }
 
-    s.used = true;
-
-    return s;
-}
-
-/* =========================================================
-   LUA IDENTIFIER
-========================================================= */
-
-function luaName() {
-
-    const chars =
-        "abcdefghijklmnopqrstuvwxyz";
-
-    let result = "_";
-
-    for (
-        let i = 0;
-        i < 8;
-        i++
-    ) {
-        result +=
-            chars[
-                randomInt(
-                    0,
-                    chars.length - 1
-                )
-            ];
-    }
-
-    return result;
-}
-
-/* =========================================================
-   PAYLOAD OBFUSCATION
-========================================================= */
-
-function encodeSource(source) {
-
-    const bytes =
-        Array.from(
-            Buffer.from(
-                source,
-                "utf8"
-            )
-        );
-
-    const fragments = [];
-
-    let position = 0;
-
-    while (
-        position <
-        bytes.length
-    ) {
-
-        const size =
-            Math.min(
-                bytes.length -
-                position,
-
-                randomInt(
-                    4,
-                    10
-                )
-            );
-
-        const part =
-            bytes.slice(
-                position,
-                position + size
-            );
-
-        position += size;
-
-        fragments.push(part);
-    }
-
-    const xorKey =
-        randomInt(1, 255);
-
-    const addKey =
-        randomInt(1, 255);
-
-    const encoded =
-        fragments.map(
-            fragment =>
-                fragment.map(
-                    byte =>
-                        (
-                            (
-                                byte ^
-                                xorKey
-                            ) +
-                            addKey
-                        ) & 255
-                )
-        );
-
-    const order =
-        encoded.map(
-            (_, i) => i
-        );
-
-    for (
-        let i =
-            order.length - 1;
-        i > 0;
-        i--
-    ) {
-
-        const j =
-            randomInt(0, i);
-
-        [
-            order[i],
-            order[j]
-        ] = [
-            order[j],
-            order[i]
-        ];
-    }
-
-    return {
-        fragments: encoded,
-        order,
-        xorKey,
-        addKey
-    };
-}
-
-/* =========================================================
-   LUA ARRAY
-========================================================= */
-
-function luaArray(array) {
     return (
-        "{" +
-        array.join(",") +
-        "}"
+        req.socket.remoteAddress ||
+        "unknown"
     );
 }
 
 /* =========================================================
-   BUILD L2
+   PAYLOAD
 ========================================================= */
 
-function buildLayer2(
-    payloadUrl,
-    session
-) {
+function readPayload() {
 
-    const payload =
-        session.payload;
+    try {
 
-    const Http =
-        luaName();
-
-    const Request =
-        luaName();
-
-    const Response =
-        luaName();
-
-    const Decode =
-        luaName();
-
-    const Parts =
-        luaName();
-
-    const Order =
-        luaName();
-
-    const Output =
-        luaName();
-
-    const XorKey =
-        luaName();
-
-    const AddKey =
-        luaName();
-
-    const Load =
-        luaName();
-
-    const Part =
-        luaName();
-
-    const Byte =
-        luaName();
-
-    const Decoded =
-        luaName();
-
-    const fragmentLua =
-        payload.fragments
-            .map(luaArray)
-            .join(",");
-
-    const orderLua =
-        luaArray(
-            payload.order.map(
-                x => x + 1
+        if (
+            !fs.existsSync(
+                payloadStore
             )
+        ) {
+
+            if (
+                fs.existsSync(
+                    PAYLOAD_FILE
+                )
+            ) {
+
+                fs.copyFileSync(
+                    PAYLOAD_FILE,
+                    payloadStore
+                );
+            }
+        }
+
+        if (
+            !fs.existsSync(
+                payloadStore
+            )
+        ) {
+
+            return null;
+        }
+
+        return fs.readFileSync(
+            payloadStore,
+            "utf8"
         );
 
-    /*
-     * L2 được sinh mới cho từng loader.
-     */
+    } catch (err) {
 
-    return `
-local ${Http} =
-    game:GetService("HttpService")
+        console.error(
+            "[PAYLOAD READ]",
+            err
+        );
 
-local ${Request} =
-    request or
-    http_request or
-    (syn and syn.request)
-
-if type(${Request}) ~= "function" then
-    error("LEXINX BLOCK: request unavailable")
-end
-
-local ${Response}
-
-local ok, result =
-    pcall(function()
-
-        return ${Request}({
-
-            Url =
-                ${JSON.stringify(
-                    payloadUrl
-                )},
-
-            Method =
-                "POST",
-
-            Headers = {
-
-                ["Content-Type"] =
-                    "application/json",
-
-                ["Accept"] =
-                    "application/json"
-
-            },
-
-            Body =
-                ${Http}:JSONEncode({
-
-                    session =
-                        ${JSON.stringify(
-                            session.id
-                        )},
-
-                    token =
-                        ${JSON.stringify(
-                            session.token
-                        )},
-
-                    nonce =
-                        ${JSON.stringify(
-                            session.nonce
-                        )}
-
-                })
-
-        })
-
-    end)
-
-if not ok or not result then
-    error("LEXINX BLOCK")
-end
-
-if result.StatusCode ~= 200 then
-    error(
-        "LEXINX BLOCK HTTP " ..
-        tostring(
-            result.StatusCode
-        )
-    )
-end
-
-local parsedOk, data =
-    pcall(function()
-
-        return ${Http}:JSONDecode(
-            result.Body
-        )
-
-    end)
-
-if not parsedOk or
-   type(data) ~= "table" then
-
-    error("LEXINX BLOCK")
-
-end
-
-if data.ok ~= true or
-   data.stage ~= 2 then
-
-    error("LEXINX BLOCK")
-
-end
-
-local ${Parts} = {
-    ${fragmentLua}
+        return null;
+    }
 }
 
-local ${Order} =
-    ${orderLua}
+function savePayload(
+    payload
+) {
 
-local ${XorKey} =
-    ${payload.xorKey}
+    fs.writeFileSync(
+        payloadStore,
+        payload,
+        "utf8"
+    );
 
-local ${AddKey} =
-    ${payload.addKey}
+    const meta = {
 
-local ${Output} = {}
+        hash:
+            sha256(payload),
 
-for i = 1,#${Order} do
+        size:
+            Buffer.byteLength(
+                payload,
+                "utf8"
+            ),
 
-    local ${Part} =
-        ${Parts}[
-            ${Order}[i]
-        ]
+        updatedAt:
+            new Date().toISOString()
+    };
 
-    for j = 1,#${Part} do
+    fs.writeFileSync(
+        metaStore,
+        JSON.stringify(
+            meta,
+            null,
+            2
+        ),
+        "utf8"
+    );
 
-        local ${Byte} =
-            ${Part}[j]
-
-        ${Byte} =
-            (
-                (
-                    ${Byte} -
-                    ${AddKey}
-                ) % 256
-            )
-
-        local x =
-            ${Byte}
-
-        local y =
-            ${XorKey}
-
-        local out = 0
-        local bit = 1
-
-        while x > 0 or y > 0 do
-
-            local xb =
-                x % 2
-
-            local yb =
-                y % 2
-
-            if xb ~= yb then
-                out =
-                    out + bit
-            end
-
-            x =
-                math.floor(
-                    x / 2
-                )
-
-            y =
-                math.floor(
-                    y / 2
-                )
-
-            bit =
-                bit * 2
-
-        end
-
-        ${Output}[
-            #${Output} + 1
-        ] =
-            string.char(
-                out % 256
-            )
-
-    end
-end
-
-local ${Decoded} =
-    table.concat(
-        ${Output}
-    )
-
-${Output} = nil
-${Parts} = nil
-${Order} = nil
-
-local ${Load} =
-    loadstring or load
-
-if type(${Load}) ~= "function" then
-    error(
-        "LEXINX BLOCK: loadstring unavailable"
-    )
-end
-
-local fn, err =
-    ${Load}(
-        ${Decoded}
-    )
-
-${Decoded} = nil
-
-if type(fn) ~= "function" then
-    error(
-        "LEXINX COMPILE ERROR: " ..
-        tostring(err)
-    )
-end
-
-local runOk, runErr =
-    pcall(fn)
-
-if not runOk then
-    error(
-        "LEXINX RUNTIME ERROR: " ..
-        tostring(runErr)
-    )
-end
-`;
+    return meta;
 }
 
 /* =========================================================
-   HOME
+   INITIAL PAYLOAD
+========================================================= */
+
+if (
+    !fs.existsSync(
+        payloadStore
+    ) &&
+    fs.existsSync(
+        PAYLOAD_FILE
+    )
+) {
+
+    try {
+
+        const initial =
+            fs.readFileSync(
+                PAYLOAD_FILE,
+                "utf8"
+            );
+
+        savePayload(
+            initial
+        );
+
+        console.log(
+            "[PAYLOAD] Loaded payload.lua"
+        );
+
+    } catch (err) {
+
+        console.error(
+            "[PAYLOAD INIT]",
+            err
+        );
+    }
+}
+
+/* =========================================================
+   CHALLENGE STORAGE
+========================================================= */
+
+const challenges =
+    new Map();
+
+/*
+ challengeId => {
+
+    nonce,
+    ip,
+    createdAt,
+    used
+
+ }
+*/
+
+/* =========================================================
+   TOKEN STORAGE
+========================================================= */
+
+const tokens =
+    new Map();
+
+/*
+ token => {
+
+    ip,
+    createdAt,
+    expiresAt,
+    used,
+    payloadHash
+
+ }
+*/
+
+/* =========================================================
+   RATE LIMIT STORAGE
+========================================================= */
+
+const rate =
+    new Map();
+
+/*
+ ip => {
+
+    count,
+    reset
+
+ }
+*/
+
+/* =========================================================
+   RATE LIMIT
+========================================================= */
+
+function rateLimit(
+    req,
+    res,
+    next
+) {
+
+    const ip =
+        getIP(req);
+
+    const t =
+        now();
+
+    let entry =
+        rate.get(ip);
+
+    if (
+        !entry ||
+        t > entry.reset
+    ) {
+
+        entry = {
+
+            count: 0,
+
+            reset:
+                t +
+                RATE_WINDOW
+        };
+
+        rate.set(
+            ip,
+            entry
+        );
+    }
+
+    entry.count++;
+
+    if (
+        entry.count >
+        RATE_LIMIT
+    ) {
+
+        return res
+            .status(429)
+            .json({
+
+                ok: false,
+
+                error:
+                    "RATE_LIMIT"
+            });
+    }
+
+    next();
+}
+
+/* =========================================================
+   CLEANUP
+========================================================= */
+
+setInterval(
+    () => {
+
+        const t =
+            now();
+
+        for (
+            const [
+                id,
+                item
+            ] of challenges
+        ) {
+
+            if (
+                t -
+                item.createdAt >
+                CHALLENGE_TTL
+            ) {
+
+                challenges.delete(
+                    id
+                );
+            }
+        }
+
+        for (
+            const [
+                token,
+                item
+            ] of tokens
+        ) {
+
+            if (
+                t >
+                item.expiresAt
+            ) {
+
+                tokens.delete(
+                    token
+                );
+            }
+        }
+
+        for (
+            const [
+                ip,
+                item
+            ] of rate
+        ) {
+
+            if (
+                t >
+                item.reset
+            ) {
+
+                rate.delete(
+                    ip
+                );
+            }
+        }
+
+    },
+    15 * 1000
+);
+
+/* =========================================================
+   HEALTH
 ========================================================= */
 
 app.get(
     "/",
     (req, res) => {
 
-        res.sendFile(
-            path.join(
-                __dirname,
-                "public",
-                "index.html"
-            )
-        );
+        res.json({
+
+            ok: true,
+
+            service:
+                "LEXINX PROTECT",
+
+            version:
+                "V5",
+
+            payload:
+                !!readPayload(),
+
+            time:
+                new Date().toISOString()
+        });
     }
 );
 
 /* =========================================================
-   CREATE SCRIPT
+   PUBLIC STATUS
+========================================================= */
+
+app.get(
+    "/api/status",
+    rateLimit,
+    (req, res) => {
+
+        const payload =
+            readPayload();
+
+        res.json({
+
+            ok: true,
+
+            online: true,
+
+            payload:
+                !!payload,
+
+            payloadHash:
+                payload
+                ? sha256(payload)
+                : null
+        });
+    }
+);
+
+/* =========================================================
+   CHALLENGE
+========================================================= */
+
+app.get(
+    "/api/challenge",
+    rateLimit,
+    (req, res) => {
+
+        const ip =
+            getIP(req);
+
+        const challengeId =
+            randomId(16);
+
+        const nonce =
+            randomId(32);
+
+        challenges.set(
+            challengeId,
+            {
+
+                nonce,
+
+                ip,
+
+                createdAt:
+                    now(),
+
+                used: false
+            }
+        );
+
+        res.json({
+
+            ok: true,
+
+            challenge:
+                challengeId,
+
+            nonce,
+
+            expiresIn:
+                CHALLENGE_TTL
+        });
+    }
+);
+
+/* =========================================================
+   VERIFY CHALLENGE
 ========================================================= */
 
 app.post(
-    "/api/create",
+    "/api/auth",
+    rateLimit,
     (req, res) => {
 
-        const source =
-            typeof req.body?.source ===
-            "string"
-                ? req.body.source
-                : "";
+        const {
 
-        if (!source.trim()) {
+            challenge,
+            signature
+
+        } = req.body || {};
+
+        if (
+            typeof challenge !==
+                "string" ||
+
+            typeof signature !==
+                "string"
+        ) {
 
             return res
                 .status(400)
                 .json({
+
                     ok: false,
+
                     error:
-                        "Script is empty"
+                        "INVALID_REQUEST"
                 });
         }
 
-        const db =
-            readDB();
+        const item =
+            challenges.get(
+                challenge
+            );
 
-        const id =
-            randomHex(12);
-
-        db[id] = {
-
-            id,
-
-            name:
-                cleanName(
-                    req.body?.name
-                ),
-
-            source,
-
-            createdAt:
-                Date.now(),
-
-            updatedAt:
-                Date.now()
-        };
-
-        writeDB(db);
-
-        const endpoint =
-            `${DOMAIN}/api/loader/${id}`;
-
-        secure(res).json({
-
-            ok: true,
-
-            id,
-
-            endpoint,
-
-            loader:
-                `loadstring(game:HttpGet(${JSON.stringify(
-                    endpoint
-                )}))()`
-        });
-    }
-);
-
-/* =========================================================
-   EDIT SCRIPT
-========================================================= */
-
-app.post(
-    "/api/edit/:id",
-    (req, res) => {
-
-        const db =
-            readDB();
-
-        const script =
-            db[req.params.id];
-
-        if (!script) {
+        if (!item) {
 
             return res
-                .status(404)
+                .status(403)
                 .json({
+
                     ok: false,
+
                     error:
-                        "Script not found"
+                        "CHALLENGE_INVALID"
                 });
         }
 
         if (
-            typeof req.body?.source ===
-            "string"
+            item.used
         ) {
-            script.source =
-                req.body.source;
+
+            return res
+                .status(403)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "CHALLENGE_USED"
+                });
         }
 
         if (
-            typeof req.body?.name ===
-            "string"
+            now() -
+            item.createdAt >
+            CHALLENGE_TTL
         ) {
-            script.name =
-                cleanName(
-                    req.body.name
-                );
+
+            challenges.delete(
+                challenge
+            );
+
+            return res
+                .status(403)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "CHALLENGE_EXPIRED"
+                });
         }
 
-        script.updatedAt =
-            Date.now();
-
-        writeDB(db);
-
-        secure(res).json({
-            ok: true,
-            id:
-                script.id
-        });
-    }
-);
-
-/* =========================================================
-   L1
-========================================================= */
-
-app.get(
-    "/api/loader/:id",
-    (req, res) => {
-
-        /*
-         * Browser navigation bị block.
-         *
-         * Không block chỉ dựa vào User-Agent,
-         * vì executor có thể không gửi User-Agent.
-         */
+        const ip =
+            getIP(req);
 
         if (
-            isBrowser(req)
+            item.ip !== ip
         ) {
-            return blocked(res);
-        }
 
-        const db =
-            readDB();
+            return res
+                .status(403)
+                .json({
 
-        const script =
-            db[req.params.id];
+                    ok: false,
 
-        if (!script) {
-            return blocked(res);
-        }
-
-        const session =
-            createSession(
-                script.id
-            );
-
-        session.payload =
-            encodeSource(
-                script.source
-            );
-
-        const l2 =
-            buildLayer2(
-                `${DOMAIN}/api/payload`,
-                session
-            );
-
-        /*
-         * L1 cực ngắn:
-         *
-         * loadstring(
-         *     HttpGet(...)
-         * )()
-         *
-         * Endpoint trả L2.
-         */
-
-        const loader = `
-local s =
-    game:HttpGet(
-        ${JSON.stringify(
-            `${DOMAIN}/api/loader/${script.id}`
-        )}
-    )
-
-local f =
-    loadstring(s)
-
-if type(f) ~= "function" then
-    error("LEXINX BLOCK")
-end
-
-f()
-`;
-
-        /*
-         * Lưu ý:
-         * request /api/loader trực tiếp sẽ
-         * nhận L1 chứa L2.
-         */
-
-        secure(res)
-            .type("text/plain")
-            .send(loader);
-    }
-);
-
-/* =========================================================
-   PAYLOAD GET = ALWAYS BLOCK
-========================================================= */
-
-app.get(
-    "/api/payload",
-    (req, res) => {
-
-        return blocked(res);
-    }
-);
-
-/* =========================================================
-   PAYLOAD POST
-========================================================= */
-
-app.post(
-    "/api/payload",
-    (req, res) => {
-
-        /*
-         * Chỉ POST mới được xử lý.
-         */
-
-        const {
-            session,
-            token,
-            nonce
-        } = req.body || {};
-
-        const s =
-            verifySession(
-                session,
-                token,
-                nonce
-            );
-
-        if (!s) {
-            return blocked(res);
+                    error:
+                        "IP_MISMATCH"
+                });
         }
 
         /*
-         * Session one-time.
+         * Client phải ký:
+
+             challenge + ":" + nonce
+
          */
+        const message =
+            challenge +
+            ":" +
+            item.nonce;
 
-        sessions.delete(
-            s.id
-        );
+        const expected =
+            hmac(
+                message
+            );
 
-        const db =
-            readDB();
+        if (
+            !timingSafeEqualString(
+                signature,
+                expected
+            )
+        ) {
 
-        const script =
-            db[s.scriptId];
+            return res
+                .status(403)
+                .json({
 
-        if (!script) {
-            return blocked(res);
+                    ok: false,
+
+                    error:
+                        "SIGNATURE_INVALID"
+                });
         }
 
-        /*
-         * Tạo payload mới.
-         */
+        item.used =
+            true;
+
+        const token =
+            randomId(32);
 
         const payload =
-            encodeSource(
-                script.source
-            );
+            readPayload();
 
-        secure(res).json({
+        if (!payload) {
 
-            ok: true,
+            return res
+                .status(503)
+                .json({
 
-            stage: 2,
+                    ok: false,
 
-            payload: {
-
-                fragments:
-                    payload.fragments,
-
-                order:
-                    payload.order,
-
-                xorKey:
-                    payload.xorKey,
-
-                addKey:
-                    payload.addKey
-            }
-        });
-    }
-);
-
-/* =========================================================
-   DIRECT SOURCE = BLOCK
-========================================================= */
-
-app.get(
-    "/api/source/:id",
-    (req, res) => {
-
-        return blocked(res);
-    }
-);
-
-/* =========================================================
-   SCRIPT LIST
-========================================================= */
-
-app.get(
-    "/api/scripts",
-    (req, res) => {
-
-        const db =
-            readDB();
-
-        const scripts =
-            Object.values(db)
-                .reverse()
-                .map(script => {
-
-                    const endpoint =
-                        `${DOMAIN}/api/loader/${script.id}`;
-
-                    return {
-
-                        id:
-                            script.id,
-
-                        name:
-                            script.name,
-
-                        endpoint,
-
-                        loader:
-                            `loadstring(game:HttpGet(${JSON.stringify(
-                                endpoint
-                            )}))()`,
-
-                        createdAt:
-                            script.createdAt,
-
-                        updatedAt:
-                            script.updatedAt
-                    };
+                    error:
+                        "PAYLOAD_NOT_AVAILABLE"
                 });
+        }
 
-        secure(res).json({
+        tokens.set(
+            token,
+            {
+
+                ip,
+
+                createdAt:
+                    now(),
+
+                expiresAt:
+                    now() +
+                    TOKEN_TTL,
+
+                used: false,
+
+                payloadHash:
+                    sha256(payload)
+            }
+        );
+
+        return res.json({
+
             ok: true,
-            scripts
+
+            token,
+
+            expiresIn:
+                TOKEN_TTL
         });
     }
 );
 
 /* =========================================================
-   DELETE
+   GET PAYLOAD
 ========================================================= */
 
-app.delete(
-    "/api/delete/:id",
+app.get(
+    "/api/payload",
+    rateLimit,
     (req, res) => {
 
-        const db =
-            readDB();
+        const token =
+            req.headers[
+                "x-lexinx-token"
+            ] ||
+            req.query.token;
 
         if (
-            !db[req.params.id]
+            typeof token !==
+            "string"
         ) {
+
+            return res
+                .status(401)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "TOKEN_REQUIRED"
+                });
+        }
+
+        const item =
+            tokens.get(
+                token
+            );
+
+        if (!item) {
+
+            return res
+                .status(403)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "TOKEN_INVALID"
+                });
+        }
+
+        if (
+            item.used
+        ) {
+
+            tokens.delete(
+                token
+            );
+
+            return res
+                .status(403)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "TOKEN_ALREADY_USED"
+                });
+        }
+
+        if (
+            now() >
+            item.expiresAt
+        ) {
+
+            tokens.delete(
+                token
+            );
+
+            return res
+                .status(403)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "TOKEN_EXPIRED"
+                });
+        }
+
+        const ip =
+            getIP(req);
+
+        if (
+            item.ip !== ip
+        ) {
+
+            return res
+                .status(403)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "IP_MISMATCH"
+                });
+        }
+
+        const payload =
+            readPayload();
+
+        if (!payload) {
+
+            return res
+                .status(503)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "PAYLOAD_NOT_AVAILABLE"
+                });
+        }
+
+        /*
+         * One-time token.
+         */
+        item.used =
+            true;
+
+        tokens.delete(
+            token
+        );
+
+        /*
+         * Return RAW Lua payload.
+         *
+         * Đây chính là payload đã được
+         * LEXINX V4 obfuscate.
+         */
+        res.status(200);
+
+        res.setHeader(
+            "Content-Type",
+            "text/plain; charset=utf-8"
+        );
+
+        res.setHeader(
+            "Cache-Control",
+            "no-store, no-cache"
+        );
+
+        res.setHeader(
+            "X-Lexinx-Payload",
+            item.payloadHash
+        );
+
+        res.send(
+            payload
+        );
+    }
+);
+
+/* =========================================================
+   ADMIN AUTH
+========================================================= */
+
+function requireAdmin(
+    req,
+    res,
+    next
+) {
+
+    const key =
+        req.headers[
+            "x-lexinx-admin"
+        ];
+
+    if (
+        !timingSafeEqualString(
+            String(key || ""),
+            ADMIN_KEY
+        )
+    ) {
+
+        return res
+            .status(403)
+            .json({
+
+                ok: false,
+
+                error:
+                    "ADMIN_REQUIRED"
+            });
+    }
+
+    next();
+}
+
+/* =========================================================
+   ADMIN PAYLOAD UPLOAD
+========================================================= */
+
+app.post(
+    "/api/admin/payload",
+    requireAdmin,
+    (req, res) => {
+
+        const payload =
+            typeof req.body.payload ===
+            "string"
+                ? req.body.payload
+                : null;
+
+        if (
+            !payload ||
+            !payload.trim()
+        ) {
+
+            return res
+                .status(400)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "PAYLOAD_EMPTY"
+                });
+        }
+
+        /*
+         * Basic sanity checks.
+         *
+         * Không yêu cầu payload phải chứa
+         * một VM/decoder cụ thể.
+         */
+        if (
+            payload.length >
+            2 * 1024 * 1024
+        ) {
+
+            return res
+                .status(413)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "PAYLOAD_TOO_LARGE"
+                });
+        }
+
+        const meta =
+            savePayload(
+                payload
+            );
+
+        console.log(
+            "[PAYLOAD UPDATED]",
+            meta
+        );
+
+        res.json({
+
+            ok: true,
+
+            message:
+                "Payload updated",
+
+            ...meta
+        });
+    }
+);
+
+/* =========================================================
+   ADMIN PAYLOAD INFO
+========================================================= */
+
+app.get(
+    "/api/admin/payload",
+    requireAdmin,
+    (req, res) => {
+
+        const payload =
+            readPayload();
+
+        if (!payload) {
 
             return res
                 .status(404)
                 .json({
+
                     ok: false,
+
                     error:
-                        "Script not found"
+                        "PAYLOAD_NOT_FOUND"
                 });
         }
 
-        delete db[
-            req.params.id
-        ];
+        res.json({
 
-        writeDB(db);
+            ok: true,
 
-        secure(res).json({
-            ok: true
+            hash:
+                sha256(payload),
+
+            size:
+                Buffer.byteLength(
+                    payload,
+                    "utf8"
+                ),
+
+            payload
         });
-    }
-);
-
-/* =========================================================
-   UNKNOWN API
-========================================================= */
-
-app.use(
-    "/api",
-    (req, res) => {
-
-        return blocked(res);
     }
 );
 
@@ -1157,45 +1162,40 @@ app.use(
 app.use(
     (req, res) => {
 
-        secure(res)
+        res
             .status(404)
-            .type("text/plain")
-            .send(
-                "LEXINX BLOCK"
-            );
+            .json({
+
+                ok: false,
+
+                error:
+                    "NOT_FOUND"
+            });
     }
 );
 
 /* =========================================================
-   CLEAN SESSION
+   ERROR HANDLER
 ========================================================= */
 
-setInterval(
-    () => {
+app.use(
+    (err, req, res, next) => {
 
-        const now =
-            Date.now();
+        console.error(
+            "[SERVER ERROR]",
+            err
+        );
 
-        for (
-            const [
-                id,
-                session
-            ] of sessions
-        ) {
+        res
+            .status(500)
+            .json({
 
-            if (
-                now >
-                session.expiresAt
-            ) {
+                ok: false,
 
-                sessions.delete(
-                    id
-                );
-            }
-        }
-
-    },
-    30000
+                error:
+                    "INTERNAL_SERVER_ERROR"
+            });
+    }
 );
 
 /* =========================================================
@@ -1204,25 +1204,84 @@ setInterval(
 
 app.listen(
     PORT,
+    HOST,
     () => {
 
         console.log(
-            "LEXINX PROTECT ONLINE"
+            "=============================================="
         );
 
         console.log(
-            "DOMAIN:",
-            DOMAIN
+            "       LEXINX PROTECT SERVER V5"
         );
 
         console.log(
-            "PORT:",
+            "=============================================="
+        );
+
+        console.log(
+            "[SERVER] http://" +
+            HOST +
+            ":" +
             PORT
         );
 
         console.log(
-            "FLOW:",
-            "L1 -> L2 -> PAYLOAD"
+            "[PAYLOAD] " +
+            (
+                readPayload()
+                    ? "READY"
+                    : "NOT FOUND"
+            )
+        );
+
+        console.log(
+            "[TOKEN] One-time"
+        );
+
+        console.log(
+            "[CHALLENGE] Enabled"
+        );
+
+        console.log(
+            "[RATE LIMIT] " +
+            RATE_LIMIT +
+            "/minute/IP"
+        );
+
+        console.log(
+            "=============================================="
         );
     }
+);
+
+/* =========================================================
+   GRACEFUL SHUTDOWN
+========================================================= */
+
+function shutdown(
+    signal
+) {
+
+    console.log(
+        "\n[" +
+        signal +
+        "] shutting down..."
+    );
+
+    process.exit(
+        0
+    );
+}
+
+process.on(
+    "SIGINT",
+    () =>
+        shutdown("SIGINT")
+);
+
+process.on(
+    "SIGTERM",
+    () =>
+        shutdown("SIGTERM")
 );
