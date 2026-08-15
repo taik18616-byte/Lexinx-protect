@@ -1,22 +1,12 @@
 <!doctype html>
 <html lang="vi">
-
 <head>
-
 <meta charset="utf-8">
-
-<meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
->
-
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LEXINX Lua Obfuscator V4</title>
 
 <style>
-
-*{
-    box-sizing:border-box
-}
+*{box-sizing:border-box}
 
 body{
     margin:0;
@@ -111,13 +101,13 @@ button.secondary{
     border:1px solid #333
 }
 
-button.create{
-    background:#65ff88;
-    color:#061008
-}
-
 button:hover{
     opacity:.85
+}
+
+button:disabled{
+    opacity:.5;
+    cursor:not-allowed
 }
 
 .status{
@@ -127,53 +117,18 @@ button:hover{
     border:1px solid #292929;
     background:#111;
     color:#aaa;
-    white-space:pre-wrap;
-    word-break:break-word
+    white-space:pre-wrap
 }
 
-.ok{
-    color:#8cff9b
-}
-
-.err{
-    color:#ff7777
-}
-
-.info{
-    margin-top:14px;
-    background:#111;
-    border:1px solid #292929;
-    border-radius:10px;
-    padding:14px;
-    display:none
-}
-
-.info-row{
-    margin:8px 0;
-    word-break:break-all
-}
-
-.info-label{
-    color:#777;
-    display:block;
-    margin-bottom:4px
-}
-
-.info-value{
-    color:#ddd;
-    font-family:Consolas,monospace
-}
+.ok{color:#8cff9b}
+.err{color:#ff7777}
 
 @media(max-width:800px){
-
     .grid{
         grid-template-columns:1fr
     }
-
 }
-
 </style>
-
 </head>
 
 <body>
@@ -183,61 +138,38 @@ button:hover{
 <h1>LEXINX Lua Obfuscator V4</h1>
 
 <div class="sub">
-Fragmented strings · per-entry keys · randomized pool · integrity metadata · server payload
+Fragmented strings · per-entry keys · randomized pool · server payload
 </div>
 
 <div class="options">
 
 <label>
-<input
-    id="strings"
-    type="checkbox"
-    checked
->
+<input id="strings" type="checkbox" checked>
 String packing
 </label>
 
 <label>
-<input
-    id="fragments"
-    type="checkbox"
-    checked
->
+<input id="fragments" type="checkbox" checked>
 Fragment strings
 </label>
 
 <label>
-<input
-    id="shuffle"
-    type="checkbox"
-    checked
->
+<input id="shuffle" type="checkbox" checked>
 Shuffle fragments
 </label>
 
 <label>
-<input
-    id="stage2"
-    type="checkbox"
-    checked
->
+<input id="stage2" type="checkbox" checked>
 Second encoding stage
 </label>
 
 <label>
-<input
-    id="delay"
-    type="checkbox"
-    checked
->
+<input id="delay" type="checkbox" checked>
 4s delay
 </label>
 
 <label>
-<input
-    id="comments"
-    type="checkbox"
->
+<input id="comments" type="checkbox">
 Strip comments
 </label>
 
@@ -252,9 +184,9 @@ Lua / Luau source
 </div>
 
 <textarea
-    id="input"
-    spellcheck="false"
-    placeholder="Paste Lua / Luau source..."
+id="input"
+spellcheck="false"
+placeholder="Paste Lua / Luau source..."
 ></textarea>
 
 </div>
@@ -262,14 +194,14 @@ Lua / Luau source
 <div class="panel">
 
 <div class="panel-title">
-Generated V4 output
+Generated output / Server payload
 </div>
 
 <textarea
-    id="output"
-    readonly
-    spellcheck="false"
-    placeholder="Generated Lua V4..."
+id="output"
+readonly
+spellcheck="false"
+placeholder="Generated Lua..."
 ></textarea>
 
 </div>
@@ -282,107 +214,30 @@ Generated V4 output
 OBFUSCATE
 </button>
 
-<button
-    class="create"
-    onclick="createPayload()"
->
+<button id="createBtn" onclick="createPayload()">
 CREATE
 </button>
 
-<button
-    class="secondary"
-    onclick="validate()"
->
+<button class="secondary" onclick="validate()">
 VALIDATE
 </button>
 
-<button
-    class="secondary"
-    onclick="copyResult()"
->
+<button class="secondary" onclick="copyResult()">
 COPY
 </button>
 
-<button
-    class="secondary"
-    onclick="downloadResult()"
->
+<button class="secondary" onclick="downloadResult()">
 DOWNLOAD
 </button>
 
-<button
-    class="secondary"
-    onclick="clearAll()"
->
+<button class="secondary" onclick="clearAll()">
 CLEAR
 </button>
 
 </div>
 
-<div
-    id="status"
-    class="status"
->
+<div id="status" class="status">
 Ready.
-</div>
-
-<div
-    id="serverInfo"
-    class="info"
->
-
-<div class="info-row">
-
-<span class="info-label">
-Payload ID
-</span>
-
-<span
-    id="payloadId"
-    class="info-value"
-></span>
-
-</div>
-
-<div class="info-row">
-
-<span class="info-label">
-Token
-</span>
-
-<span
-    id="payloadToken"
-    class="info-value"
-></span>
-
-</div>
-
-<div class="info-row">
-
-<span class="info-label">
-Payload URL
-</span>
-
-<span
-    id="payloadUrl"
-    class="info-value"
-></span>
-
-</div>
-
-<div class="info-row">
-
-<span class="info-label">
-SHA-256
-</span>
-
-<span
-    id="payloadHash"
-    class="info-value"
-></span>
-
-</div>
-
 </div>
 
 </div>
@@ -396,8 +251,7 @@ SHA-256
 function rnd(min,max){
 
     return Math.floor(
-        Math.random()*
-        (max-min+1)
+        Math.random()*(max-min+1)
     )+min;
 }
 
@@ -408,17 +262,10 @@ function name8(){
 
     let s="_";
 
-    for(
-        let i=0;
-        i<8;
-        i++
-    ){
+    for(let i=0;i<8;i++){
 
         s+=chars[
-            rnd(
-                0,
-                chars.length-1
-            )
+            rnd(0,chars.length-1)
         ];
     }
 
@@ -428,8 +275,7 @@ function name8(){
 function randomByte(){
 
     if(
-        typeof crypto !==
-        "undefined" &&
+        typeof crypto !== "undefined" &&
         crypto.getRandomValues
     ){
 
@@ -451,8 +297,7 @@ function randomByte(){
 function bytesOf(text){
 
     return Array.from(
-        new TextEncoder()
-            .encode(text)
+        new TextEncoder().encode(text)
     );
 }
 
@@ -461,11 +306,7 @@ function xor(a,k){
     const out=
         new Array(a.length);
 
-    for(
-        let i=0;
-        i<a.length;
-        i++
-    ){
+    for(let i=0;i<a.length;i++){
 
         out[i]=
             (a[i]^k)&255;
@@ -477,24 +318,13 @@ function xor(a,k){
 function addTransform(a,k){
 
     return a.map(
-        x=>
-            (x+k)&255
-    );
-}
-
-function subTransform(a,k){
-
-    return a.map(
-        x=>
-            (x-k+256)&255
+        x=>(x+k)&255
     );
 }
 
 function luaArray(a){
 
-    return "{"+
-        a.join(",")+
-        "}";
+    return "{"+a.join(",")+"}";
 }
 
 /* =========================================================
@@ -507,59 +337,19 @@ function decodeLuaEscapes(s){
         /\\(\\|'|"|n|r|t|b|f|v|a|x[0-9a-fA-F]{2}|\d{1,3})/g,
         (full,x)=>{
 
-            if(
-                x==="\\"
-            )
-                return "\\";
+            if(x==="\\")return "\\";
+            if(x==="'")return "'";
+            if(x==='"')return '"';
 
-            if(
-                x==="'"
-            )
-                return "'";
+            if(x==="n")return "\n";
+            if(x==="r")return "\r";
+            if(x==="t")return "\t";
+            if(x==="b")return "\b";
+            if(x==="f")return "\f";
+            if(x==="v")return "\v";
+            if(x==="a")return "\x07";
 
-            if(
-                x==='"'
-            )
-                return '"';
-
-            if(
-                x==="n"
-            )
-                return "\n";
-
-            if(
-                x==="r"
-            )
-                return "\r";
-
-            if(
-                x==="t"
-            )
-                return "\t";
-
-            if(
-                x==="b"
-            )
-                return "\b";
-
-            if(
-                x==="f"
-            )
-                return "\f";
-
-            if(
-                x==="v"
-            )
-                return "\v";
-
-            if(
-                x==="a"
-            )
-                return "\x07";
-
-            if(
-                x[0]==="x"
-            ){
+            if(x[0]==="x"){
 
                 return String.fromCharCode(
                     parseInt(
@@ -569,15 +359,10 @@ function decodeLuaEscapes(s){
                 );
             }
 
-            if(
-                /^\d+$/.test(x)
-            ){
+            if(/^\d+$/.test(x)){
 
                 return String.fromCharCode(
-                    parseInt(
-                        x,
-                        10
-                    )
+                    parseInt(x,10)
                 );
             }
 
@@ -597,12 +382,9 @@ function stripCommentsSafe(source){
     let quote=null;
     let escaped=false;
 
-    while(
-        i<source.length
-    ){
+    while(i<source.length){
 
-        const c=
-            source[i];
+        const c=source[i];
 
         if(quote){
 
@@ -612,33 +394,23 @@ function stripCommentsSafe(source){
 
                 escaped=false;
 
-            }else if(
-                c==="\\"
-            ){
+            }else if(c==="\\"){
 
                 escaped=true;
 
-            }else if(
-                c===quote
-            ){
+            }else if(c===quote){
 
                 quote=null;
             }
 
             i++;
-
             continue;
         }
 
-        if(
-            c==="\"" ||
-            c==="'"
-        ){
+        if(c==="\""||c==="'"){
 
             quote=c;
-
             out+=c;
-
             i++;
 
             continue;
@@ -660,12 +432,9 @@ function stripCommentsSafe(source){
                         i+4
                     );
 
-                if(
-                    end!==-1
-                ){
+                if(end!==-1){
 
                     i=end+2;
-
                     continue;
                 }
             }
@@ -682,7 +451,6 @@ function stripCommentsSafe(source){
         }
 
         out+=c;
-
         i++;
     }
 
@@ -696,17 +464,12 @@ function stripCommentsSafe(source){
 function tokenizeStrings(source){
 
     const strings=[];
-
     let out="";
-
     let i=0;
 
-    while(
-        i<source.length
-    ){
+    while(i<source.length){
 
-        const c=
-            source[i];
+        const c=source[i];
 
         if(
             c==="-" &&
@@ -725,11 +488,10 @@ function tokenizeStrings(source){
                 i++;
             }
 
-            out+=
-                source.slice(
-                    start,
-                    i
-                );
+            out+=source.slice(
+                start,
+                i
+            );
 
             continue;
         }
@@ -745,9 +507,7 @@ function tokenizeStrings(source){
                     i+2
                 );
 
-            if(
-                end!==-1
-            ){
+            if(end!==-1){
 
                 const value=
                     source.slice(
@@ -755,13 +515,11 @@ function tokenizeStrings(source){
                         end
                     );
 
-                strings.push(
-                    value
-                );
+                strings.push(value);
 
                 out+=
-                    "__LXSTR_"+
-                    strings.length+
+                    "__LXSTR_" +
+                    strings.length +
                     "__";
 
                 i=end+2;
@@ -778,39 +536,29 @@ function tokenizeStrings(source){
             const quote=c;
 
             let j=i+1;
-
             let escaped=false;
 
-            while(
-                j<source.length
-            ){
+            while(j<source.length){
 
-                const x=
-                    source[j];
+                const x=source[j];
 
                 if(escaped){
 
                     escaped=false;
-
                     j++;
 
                     continue;
                 }
 
-                if(
-                    x==="\\"
-                ){
+                if(x==="\\"){
 
                     escaped=true;
-
                     j++;
 
                     continue;
                 }
 
-                if(
-                    x===quote
-                ){
+                if(x===quote){
 
                     break;
                 }
@@ -818,26 +566,20 @@ function tokenizeStrings(source){
                 j++;
             }
 
-            if(
-                j>=source.length
-            ){
+            if(j>=source.length){
 
                 throw new Error(
-                    "Unclosed string at position "+
-                    i
+                    "Unclosed string at position "+i
                 );
             }
 
             strings.push(
-                source.slice(
-                    i+1,
-                    j
-                )
+                source.slice(i+1,j)
             );
 
             out+=
-                "__LXSTR_"+
-                strings.length+
+                "__LXSTR_" +
+                strings.length +
                 "__";
 
             i=j+1;
@@ -846,7 +588,6 @@ function tokenizeStrings(source){
         }
 
         out+=c;
-
         i++;
     }
 
@@ -863,12 +604,9 @@ function tokenizeStrings(source){
 function splitFragments(bytes){
 
     const result=[];
-
     let p=0;
 
-    while(
-        p<bytes.length
-    ){
+    while(p<bytes.length){
 
         const size=
             Math.min(
@@ -891,8 +629,7 @@ function splitFragments(bytes){
 
 function shuffle(a){
 
-    const x=
-        a.slice();
+    const x=a.slice();
 
     for(
         let i=x.length-1;
@@ -900,8 +637,7 @@ function shuffle(a){
         i--
     ){
 
-        const j=
-            rnd(0,i);
+        const j=rnd(0,i);
 
         [
             x[i],
@@ -916,7 +652,7 @@ function shuffle(a){
 }
 
 /* =========================================================
-   FNV HASH
+   HASH
 ========================================================= */
 
 function hashText(text){
@@ -949,20 +685,11 @@ function hashText(text){
 
 function makeDecoder(){
 
-    const fn=
-        name8();
-
-    const input=
-        name8();
-
-    const result=
-        name8();
-
-    const index=
-        name8();
-
-    const value=
-        name8();
+    const fn=name8();
+    const input=name8();
+    const result=name8();
+    const index=name8();
+    const value=name8();
 
     const code=`
 
@@ -972,8 +699,7 @@ local ${fn}=function(${input},k)
 
     for ${index}=1,#${input} do
 
-        local ${value}=
-            ${input}[${index}]
+        local ${value}=${input}[${index}]
 
         local x=${value}
         local y=k
@@ -986,24 +712,19 @@ local ${fn}=function(${input},k)
             local yb=y%2
 
             if xb~=yb then
-
                 o=o+bit
-
             end
 
             x=math.floor(x/2)
             y=math.floor(y/2)
             bit=bit*2
-
         end
 
         ${result}[${index}]=
             string.char(o%256)
-
     end
 
     return table.concat(${result})
-
 end
 
 `;
@@ -1018,10 +739,7 @@ end
    BUILD POOL
 ========================================================= */
 
-function makePool(
-    strings,
-    options
-){
+function makePool(strings,options){
 
     const decoder=
         makeDecoder();
@@ -1059,9 +777,7 @@ function makePool(
                 xorKey
             );
 
-        if(
-            options.stage2
-        ){
+        if(options.stage2){
 
             data=
                 addTransform(
@@ -1072,9 +788,7 @@ function makePool(
 
         let fragments;
 
-        if(
-            options.fragments
-        ){
+        if(options.fragments){
 
             fragments=
                 splitFragments(
@@ -1093,9 +807,7 @@ function makePool(
                 (_,n)=>n
             );
 
-        if(
-            options.shuffle
-        ){
+        if(options.shuffle){
 
             order=
                 shuffle(order);
@@ -1104,13 +816,9 @@ function makePool(
         entries.push({
 
             fragments,
-
             order,
-
             xorKey,
-
             addKey
-
         });
     }
 
@@ -1122,8 +830,7 @@ function makePool(
         i++
     ){
 
-        const e=
-            entries[i];
+        const e=entries[i];
 
         const fragmentParts=
             e.fragments.map(
@@ -1131,7 +838,6 @@ function makePool(
             );
 
         poolParts.push(`
-
 [${i+1}]={
     f={${fragmentParts.join(",")}},
     o=${luaArray(
@@ -1142,52 +848,28 @@ function makePool(
     x=${e.xorKey},
     a=${e.addKey}
 }
-
 `);
     }
 
     const pool=`
 
 local ${poolName}={
-
 ${poolParts.join(",")}
-
 }
 
 `;
 
-    const getter=
-        name8();
-
-    const entry=
-        name8();
-
-    const parts=
-        name8();
-
-    const order=
-        name8();
-
-    const output=
-        name8();
-
-    const part=
-        name8();
-
-    const byte=
-        name8();
-
-    const xkey=
-        name8();
-
-    const akey=
-        name8();
-
-    const decoded=
-        name8();
-
-    const index=
-        name8();
+    const getter=name8();
+    const entry=name8();
+    const parts=name8();
+    const order=name8();
+    const output=name8();
+    const part=name8();
+    const byte=name8();
+    const xkey=name8();
+    const akey=name8();
+    const decoded=name8();
+    const index=name8();
 
     const reconstruct=`
 
@@ -1197,9 +879,7 @@ local ${getter}=function(id)
         ${poolName}[id]
 
     if not ${entry} then
-
         return nil
-
     end
 
     local ${parts}=
@@ -1235,9 +915,7 @@ local ${getter}=function(id)
 
             ${output}[#${output}+1]=
                 ${byte}
-
         end
-
     end
 
     local ${decoded}=
@@ -1247,7 +925,6 @@ local ${getter}=function(id)
         )
 
     return ${decoded}
-
 end
 
 `;
@@ -1263,7 +940,6 @@ end
 
         count:
             strings.length
-
     };
 }
 
@@ -1284,17 +960,14 @@ function replaceMarkers(
     ){
 
         const marker=
-            "__LXSTR_"+
-            i+
-            "__";
+            "__LXSTR_"+i+"__";
 
         source=
-            source
-                .split(marker)
-                .join(
-                    getter+
-                    "("+i+")"
-                );
+            source.split(
+                marker
+            ).join(
+                getter+"("+i+")"
+            );
     }
 
     return source;
@@ -1304,15 +977,11 @@ function replaceMarkers(
    VALIDATOR
 ========================================================= */
 
-function validateGenerated(
-    source
-){
+function validateGenerated(source){
 
     const errors=[];
 
-    if(
-        !source.trim()
-    ){
+    if(!source.trim()){
 
         errors.push(
             "Output is empty."
@@ -1322,8 +991,9 @@ function validateGenerated(
     }
 
     if(
-        /__LXSTR_\d+__/
-            .test(source)
+        /__LXSTR_\d+__/.test(
+            source
+        )
     ){
 
         errors.push(
@@ -1332,8 +1002,9 @@ function validateGenerated(
     }
 
     if(
-        !/string\.char/
-            .test(source)
+        !/string\.char/.test(
+            source
+        )
     ){
 
         errors.push(
@@ -1342,8 +1013,9 @@ function validateGenerated(
     }
 
     if(
-        !/table\.concat/
-            .test(source)
+        !/table\.concat/.test(
+            source
+        )
     ){
 
         errors.push(
@@ -1352,8 +1024,9 @@ function validateGenerated(
     }
 
     if(
-        !/while x>0 or y>0/
-            .test(source)
+        !/while x>0 or y>0/.test(
+            source
+        )
     ){
 
         errors.push(
@@ -1362,8 +1035,9 @@ function validateGenerated(
     }
 
     if(
-        !/local\s+_[a-z]{8}\s*=\s*function/
-            .test(source)
+        !/local\s+_[a-z]{8}\s*=\s*function/.test(
+            source
+        )
     ){
 
         errors.push(
@@ -1375,23 +1049,22 @@ function validateGenerated(
 }
 
 /* =========================================================
-   BUILD
+   BUILD LOCAL
 ========================================================= */
 
 function build(){
 
     const input=
-        document
-            .getElementById("input")
-            .value;
+        document.getElementById(
+            "input"
+        ).value;
 
     const status=
-        document
-            .getElementById("status");
+        document.getElementById(
+            "status"
+        );
 
-    if(
-        !input.trim()
-    ){
+    if(!input.trim()){
 
         status.className=
             "status err";
@@ -1404,15 +1077,12 @@ function build(){
 
     try{
 
-        let source=
-            input;
+        let source=input;
 
         if(
-            document
-                .getElementById(
-                    "comments"
-                )
-                .checked
+            document.getElementById(
+                "comments"
+            ).checked
         ){
 
             source=
@@ -1422,25 +1092,17 @@ function build(){
         }
 
         const useStrings=
-            document
-                .getElementById(
-                    "strings"
-                )
-                .checked;
+            document.getElementById(
+                "strings"
+            ).checked;
 
         let pool={
-
             code:"",
-
             getter:null,
-
             count:0
-
         };
 
-        if(
-            useStrings
-        ){
+        if(useStrings){
 
             const tokenized=
                 tokenizeStrings(
@@ -1454,28 +1116,20 @@ function build(){
                 makePool(
                     tokenized.strings,
                     {
-
                         fragments:
-                            document
-                                .getElementById(
-                                    "fragments"
-                                )
-                                .checked,
+                            document.getElementById(
+                                "fragments"
+                            ).checked,
 
                         shuffle:
-                            document
-                                .getElementById(
-                                    "shuffle"
-                                )
-                                .checked,
+                            document.getElementById(
+                                "shuffle"
+                            ).checked,
 
                         stage2:
-                            document
-                                .getElementById(
-                                    "stage2"
-                                )
-                                .checked
-
+                            document.getElementById(
+                                "stage2"
+                            ).checked
                     }
                 );
 
@@ -1490,17 +1144,13 @@ function build(){
         let delay="";
 
         if(
-            document
-                .getElementById(
-                    "delay"
-                )
-                .checked
+            document.getElementById(
+                "delay"
+            ).checked
         ){
 
             delay=`
-
 task.wait(4)
-
 `;
         }
 
@@ -1508,45 +1158,36 @@ task.wait(4)
             hashText(source);
 
         const output=
-
 `-- LEXINX Lua Packed V4
 -- Generated: ${new Date().toISOString()}
 -- Strings: ${pool.count}
 -- Fragmentation: ${
-    document
-        .getElementById(
-            "fragments"
-        )
-        .checked
-        ? "enabled"
-        : "disabled"
+    document.getElementById(
+        "fragments"
+    ).checked
+    ? "enabled"
+    : "disabled"
 }
 -- Shuffle: ${
-    document
-        .getElementById(
-            "shuffle"
-        )
-        .checked
-        ? "enabled"
-        : "disabled"
+    document.getElementById(
+        "shuffle"
+    ).checked
+    ? "enabled"
+    : "disabled"
 }
 -- Stage2: ${
-    document
-        .getElementById(
-            "stage2"
-        )
-        .checked
-        ? "enabled"
-        : "disabled"
+    document.getElementById(
+        "stage2"
+    ).checked
+    ? "enabled"
+    : "disabled"
 }
 -- Delay: ${
-    document
-        .getElementById(
-            "delay"
-        )
-        .checked
-        ? "4s"
-        : "off"
+    document.getElementById(
+        "delay"
+    ).checked
+    ? "4s"
+    : "off"
 }
 -- Integrity: ${hash}
 
@@ -1562,9 +1203,7 @@ ${source}
                 output
             );
 
-        if(
-            errors.length
-        ){
+        if(errors.length){
 
             status.className=
                 "status err";
@@ -1576,81 +1215,22 @@ ${source}
             return;
         }
 
-        document
-            .getElementById(
-                "output"
-            )
-            .value=
-                output;
+        document.getElementById(
+            "output"
+        ).value=
+            output;
 
         status.className=
             "status ok";
 
         status.textContent=
-
             "BUILD SUCCESS\n\n"+
-
             "Strings packed: "+
             pool.count+
-
             "\n"+
-
-            "Fragmentation: "+
-            (
-                document
-                    .getElementById(
-                        "fragments"
-                    )
-                    .checked
-                    ? "ON"
-                    : "OFF"
-            )+
-
-            "\n"+
-
-            "Shuffle: "+
-            (
-                document
-                    .getElementById(
-                        "shuffle"
-                    )
-                    .checked
-                    ? "ON"
-                    : "OFF"
-            )+
-
-            "\n"+
-
-            "Second encoding: "+
-            (
-                document
-                    .getElementById(
-                        "stage2"
-                    )
-                    .checked
-                    ? "ON"
-                    : "OFF"
-            )+
-
-            "\n"+
-
-            "Delay: "+
-            (
-                document
-                    .getElementById(
-                        "delay"
-                    )
-                    .checked
-                    ? "4 seconds"
-                    : "OFF"
-            )+
-
-            "\n"+
-
             "Validation: PASS";
 
-    }
-    catch(e){
+    }catch(e){
 
         console.error(e);
 
@@ -1664,87 +1244,58 @@ ${source}
 }
 
 /* =========================================================
-   CREATE PAYLOAD
+   CREATE FROM SERVER
 ========================================================= */
 
 async function createPayload(){
 
+    const input=
+        document.getElementById(
+            "input"
+        ).value.trim();
+
     const output=
-        document
-            .getElementById(
-                "output"
-            )
-            .value;
-
-    const status=
-        document
-            .getElementById(
-                "status"
-            );
-
-    const info=
-        document
-            .getElementById(
-                "serverInfo"
-            );
-
-    if(
-        !output.trim()
-    ){
-
-        status.className=
-            "status err";
-
-        status.textContent=
-            "Generate V4 first.";
-
-        return;
-    }
-
-    const errors=
-        validateGenerated(
-            output
+        document.getElementById(
+            "output"
         );
 
-    if(
-        errors.length
-    ){
+    const status=
+        document.getElementById(
+            "status"
+        );
+
+    const button=
+        document.getElementById(
+            "createBtn"
+        );
+
+    if(!input){
 
         status.className=
             "status err";
 
         status.textContent=
-            "CREATE BLOCKED:\n\n"+
-            errors.join("\n");
+            "Input is empty.";
 
         return;
     }
+
+    button.disabled=true;
+    button.textContent="CREATING...";
+
+    status.className=
+        "status";
+
+    status.textContent=
+        "Sending source to server...";
 
     try{
 
-        status.className=
-            "status";
-
-        status.textContent=
-            "Uploading V4 payload...";
-
-        info.style.display=
-            "none";
-
-        /*
-         * Vì index.html được serve
-         * trực tiếp từ server.js,
-         * fetch("/create") luôn đi
-         * tới đúng server.
-         */
-
         const response=
             await fetch(
-                "/create",
+                "/api/create",
                 {
-
-                    method:
-                        "POST",
+                    method:"POST",
 
                     headers:{
                         "Content-Type":
@@ -1753,10 +1304,40 @@ async function createPayload(){
 
                     body:
                         JSON.stringify({
-                            payload:
-                                output
-                        })
+                            source:input,
 
+                            options:{
+                                strings:
+                                    document.getElementById(
+                                        "strings"
+                                    ).checked,
+
+                                fragments:
+                                    document.getElementById(
+                                        "fragments"
+                                    ).checked,
+
+                                shuffle:
+                                    document.getElementById(
+                                        "shuffle"
+                                    ).checked,
+
+                                stage2:
+                                    document.getElementById(
+                                        "stage2"
+                                    ).checked,
+
+                                delay:
+                                    document.getElementById(
+                                        "delay"
+                                    ).checked,
+
+                                comments:
+                                    document.getElementById(
+                                        "comments"
+                                    ).checked
+                            }
+                        })
                 }
             );
 
@@ -1767,82 +1348,60 @@ async function createPayload(){
             data=
                 await response.json();
 
-        }
-        catch{
+        }catch{
 
             throw new Error(
-                "Server returned invalid JSON ("+
-                response.status+
-                ")"
+                "Server returned invalid JSON."
             );
         }
 
-        if(
-            !response.ok ||
-            !data.ok
-        ){
+        if(!response.ok){
 
             throw new Error(
                 data.error ||
-                "CREATE FAILED"
+                "HTTP "+response.status
             );
         }
 
-        document
-            .getElementById(
-                "payloadId"
-            )
-            .textContent=
-                data.id;
+        if(!data.success){
 
-        document
-            .getElementById(
-                "payloadToken"
-            )
-            .textContent=
-                data.token;
+            throw new Error(
+                data.error ||
+                "CREATE failed."
+            );
+        }
 
-        document
-            .getElementById(
-                "payloadUrl"
-            )
-            .textContent=
-                location.origin+
-                data.payloadUrl;
+        const payload=
+            data.payload ||
+            data.code ||
+            data.result;
 
-        document
-            .getElementById(
-                "payloadHash"
-            )
-            .textContent=
-                data.hash;
+        if(
+            typeof payload!=="string" ||
+            !payload.length
+        ){
 
-        info.style.display=
-            "block";
+            throw new Error(
+                "Server did not return payload."
+            );
+        }
+
+        output.value=
+            payload;
 
         status.className=
             "status ok";
 
         status.textContent=
-
             "CREATE SUCCESS\n\n"+
+            "Payload received from server.\n"+
+            "Length: "+
+            payload.length;
 
-            "Payload V4 đã được lưu trên server.\n\n"+
-
-            "ID: "+
-            data.id+
-
-            "\n\n"+
-
-            "Expires: "+
-            new Date(
-                data.expiresAt
-            ).toLocaleString();
-
-    }
-    catch(error){
+    }catch(error){
 
         console.error(
+            "CREATE ERROR:",
             error
         );
 
@@ -1852,6 +1411,11 @@ async function createPayload(){
         status.textContent=
             "CREATE ERROR:\n\n"+
             error.message;
+
+    }finally{
+
+        button.disabled=false;
+        button.textContent="CREATE";
     }
 }
 
@@ -1862,26 +1426,21 @@ async function createPayload(){
 function validate(){
 
     const output=
-        document
-            .getElementById(
-                "output"
-            )
-            .value;
+        document.getElementById(
+            "output"
+        ).value;
 
     const status=
-        document
-            .getElementById(
-                "status"
-            );
+        document.getElementById(
+            "status"
+        );
 
     const errors=
         validateGenerated(
             output
         );
 
-    if(
-        errors.length
-    ){
+    if(errors.length){
 
         status.className=
             "status err";
@@ -1890,8 +1449,7 @@ function validate(){
             "VALIDATION FAILED:\n\n"+
             errors.join("\n");
 
-    }
-    else{
+    }else{
 
         status.className=
             "status ok";
@@ -1908,26 +1466,33 @@ function validate(){
 async function copyResult(){
 
     const output=
-        document
-            .getElementById(
-                "output"
-            );
+        document.getElementById(
+            "output"
+        );
 
-    if(
-        !output.value
-    )
+    const status=
+        document.getElementById(
+            "status"
+        );
+
+    if(!output.value){
+
+        status.className=
+            "status err";
+
+        status.textContent=
+            "Nothing to copy.";
+
         return;
+    }
 
     try{
 
-        await navigator
-            .clipboard
-            .writeText(
-                output.value
-            );
+        await navigator.clipboard.writeText(
+            output.value
+        );
 
-    }
-    catch{
+    }catch{
 
         output.select();
 
@@ -1936,12 +1501,11 @@ async function copyResult(){
         );
     }
 
-    document
-        .getElementById(
-            "status"
-        )
-        .textContent=
-            "Copied.";
+    status.className=
+        "status ok";
+
+    status.textContent=
+        "Copied.";
 }
 
 /* =========================================================
@@ -1951,33 +1515,22 @@ async function copyResult(){
 function downloadResult(){
 
     const output=
-        document
-            .getElementById(
-                "output"
-            )
-            .value;
+        document.getElementById(
+            "output"
+        ).value;
 
-    if(
-        !output
-    )
-        return;
-
-    const errors=
-        validateGenerated(
-            output
+    const status=
+        document.getElementById(
+            "status"
         );
 
-    if(
-        errors.length
-    ){
+    if(!output){
 
-        document
-            .getElementById(
-                "status"
-            )
-            .textContent=
-                "Download blocked:\n"+
-                errors.join("\n");
+        status.className=
+            "status err";
+
+        status.textContent=
+            "Nothing to download.";
 
         return;
     }
@@ -2006,24 +1559,19 @@ function downloadResult(){
     a.download=
         "lexinx_v4.lua";
 
-    document
-        .body
-        .appendChild(a);
+    document.body.appendChild(a);
 
     a.click();
 
     a.remove();
 
-    URL.revokeObjectURL(
-        url
-    );
+    URL.revokeObjectURL(url);
 
-    document
-        .getElementById(
-            "status"
-        )
-        .textContent=
-            "Downloaded.";
+    status.className=
+        "status ok";
+
+    status.textContent=
+        "Downloaded.";
 }
 
 /* =========================================================
@@ -2032,30 +1580,18 @@ function downloadResult(){
 
 function clearAll(){
 
-    document
-        .getElementById(
-            "input"
-        )
-        .value="";
+    document.getElementById(
+        "input"
+    ).value="";
 
-    document
-        .getElementById(
-            "output"
-        )
-        .value="";
-
-    document
-        .getElementById(
-            "serverInfo"
-        )
-        .style.display=
-            "none";
+    document.getElementById(
+        "output"
+    ).value="";
 
     const status=
-        document
-            .getElementById(
-                "status"
-            );
+        document.getElementById(
+            "status"
+        );
 
     status.className=
         "status";
@@ -2067,5 +1603,4 @@ function clearAll(){
 </script>
 
 </body>
-
 </html>
