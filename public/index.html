@@ -1,13 +1,22 @@
 <!DOCTYPE html>
 <html lang="vi">
+
 <head>
     <meta charset="UTF-8">
+
     <meta
         name="viewport"
         content="width=device-width, initial-scale=1.0"
     >
 
     <title>LEXINX Protect</title>
+
+    <!-- Cloudflare Turnstile -->
+    <script
+        src="https://challenges.cloudflare.com/turnstile/v0/api.js"
+        async
+        defer>
+    </script>
 
     <style>
         * {
@@ -17,8 +26,7 @@
         body {
             margin: 0;
             min-height: 100vh;
-            background:
-                #080808;
+            background: #080808;
             color: #fff;
             font-family:
                 Arial,
@@ -39,34 +47,34 @@
         .center {
             min-height: 100vh;
             display: flex;
-            align-items: center;
             justify-content: center;
+            align-items: center;
             padding: 20px;
         }
 
         .card {
             width: 100%;
-            max-width: 420px;
+            max-width: 430px;
             background: #111;
             border: 1px solid #292929;
             border-radius: 18px;
             padding: 28px;
             box-shadow:
                 0 20px 70px
-                rgba(0,0,0,.5);
+                rgba(0, 0, 0, .55);
         }
 
         .logo {
             text-align: center;
-            font-size: 30px;
-            font-weight: 800;
-            margin-bottom: 6px;
+            font-size: 32px;
+            font-weight: 900;
+            letter-spacing: 2px;
         }
 
-        .sub {
+        .subtitle {
             text-align: center;
             color: #888;
-            margin-bottom: 25px;
+            margin: 7px 0 25px;
         }
 
         input,
@@ -76,8 +84,8 @@
             color: #fff;
             border: 1px solid #292929;
             border-radius: 10px;
-            padding: 12px;
             outline: none;
+            padding: 12px;
             margin-bottom: 12px;
         }
 
@@ -88,26 +96,26 @@
 
         button {
             width: 100%;
+            padding: 12px;
             border: 0;
             border-radius: 10px;
-            padding: 12px;
-            cursor: pointer;
             background: #fff;
             color: #000;
-            font-weight: 700;
+            font-weight: 800;
+            cursor: pointer;
             margin-top: 5px;
         }
 
         button.secondary {
-            background: #1b1b1b;
+            background: #191919;
             color: #fff;
             border: 1px solid #303030;
         }
 
         .switch {
             text-align: center;
-            color: #888;
             margin-top: 18px;
+            color: #777;
             cursor: pointer;
         }
 
@@ -116,16 +124,18 @@
             font-weight: 700;
         }
 
-        .error {
-            color: #ff6666;
-            margin: 10px 0;
+        .message {
+            min-height: 20px;
             text-align: center;
+            margin-top: 12px;
+            color: #ff6666;
         }
 
-        .success {
-            color: #65e89b;
-            margin: 10px 0;
-            text-align: center;
+        .turnstile {
+            margin: 15px 0;
+            display: flex;
+            justify-content: center;
+            min-height: 65px;
         }
 
         /* DASHBOARD */
@@ -138,26 +148,27 @@
 
         .topbar {
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            justify-content: space-between;
             gap: 15px;
             margin-bottom: 25px;
         }
 
         .brand {
             font-size: 25px;
-            font-weight: 800;
+            font-weight: 900;
         }
 
-        .user {
-            color: #aaa;
+        .account {
+            color: #888;
+            margin-top: 4px;
         }
 
         .logout {
             width: auto;
-            padding: 9px 15px;
             margin: 0;
-            background: #1a1a1a;
+            padding: 9px 16px;
+            background: #191919;
             color: #fff;
             border: 1px solid #333;
         }
@@ -183,8 +194,7 @@
         textarea {
             min-height: 350px;
             resize: vertical;
-            font-family:
-                monospace;
+            font-family: monospace;
         }
 
         .scripts {
@@ -197,55 +207,44 @@
             background: #080808;
             border: 1px solid #292929;
             border-radius: 10px;
-            padding: 12px;
+            padding: 13px;
         }
 
         .script-name {
-            font-weight: 700;
+            font-weight: 800;
             margin-bottom: 6px;
         }
 
         .script-id {
-            color: #777;
+            color: #666;
             font-size: 12px;
             word-break: break-all;
         }
 
-        .script-actions {
+        .actions {
             display: flex;
             gap: 7px;
             margin-top: 10px;
         }
 
-        .script-actions button {
+        .actions button {
             margin: 0;
             padding: 8px;
         }
 
         .delete {
-            background: #321414 !important;
-            color: #ff8585 !important;
+            background: #301414 !important;
+            color: #ff7777 !important;
             border: 1px solid #552020 !important;
         }
 
         .empty {
-            color: #777;
+            color: #666;
             text-align: center;
-            padding: 30px 0;
+            padding: 30px;
         }
 
-        .loader-output {
-            margin-top: 12px;
-            display: none;
-        }
-
-        .loader-output textarea {
-            min-height: 90px;
-        }
-
-        @media (
-            max-width: 800px
-        ) {
+        @media (max-width: 800px) {
             .grid {
                 grid-template-columns: 1fr;
             }
@@ -261,10 +260,13 @@
 <body>
 
 <!-- ==================================================
-     AUTH
+     AUTH PAGE
 ================================================== -->
 
-<div id="auth" class="center">
+<div
+    id="authPage"
+    class="center"
+>
 
     <div class="card">
 
@@ -272,9 +274,11 @@
             LEXINX
         </div>
 
-        <div class="sub">
+        <div class="subtitle">
             Protect Dashboard
         </div>
+
+        <!-- LOGIN -->
 
         <div id="loginBox">
 
@@ -292,6 +296,11 @@
                 autocomplete="current-password"
             >
 
+            <div
+                class="turnstile"
+                id="loginTurnstile"
+            ></div>
+
             <button
                 onclick="login()"
             >
@@ -300,7 +309,7 @@
 
             <div
                 id="loginMessage"
-                class="error"
+                class="message"
             ></div>
 
             <div
@@ -312,6 +321,8 @@
             </div>
 
         </div>
+
+        <!-- REGISTER -->
 
         <div
             id="registerBox"
@@ -339,6 +350,11 @@
                 autocomplete="new-password"
             >
 
+            <div
+                class="turnstile"
+                id="registerTurnstile"
+            ></div>
+
             <button
                 onclick="register()"
             >
@@ -347,7 +363,7 @@
 
             <div
                 id="registerMessage"
-                class="error"
+                class="message"
             ></div>
 
             <div
@@ -369,7 +385,7 @@
 ================================================== -->
 
 <div
-    id="dashboard"
+    id="dashboardPage"
     class="dashboard hidden"
 >
 
@@ -380,9 +396,9 @@
                 LEXINX Protect
             </div>
 
-            <div class="user">
-                Tài khoản:
-                <strong id="currentUser">
+            <div class="account">
+                Account:
+                <strong id="accountName">
                     -
                 </strong>
             </div>
@@ -399,58 +415,42 @@
 
     <div class="grid">
 
-        <!-- CREATE / EDIT -->
+        <!-- EDITOR -->
 
         <div class="panel">
 
-            <h2>
-                Script Editor
+            <h2 id="editorTitle">
+                Tạo Script
             </h2>
 
             <input
                 id="scriptName"
+                type="text"
                 placeholder="Tên script"
             >
 
             <textarea
                 id="scriptSource"
-                placeholder="Dán Lua source vào đây..."
+                placeholder="Nhập source của script..."
             ></textarea>
 
             <button
                 onclick="saveScript()"
             >
-                Tạo Script
+                Lưu Script
             </button>
 
             <button
                 class="secondary"
                 onclick="clearEditor()"
             >
-                Xóa Editor
+                Clear
             </button>
 
             <div
                 id="editorMessage"
-                class="success"
+                class="message"
             ></div>
-
-            <div
-                id="loaderOutput"
-                class="loader-output"
-            >
-                <textarea
-                    id="loaderText"
-                    readonly
-                ></textarea>
-
-                <button
-                    class="secondary"
-                    onclick="copyLoader()"
-                >
-                    Copy Loader
-                </button>
-            </div>
 
         </div>
 
@@ -478,7 +478,111 @@
 </div>
 
 <script>
+    /*
+     * Thay bằng Site Key thật của
+     * Cloudflare Turnstile.
+     *
+     * Site Key KHÔNG phải Secret Key.
+     */
+    const TURNSTILE_SITE_KEY =
+        "YOUR_TURNSTILE_SITE_KEY";
+
+    let loginWidget = null;
+    let registerWidget = null;
     let editingID = null;
+
+    /* =================================================
+       TURNSTILE
+    ================================================= */
+
+    function renderTurnstile() {
+
+        if (
+            !window.turnstile
+        ) {
+            setTimeout(
+                renderTurnstile,
+                300
+            );
+
+            return;
+        }
+
+        if (
+            TURNSTILE_SITE_KEY ===
+            "YOUR_TURNSTILE_SITE_KEY"
+        ) {
+            console.warn(
+                "Bạn chưa thay TURNSTILE_SITE_KEY"
+            );
+
+            return;
+        }
+
+        if (
+            !loginWidget
+        ) {
+            loginWidget =
+                turnstile.render(
+                    "#loginTurnstile",
+                    {
+                        sitekey:
+                            TURNSTILE_SITE_KEY,
+
+                        theme:
+                            "dark"
+                    }
+                );
+        }
+
+        if (
+            !registerWidget
+        ) {
+            registerWidget =
+                turnstile.render(
+                    "#registerTurnstile",
+                    {
+                        sitekey:
+                            TURNSTILE_SITE_KEY,
+
+                        theme:
+                            "dark"
+                    }
+                );
+        }
+    }
+
+    function getTurnstileToken(
+        widget
+    ) {
+        if (
+            widget === null
+        ) {
+            return "";
+        }
+
+        try {
+            return turnstile.getResponse(
+                widget
+            );
+        } catch {
+            return "";
+        }
+    }
+
+    function resetTurnstile(
+        widget
+    ) {
+        try {
+            if (
+                widget !== null
+            ) {
+                turnstile.reset(
+                    widget
+                );
+            }
+        } catch {}
+    }
 
     /* =================================================
        API
@@ -488,17 +592,22 @@
         url,
         options = {}
     ) {
+
         const response =
             await fetch(
                 url,
                 {
                     credentials:
                         "same-origin",
+
                     ...options,
+
                     headers: {
                         "Content-Type":
                             "application/json",
-                        ...(options.headers || {})
+
+                        ...(options.headers ||
+                            {})
                     }
                 }
             );
@@ -510,7 +619,9 @@
                 await response.json();
         } catch {}
 
-        if (!response.ok) {
+        if (
+            !response.ok
+        ) {
             throw new Error(
                 data.error ||
                 "Request failed"
@@ -525,6 +636,7 @@
     ================================================= */
 
     function showRegister() {
+
         document
             .getElementById(
                 "loginBox"
@@ -538,9 +650,15 @@
             )
             .classList
             .remove("hidden");
+
+        setTimeout(
+            renderTurnstile,
+            100
+        );
     }
 
     function showLogin() {
+
         document
             .getElementById(
                 "registerBox"
@@ -554,6 +672,11 @@
             )
             .classList
             .remove("hidden");
+
+        setTimeout(
+            renderTurnstile,
+            100
+        );
     }
 
     /* =================================================
@@ -590,7 +713,8 @@
                     "registerMessage"
                 );
 
-        message.textContent = "";
+        message.textContent =
+            "";
 
         if (
             password !==
@@ -598,6 +722,19 @@
         ) {
             message.textContent =
                 "Password không giống nhau";
+
+            return;
+        }
+
+        const token =
+            getTurnstileToken(
+                registerWidget
+            );
+
+        if (!token) {
+            message.textContent =
+                "Hãy hoàn thành Cloudflare verification";
+
             return;
         }
 
@@ -607,27 +744,34 @@
                 await api(
                     "/api/register",
                     {
-                        method: "POST",
+                        method:
+                            "POST",
 
                         body:
                             JSON.stringify({
                                 username,
-                                password
+                                password,
+                                turnstileToken:
+                                    token
                             })
                     }
                 );
 
-            message.textContent =
-                "Tạo tài khoản thành công";
-
-            enterDashboard(
-                data.username
-            );
+            /*
+             * Server tự cấp URL
+             * riêng cho tài khoản.
+             */
+            window.location.href =
+                data.url;
 
         } catch (error) {
 
             message.textContent =
                 error.message;
+
+            resetTurnstile(
+                registerWidget
+            );
         }
     }
 
@@ -658,7 +802,20 @@
                     "loginMessage"
                 );
 
-        message.textContent = "";
+        message.textContent =
+            "";
+
+        const token =
+            getTurnstileToken(
+                loginWidget
+            );
+
+        if (!token) {
+            message.textContent =
+                "Hãy hoàn thành Cloudflare verification";
+
+            return;
+        }
 
         try {
 
@@ -666,24 +823,34 @@
                 await api(
                     "/api/login",
                     {
-                        method: "POST",
+                        method:
+                            "POST",
 
                         body:
                             JSON.stringify({
                                 username,
-                                password
+                                password,
+                                turnstileToken:
+                                    token
                             })
                     }
                 );
 
-            enterDashboard(
-                data.username
-            );
+            /*
+             * Không tự ghép URL.
+             * Server trả URL đã xác thực.
+             */
+            window.location.href =
+                data.url;
 
         } catch (error) {
 
             message.textContent =
                 error.message;
+
+            resetTurnstile(
+                loginWidget
+            );
         }
     }
 
@@ -694,70 +861,72 @@
     async function logout() {
 
         try {
+
             await api(
                 "/api/logout",
                 {
-                    method: "POST"
+                    method:
+                        "POST"
                 }
             );
+
         } catch {}
 
-        document
-            .getElementById(
-                "dashboard"
-            )
-            .classList
-            .add("hidden");
-
-        document
-            .getElementById(
-                "auth"
-            )
-            .classList
-            .remove("hidden");
-
-        showLogin();
+        window.location.href =
+            "/";
     }
 
     /* =================================================
-       DASHBOARD
+       ACCOUNT
     ================================================= */
 
-    function enterDashboard(
-        username
-    ) {
+    async function loadAccount() {
 
-        document
-            .getElementById(
-                "auth"
-            )
-            .classList
-            .add("hidden");
+        try {
 
-        document
-            .getElementById(
-                "dashboard"
-            )
-            .classList
-            .remove("hidden");
+            const data =
+                await api(
+                    "/api/me"
+                );
 
-        document
-            .getElementById(
-                "currentUser"
-            )
-            .textContent =
-                username;
+            document
+                .getElementById(
+                    "accountName"
+                )
+                .textContent =
+                    data.username;
 
-        loadScripts();
+            document
+                .getElementById(
+                    "authPage"
+                )
+                .classList
+                .add("hidden");
+
+            document
+                .getElementById(
+                    "dashboardPage"
+                )
+                .classList
+                .remove("hidden");
+
+            loadScripts();
+
+        } catch {
+            /*
+             * Không có session:
+             * giữ trang login.
+             */
+        }
     }
 
     /* =================================================
-       LOAD SCRIPTS
+       SCRIPTS
     ================================================= */
 
     async function loadScripts() {
 
-        const container =
+        const box =
             document
                 .getElementById(
                     "scripts"
@@ -771,68 +940,66 @@
                 );
 
             if (
+                !data.scripts ||
                 !data.scripts.length
             ) {
-                container.innerHTML =
-                    '<div class="empty">Chưa có script</div>';
+                box.innerHTML =
+                    `<div class="empty">
+                        Chưa có script
+                    </div>`;
+
                 return;
             }
 
-            container.innerHTML =
+            box.innerHTML =
                 data.scripts
                     .map(
                         script => `
-                            <div class="script">
+                        <div class="script">
 
-                                <div class="script-name">
-                                    ${escapeHTML(
-                                        script.name
-                                    )}
-                                </div>
+                            <div class="script-name">
+                                ${escapeHTML(
+                                    script.name
+                                )}
+                            </div>
 
-                                <div class="script-id">
-                                    ID:
-                                    ${escapeHTML(
-                                        script.id
-                                    )}
-                                </div>
+                            <div class="script-id">
+                                ID:
+                                ${escapeHTML(
+                                    script.id
+                                )}
+                            </div>
 
-                                <div class="script-actions">
+                            <div class="actions">
 
-                                    <button
-                                        onclick="editScript('${script.id}')"
-                                    >
-                                        Edit
-                                    </button>
+                                <button
+                                    onclick="editScript('${script.id}')"
+                                >
+                                    Edit
+                                </button>
 
-                                    <button
-                                        onclick="copyText(${JSON.stringify(
-                                            script.loader
-                                        )})"
-                                    >
-                                        Copy Loader
-                                    </button>
-
-                                    <button
-                                        class="delete"
-                                        onclick="deleteScript('${script.id}')"
-                                    >
-                                        Delete
-                                    </button>
-
-                                </div>
+                                <button
+                                    class="delete"
+                                    onclick="deleteScript('${script.id}')"
+                                >
+                                    Delete
+                                </button>
 
                             </div>
+
+                        </div>
                         `
                     )
                     .join("");
 
         } catch (error) {
 
-            container.innerHTML =
-                `<div class="error">${escapeHTML(
-                    error.message
-                )}</div>`;
+            box.innerHTML =
+                `<div class="message">
+                    ${escapeHTML(
+                        error.message
+                    )}
+                </div>`;
         }
     }
 
@@ -863,82 +1030,54 @@
                     "editorMessage"
                 );
 
-        message.textContent = "";
+        message.textContent =
+            "";
 
         try {
 
-            let data;
+            if (
+                editingID
+            ) {
 
-            if (editingID) {
+                await api(
+                    "/api/edit/" +
+                    editingID,
+                    {
+                        method:
+                            "POST",
 
-                data =
-                    await api(
-                        "/api/edit/" +
-                        editingID,
-                        {
-                            method:
-                                "POST",
-
-                            body:
-                                JSON.stringify({
-                                    name,
-                                    source
-                                })
-                        }
-                    );
+                        body:
+                            JSON.stringify({
+                                name,
+                                source
+                            })
+                    }
+                );
 
                 message.textContent =
-                    "Đã cập nhật script";
+                    "Đã cập nhật.";
 
             } else {
 
-                data =
-                    await api(
-                        "/api/create",
-                        {
-                            method:
-                                "POST",
+                await api(
+                    "/api/create",
+                    {
+                        method:
+                            "POST",
 
-                            body:
-                                JSON.stringify({
-                                    name,
-                                    source
-                                })
-                        }
-                    );
+                        body:
+                            JSON.stringify({
+                                name,
+                                source
+                            })
+                    }
+                );
 
                 message.textContent =
-                    "Đã tạo script";
-
-                document
-                    .getElementById(
-                        "loaderText"
-                    )
-                    .value =
-                    data.loader;
-
-                document
-                    .getElementById(
-                        "loaderOutput"
-                    )
-                    .style.display =
-                        "block";
+                    "Đã tạo script.";
             }
 
-            editingID = null;
-
-            document
-                .getElementById(
-                    "scriptName"
-                )
-                .value = "";
-
-            document
-                .getElementById(
-                    "scriptSource"
-                )
-                .value = "";
-
+            clearEditor();
             loadScripts();
 
         } catch (error) {
@@ -967,24 +1106,24 @@
 
             document
                 .getElementById(
+                    "editorTitle"
+                )
+                .textContent =
+                    "Edit Script";
+
+            document
+                .getElementById(
                     "scriptName"
                 )
                 .value =
-                data.script.name;
+                    data.script.name;
 
             document
                 .getElementById(
                     "scriptSource"
                 )
                 .value =
-                data.script.source;
-
-            document
-                .querySelector(
-                    ".panel h2"
-                )
-                .textContent =
-                "Edit Script";
+                    data.script.source;
 
         } catch (error) {
 
@@ -1004,7 +1143,7 @@
 
         if (
             !confirm(
-                "Xóa script này?"
+                "Bạn có chắc muốn xóa script này?"
             )
         ) {
             return;
@@ -1037,71 +1176,29 @@
 
     function clearEditor() {
 
-        editingID = null;
+        editingID =
+            null;
+
+        document
+            .getElementById(
+                "editorTitle"
+            )
+            .textContent =
+                "Tạo Script";
 
         document
             .getElementById(
                 "scriptName"
             )
-            .value = "";
+            .value =
+                "";
 
         document
             .getElementById(
                 "scriptSource"
             )
-            .value = "";
-
-        document
-            .getElementById(
-                "editorMessage"
-            )
-            .textContent = "";
-
-        document
-            .getElementById(
-                "loaderOutput"
-            )
-            .style.display =
-                "none";
-    }
-
-    /* =================================================
-       COPY
-    ================================================= */
-
-    async function copyText(
-        text
-    ) {
-
-        try {
-
-            await navigator
-                .clipboard
-                .writeText(text);
-
-            alert(
-                "Đã copy"
-            );
-
-        } catch {
-
-            prompt(
-                "Copy:",
-                text
-            );
-        }
-    }
-
-    async function copyLoader() {
-
-        const text =
-            document
-                .getElementById(
-                    "loaderText"
-                )
-                .value;
-
-        copyText(text);
+            .value =
+                "";
     }
 
     /* =================================================
@@ -1135,28 +1232,11 @@
     }
 
     /* =================================================
-       CHECK SESSION
+       START
     ================================================= */
 
-    async function checkLogin() {
-
-        try {
-
-            const data =
-                await api(
-                    "/api/me"
-                );
-
-            enterDashboard(
-                data.username
-            );
-
-        } catch {
-            // Chưa đăng nhập
-        }
-    }
-
-    checkLogin();
+    renderTurnstile();
+    loadAccount();
 </script>
 
 </body>
