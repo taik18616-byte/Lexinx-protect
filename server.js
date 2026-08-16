@@ -11,7 +11,7 @@ const DOMAIN =
     "https://Lexinx-protect.onrender.com";
 
 const DATA_DIR = path.join(__dirname, "data");
-const DB_FILE = path.join(DATA_DIR, "database.json");
+const ACCOUNTS_FILE = path.join(DATA_DIR, "accounts.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
@@ -19,12 +19,10 @@ const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 
-if (!fs.existsSync(DB_FILE)) {
+if (!fs.existsSync(ACCOUNTS_FILE)) {
     fs.writeFileSync(
-        DB_FILE,
-        JSON.stringify({
-            users: {}
-        }, null, 2),
+        ACCOUNTS_FILE,
+        "{}",
         "utf8"
     );
 }
@@ -32,7 +30,12 @@ if (!fs.existsSync(DB_FILE)) {
 app.disable("x-powered-by");
 
 app.use(express.json({
-    limit: "20mb"
+    limit: "15mb"
+}));
+
+app.use(express.urlencoded({
+    extended: true,
+    limit: "15mb"
 }));
 
 app.use(express.static(PUBLIC_DIR));
@@ -41,29 +44,24 @@ app.use(express.static(PUBLIC_DIR));
    DATABASE
 ===================================================== */
 
-function readDB() {
+function readAccounts() {
     try {
-        const data = JSON.parse(
-            fs.readFileSync(DB_FILE, "utf8")
+        return JSON.parse(
+            fs.readFileSync(
+                ACCOUNTS_FILE,
+                "utf8"
+            )
         );
-
-        if (!data.users) {
-            data.users = {};
-        }
-
-        return data;
     } catch {
-        return {
-            users: {}
-        };
+        return {};
     }
 }
 
-function writeDB(db) {
+function writeAccounts(accounts) {
     fs.writeFileSync(
-        DB_FILE,
+        ACCOUNTS_FILE,
         JSON.stringify(
-            db,
+            accounts,
             null,
             2
         ),
@@ -72,7 +70,7 @@ function writeDB(db) {
 }
 
 /* =====================================================
-   SECURITY
+   RANDOM
 ===================================================== */
 
 function randomHex(bytes = 32) {
@@ -81,15 +79,249 @@ function randomHex(bytes = 32) {
         .toString("hex");
 }
 
-function hashPassword(password, salt) {
-    return crypto
-        .scryptSync(
+function createID() {
+    return randomHex(12);
+}
+
+/* =====================================================
+   PASSWORD HASH
+===================================================== */
+
+function hashPassword(password) {
+    const salt =
+        crypto.randomBytes(16);
+
+    const hash =
+        crypto.scryptSync(
             password,
             salt,
             64
-        )
-        .toString("hex");
+        );
+
+    return {
+        salt: salt.toString("hex"),
+        hash: hash.toString("hex")
+    };
 }
+
+function verifyPassword(
+    password,
+    stored
+) {
+    try {
+        const salt =
+            Buffer.from(
+                stored.salt,
+                "hex"
+            );
+
+        const expected =
+            Buffer.from(
+                stored.hash,
+                "hex"
+            );
+
+        const actual =
+            crypto.scryptSync(
+                password,
+                salt,
+                64
+            );
+
+        return (
+            actual.length ===
+                expected.length &&
+            crypto.timingSafeEqual(
+                actual,
+                expected
+            )
+        );
+    } catch {
+        return false;
+    }
+}
+
+/* =====================================================
+   COOKIE
+===================================================== */
+
+function parseCookies(req) {
+    const cookies = {};
+
+    const header =
+        req.headers.cookie;
+
+    if (!header) {
+        return cookies;
+    }
+
+    for (
+        const part of header.split(";")
+    ) {
+        const index =
+            part.indexOf("=");
+
+        if (index === -1) {
+            continue;
+        }
+
+        const key =
+            part
+                .slice(0, index)
+                .trim();
+
+        const value =
+            part
+                .slice(index + 1)
+                .trim();
+
+        cookies[key] =
+            decodeURIComponent(value);
+    }
+
+    return cookies;
+}
+
+function setSessionCookie(
+    res,
+    sessionID
+) {
+    res.setHeader(
+        "Set-Cookie",
+        [
+            `lexinx_session=${encodeURIComponent(sessionID)}`,
+            "Path=/",
+            "HttpOnly",
+            "SameSite=Lax",
+            "Max-Age=604800"
+        ].join("; ")
+    );
+}
+
+function clearSessionCookie(res) {
+    res.setHeader(
+        "Set-Cookie",
+        [
+            "lexinx_session=",
+            "Path=/",
+            "HttpOnly",
+            "SameSite=Lax",
+            "Max-Age=0"
+        ].join("; ")
+    );
+}
+
+/* =====================================================
+   SESSIONS
+===================================================== */
+
+const sessions = new Map();
+
+function createSession(username) {
+    const id =
+        randomHex(48);
+
+    sessions.set(id, {
+        username,
+        createdAt: Date.now(),
+        expiresAt:
+            Date.now() +
+            SESSION_TTL
+    });
+
+    return id;
+}
+
+function getCurrentUser(req) {
+    const cookies =
+        parseCookies(req);
+
+    const sessionID =
+        cookies.lexinx_session;
+
+    if (!sessionID) {
+        return null;
+    }
+
+    const session =
+        sessions.get(sessionID);
+
+    if (!session) {
+        return null;
+    }
+
+    if (
+        Date.now() >
+        session.expiresAt
+    ) {
+        sessions.delete(
+            sessionID
+        );
+
+        return null;
+    }
+
+    return {
+        username:
+            session.username,
+
+        sessionID
+    };
+}
+
+/* =====================================================
+   AUTH MIDDLEWARE
+===================================================== */
+
+function requireAuth(
+    req,
+    res,
+    next
+) {
+    const user =
+        getCurrentUser(req);
+
+    if (!user) {
+        return res
+            .status(401)
+            .json({
+                ok: false,
+                error:
+                    "Not logged in"
+            });
+    }
+
+    req.user =
+        user;
+
+    next();
+}
+
+/* =====================================================
+   USERNAME VALIDATION
+===================================================== */
+
+function validUsername(username) {
+    return (
+        typeof username ===
+            "string" &&
+        /^[a-zA-Z0-9_]{3,24}$/
+            .test(username)
+    );
+}
+
+function validPassword(password) {
+    return (
+        typeof password ===
+            "string" &&
+        password.length >= 6 &&
+        password.length <= 128
+    );
+}
+
+/* =====================================================
+   SCRIPT HELPERS
+===================================================== */
 
 function cleanName(name) {
     return String(
@@ -102,122 +334,11 @@ function cleanName(name) {
         .slice(0, 80);
 }
 
-function validUsername(username) {
-    return /^[a-zA-Z0-9_]{3,32}$/
-        .test(username);
-}
-
-function validPassword(password) {
-    return (
-        typeof password === "string" &&
-        password.length >= 6 &&
-        password.length <= 128
-    );
-}
-
-/* =====================================================
-   SESSION
-===================================================== */
-
-const sessions = new Map();
-
-function createSession(userId) {
-
-    const token =
-        randomHex(48);
-
-    sessions.set(
-        token,
-        {
-            userId,
-            createdAt: Date.now(),
-            expiresAt:
-                Date.now() +
-                SESSION_TTL
-        }
-    );
-
-    return token;
-}
-
-function getSession(req) {
-
-    const header =
-        req.headers.authorization;
-
-    if (
-        typeof header !== "string"
-    ) {
-        return null;
-    }
-
-    if (
-        !header.startsWith(
-            "Bearer "
-        )
-    ) {
-        return null;
-    }
-
-    const token =
-        header.slice(7).trim();
-
-    if (!token) {
-        return null;
-    }
-
-    const session =
-        sessions.get(token);
-
-    if (!session) {
-        return null;
-    }
-
-    if (
-        Date.now() >
-        session.expiresAt
-    ) {
-        sessions.delete(token);
-        return null;
-    }
-
-    return {
-        token,
-        ...session
-    };
-}
-
-function requireAuth(
-    req,
-    res,
-    next
-) {
-
-    const session =
-        getSession(req);
-
-    if (!session) {
-        return res.status(401).json({
-            ok: false,
-            error: "Not logged in"
-        });
-    }
-
-    req.userId =
-        session.userId;
-
-    req.session =
-        session;
-
-    next();
-}
-
 /* =====================================================
    HOME
 ===================================================== */
 
 app.get("/", (req, res) => {
-
     res.sendFile(
         path.join(
             PUBLIC_DIR,
@@ -231,99 +352,95 @@ app.get("/", (req, res) => {
 ===================================================== */
 
 app.post(
-    "/api/auth/register",
+    "/api/register",
     (req, res) => {
-
-        const username =
-            String(
-                req.body?.username ||
-                ""
-            ).trim();
-
-        const password =
-            req.body?.password;
+        const {
+            username,
+            password
+        } = req.body || {};
 
         if (
-            !validUsername(username)
+            !validUsername(
+                username
+            )
         ) {
-            return res.status(400).json({
-                ok: false,
-                error:
-                    "Username must contain 3-32 letters, numbers or _"
-            });
+            return res
+                .status(400)
+                .json({
+                    ok: false,
+                    error:
+                        "Username must contain 3-24 letters, numbers or _"
+                });
         }
 
         if (
-            !validPassword(password)
+            !validPassword(
+                password
+            )
         ) {
-            return res.status(400).json({
-                ok: false,
-                error:
-                    "Password must contain 6-128 characters"
-            });
+            return res
+                .status(400)
+                .json({
+                    ok: false,
+                    error:
+                        "Password must contain 6-128 characters"
+                });
         }
 
-        const db =
-            readDB();
-
-        const key =
-            username.toLowerCase();
+        const accounts =
+            readAccounts();
 
         if (
-            db.users[key]
+            accounts[username]
         ) {
-            return res.status(409).json({
-                ok: false,
-                error:
-                    "Username already exists"
-            });
+            return res
+                .status(409)
+                .json({
+                    ok: false,
+                    error:
+                        "Username already exists"
+                });
         }
 
-        const userId =
-            randomHex(16);
-
-        const salt =
-            randomHex(16);
-
-        const passwordHash =
+        const passwordData =
             hashPassword(
-                password,
-                salt
+                password
             );
 
-        db.users[key] = {
-
-            id:
-                userId,
-
+        accounts[username] = {
             username,
 
-            passwordHash,
+            password: {
+                salt:
+                    passwordData.salt,
 
-            salt,
+                hash:
+                    passwordData.hash
+            },
 
             createdAt:
                 Date.now(),
 
             scripts: {}
-
         };
 
-        writeDB(db);
+        writeAccounts(
+            accounts
+        );
 
-        const session =
+        const sessionID =
             createSession(
-                userId
+                username
             );
 
+        setSessionCookie(
+            res,
+            sessionID
+        );
+
         res.json({
-
             ok: true,
-
-            username,
-
-            session
-
+            username
         });
     }
 );
@@ -333,80 +450,72 @@ app.post(
 ===================================================== */
 
 app.post(
-    "/api/auth/login",
+    "/api/login",
     (req, res) => {
+        const {
+            username,
+            password
+        } = req.body || {};
 
-        const username =
-            String(
-                req.body?.username ||
-                ""
-            ).trim();
+        if (
+            typeof username !==
+                "string" ||
+            typeof password !==
+                "string"
+        ) {
+            return res
+                .status(400)
+                .json({
+                    ok: false,
+                    error:
+                        "Invalid login"
+                });
+        }
 
-        const password =
-            req.body?.password;
+        const accounts =
+            readAccounts();
 
-        const db =
-            readDB();
+        const account =
+            accounts[username];
 
-        const user =
-            db.users[
-                username.toLowerCase()
-            ];
-
-        if (!user) {
-            return res.status(401).json({
-                ok: false,
-                error:
-                    "Invalid username or password"
-            });
+        if (!account) {
+            return res
+                .status(401)
+                .json({
+                    ok: false,
+                    error:
+                        "Invalid username or password"
+                });
         }
 
         if (
-            !validPassword(password)
-        ) {
-            return res.status(401).json({
-                ok: false,
-                error:
-                    "Invalid username or password"
-            });
-        }
-
-        const hash =
-            hashPassword(
+            !verifyPassword(
                 password,
-                user.salt
-            );
-
-        const valid =
-            crypto.timingSafeEqual(
-                Buffer.from(hash),
-                Buffer.from(
-                    user.passwordHash
-                )
-            );
-
-        if (!valid) {
-            return res.status(401).json({
-                ok: false,
-                error:
-                    "Invalid username or password"
-            });
+                account.password
+            )
+        ) {
+            return res
+                .status(401)
+                .json({
+                    ok: false,
+                    error:
+                        "Invalid username or password"
+                });
         }
 
-        const session =
+        const sessionID =
             createSession(
-                user.id
+                username
             );
+
+        setSessionCookie(
+            res,
+            sessionID
+        );
 
         res.json({
-
             ok: true,
-
-            username:
-                user.username,
-
-            session
-
+            username
         });
     }
 );
@@ -416,15 +525,23 @@ app.post(
 ===================================================== */
 
 app.post(
-    "/api/auth/logout",
-    requireAuth,
+    "/api/logout",
     (req, res) => {
+        const cookies =
+            parseCookies(req);
 
-        if (req.session?.token) {
+        const sessionID =
+            cookies.lexinx_session;
+
+        if (sessionID) {
             sessions.delete(
-                req.session.token
+                sessionID
             );
         }
+
+        clearSessionCookie(
+            res
+        );
 
         res.json({
             ok: true
@@ -437,45 +554,14 @@ app.post(
 ===================================================== */
 
 app.get(
-    "/api/auth/me",
+    "/api/me",
     requireAuth,
     (req, res) => {
-
-        const db =
-            readDB();
-
-        const user =
-            Object.values(
-                db.users
-            ).find(
-                u =>
-                    u.id ===
-                    req.userId
-            );
-
-        if (!user) {
-            return res.status(404).json({
-                ok: false,
-                error:
-                    "User not found"
-            });
-        }
-
         res.json({
-
             ok: true,
 
-            user: {
-                id:
-                    user.id,
-
-                username:
-                    user.username,
-
-                createdAt:
-                    user.createdAt
-            }
-
+            username:
+                req.user.username
         });
     }
 );
@@ -491,54 +577,47 @@ app.post(
 
         const source =
             typeof req.body?.source ===
-            "string"
+                "string"
                 ? req.body.source
                 : "";
 
         if (!source.trim()) {
-            return res.status(400).json({
-                ok: false,
-                error:
-                    "Script is empty"
-            });
+            return res
+                .status(400)
+                .json({
+                    ok: false,
+                    error:
+                        "Script is empty"
+                });
         }
+
+        const accounts =
+            readAccounts();
+
+        const account =
+            accounts[
+                req.user.username
+            ];
+
+        if (!account) {
+            return res
+                .status(401)
+                .json({
+                    ok: false,
+                    error:
+                        "Account not found"
+                });
+        }
+
+        const id =
+            createID();
 
         const name =
             cleanName(
                 req.body?.name
             );
 
-        const db =
-            readDB();
-
-        const user =
-            Object.values(
-                db.users
-            ).find(
-                u =>
-                    u.id ===
-                    req.userId
-            );
-
-        if (!user) {
-            return res.status(404).json({
-                ok: false,
-                error:
-                    "User not found"
-            });
-        }
-
-        const id =
-            randomHex(12);
-
-        /*
-         * QUAN TRỌNG:
-         * Script nằm trong user.scripts,
-         * không nằm ở database chung.
-         */
-
-        user.scripts[id] = {
-
+        account.scripts[id] = {
             id,
 
             name,
@@ -550,13 +629,13 @@ app.post(
 
             updatedAt:
                 Date.now()
-
         };
 
-        writeDB(db);
+        writeAccounts(
+            accounts
+        );
 
         res.json({
-
             ok: true,
 
             id,
@@ -570,13 +649,12 @@ app.post(
                 `loadstring(game:HttpGet(${JSON.stringify(
                     `${DOMAIN}/api/loader/${id}`
                 )}))()`
-
         });
     }
 );
 
 /* =====================================================
-   LIST USER SCRIPTS
+   LIST ONLY CURRENT USER SCRIPTS
 ===================================================== */
 
 app.get(
@@ -584,34 +662,31 @@ app.get(
     requireAuth,
     (req, res) => {
 
-        const db =
-            readDB();
+        const accounts =
+            readAccounts();
 
-        const user =
-            Object.values(
-                db.users
-            ).find(
-                u =>
-                    u.id ===
-                    req.userId
-            );
+        const account =
+            accounts[
+                req.user.username
+            ];
 
-        if (!user) {
-            return res.status(404).json({
-                ok: false,
-                error:
-                    "User not found"
-            });
+        if (!account) {
+            return res
+                .status(401)
+                .json({
+                    ok: false,
+                    error:
+                        "Account not found"
+                });
         }
 
         const scripts =
             Object.values(
-                user.scripts || {}
+                account.scripts
             )
                 .reverse()
                 .map(
                     script => ({
-
                         id:
                             script.id,
 
@@ -628,68 +703,60 @@ app.get(
                             `loadstring(game:HttpGet(${JSON.stringify(
                                 `${DOMAIN}/api/loader/${script.id}`
                             )}))()`
-
                     })
                 );
 
         res.json({
-
             ok: true,
-
             scripts
-
         });
     }
 );
 
 /* =====================================================
-   GET OWN SCRIPT
+   GET SCRIPT FOR EDITOR
 ===================================================== */
 
 app.get(
-    "/api/scripts/:id",
+    "/api/script/:id",
     requireAuth,
     (req, res) => {
 
-        const db =
-            readDB();
+        const accounts =
+            readAccounts();
 
-        const user =
-            Object.values(
-                db.users
-            ).find(
-                u =>
-                    u.id ===
-                    req.userId
-            );
+        const account =
+            accounts[
+                req.user.username
+            ];
 
-        if (!user) {
-            return res.status(404).json({
-                ok: false,
-                error:
-                    "User not found"
-            });
+        if (!account) {
+            return res
+                .status(401)
+                .json({
+                    ok: false
+                });
         }
 
         const script =
-            user.scripts[
+            account.scripts[
                 req.params.id
             ];
 
         if (!script) {
-            return res.status(404).json({
-                ok: false,
-                error:
-                    "Script not found"
-            });
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "Script not found"
+                });
         }
 
         res.json({
-
             ok: true,
 
             script: {
-
                 id:
                     script.id,
 
@@ -704,68 +771,65 @@ app.get(
 
                 updatedAt:
                     script.updatedAt
-
             }
-
         });
     }
 );
 
 /* =====================================================
-   EDIT OWN SCRIPT
+   EDIT SCRIPT
 ===================================================== */
 
-app.put(
-    "/api/scripts/:id",
+app.post(
+    "/api/edit/:id",
     requireAuth,
     (req, res) => {
 
-        const db =
-            readDB();
+        const accounts =
+            readAccounts();
 
-        const user =
-            Object.values(
-                db.users
-            ).find(
-                u =>
-                    u.id ===
-                    req.userId
-            );
+        const account =
+            accounts[
+                req.user.username
+            ];
 
-        if (!user) {
-            return res.status(404).json({
-                ok: false,
-                error:
-                    "User not found"
-            });
+        if (!account) {
+            return res
+                .status(401)
+                .json({
+                    ok: false
+                });
         }
 
         const script =
-            user.scripts[
+            account.scripts[
                 req.params.id
             ];
 
         if (!script) {
-            return res.status(404).json({
-                ok: false,
-                error:
-                    "Script not found"
-            });
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "Script not found"
+                });
         }
 
         if (
             typeof req.body?.source ===
             "string"
         ) {
-
             if (
                 !req.body.source.trim()
             ) {
-                return res.status(400).json({
-                    ok: false,
-                    error:
-                        "Script is empty"
-                });
+                return res
+                    .status(400)
+                    .json({
+                        ok: false,
+                        error:
+                            "Script is empty"
+                    });
             }
 
             script.source =
@@ -777,7 +841,6 @@ app.put(
                 "string" &&
             req.body.name.trim()
         ) {
-
             script.name =
                 cleanName(
                     req.body.name
@@ -787,68 +850,67 @@ app.put(
         script.updatedAt =
             Date.now();
 
-        writeDB(db);
+        writeAccounts(
+            accounts
+        );
 
         res.json({
-
             ok: true,
-
             id:
                 script.id,
 
             name:
                 script.name
-
         });
     }
 );
 
 /* =====================================================
-   DELETE OWN SCRIPT
+   DELETE SCRIPT
 ===================================================== */
 
 app.delete(
-    "/api/scripts/:id",
+    "/api/delete/:id",
     requireAuth,
     (req, res) => {
 
-        const db =
-            readDB();
+        const accounts =
+            readAccounts();
 
-        const user =
-            Object.values(
-                db.users
-            ).find(
-                u =>
-                    u.id ===
-                    req.userId
-            );
+        const account =
+            accounts[
+                req.user.username
+            ];
 
-        if (!user) {
-            return res.status(404).json({
-                ok: false,
-                error:
-                    "User not found"
-            });
+        if (!account) {
+            return res
+                .status(401)
+                .json({
+                    ok: false
+                });
         }
 
         if (
-            !user.scripts[
+            !account.scripts[
                 req.params.id
             ]
         ) {
-            return res.status(404).json({
-                ok: false,
-                error:
-                    "Script not found"
-            });
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "Script not found"
+                });
         }
 
-        delete user.scripts[
+        delete account.scripts[
             req.params.id
         ];
 
-        writeDB(db);
+        writeAccounts(
+            accounts
+        );
 
         res.json({
             ok: true
@@ -857,50 +919,50 @@ app.delete(
 );
 
 /* =====================================================
-   LOADER
+   LOADER ENDPOINT
 =====================================================
 
-   Chỉ xác định script theo ID.
-   Việc cấp quyền quản trị web vẫn dựa
-   trên session tài khoản.
+Chỉ tìm script trong tài khoản sở hữu ID đó.
+
+Không có account -> không có script.
 ===================================================== */
 
 app.get(
     "/api/loader/:id",
     (req, res) => {
 
-        const db =
-            readDB();
+        const accounts =
+            readAccounts();
 
-        let found = null;
+        let owner = null;
+        let script = null;
 
         for (
-            const user of
-            Object.values(
-                db.users
-            )
+            const username
+            of Object.keys(accounts)
         ) {
+            const account =
+                accounts[username];
 
             if (
-                user.scripts &&
-                user.scripts[
+                account.scripts &&
+                account.scripts[
                     req.params.id
                 ]
             ) {
+                owner =
+                    username;
 
-                found = {
-                    user,
-                    script:
-                        user.scripts[
-                            req.params.id
-                        ]
-                };
+                script =
+                    account.scripts[
+                        req.params.id
+                    ];
 
                 break;
             }
         }
 
-        if (!found) {
+        if (!script) {
             return res
                 .status(404)
                 .type("text/plain")
@@ -910,9 +972,49 @@ app.get(
         }
 
         /*
-         * Không trả source trực tiếp ở đây.
-         * Endpoint loader chỉ xác định script tồn tại.
+         * Endpoint này chỉ minh họa loader.
+         * Source không được đưa vào response.
          */
+
+        const lua = `
+local HttpService = game:GetService("HttpService")
+
+local URL = ${JSON.stringify(
+            `${DOMAIN}/api/runtime/${script.id}`
+        )}
+
+local response = request({
+    Url = URL,
+    Method = "POST",
+    Headers = {
+        ["Content-Type"] =
+            "application/json"
+    },
+    Body = "{}"
+})
+
+if response.StatusCode ~= 200 then
+    error("LEXINX BLOCK")
+end
+
+local data =
+    HttpService:JSONDecode(
+        response.Body
+    )
+
+if not data.ok then
+    error("LEXINX BLOCK")
+end
+
+local fn, err =
+    loadstring(data.code)
+
+if not fn then
+    error(err)
+end
+
+fn()
+`;
 
         res
             .type("text/plain")
@@ -920,47 +1022,75 @@ app.get(
                 "Cache-Control",
                 "no-store"
             )
-            .send(
-                "LEXINX SCRIPT READY"
-            );
+            .send(lua);
     }
 );
 
-/* =====================================================
-   UNKNOWN API
-===================================================== */
+/*
+========================================================
+RUNTIME SOURCE
+========================================================
 
-app.use(
-    "/api",
+Lưu ý:
+Loader runtime hiện không có account cookie,
+nên endpoint này chỉ là placeholder.
+
+Nếu muốn bảo vệ runtime thật sự,
+nên thêm license/key/session riêng
+cho từng loader.
+========================================================
+*/
+
+app.post(
+    "/api/runtime/:id",
     (req, res) => {
 
-        res
-            .status(404)
-            .type("text/plain")
-            .send(
-                "LEXINX BLOCK"
-            );
+        const accounts =
+            readAccounts();
+
+        let script = null;
+
+        for (
+            const username
+            of Object.keys(accounts)
+        ) {
+            const account =
+                accounts[username];
+
+            if (
+                account.scripts &&
+                account.scripts[
+                    req.params.id
+                ]
+            ) {
+                script =
+                    account.scripts[
+                        req.params.id
+                    ];
+
+                break;
+            }
+        }
+
+        if (!script) {
+            return res
+                .status(404)
+                .json({
+                    ok: false
+                });
+        }
+
+        res.json({
+            ok: true,
+
+            code:
+                script.source
+        });
     }
 );
 
 /* =====================================================
-   404
-===================================================== */
-
-app.use(
-    (req, res) => {
-
-        res
-            .status(404)
-            .type("text/plain")
-            .send(
-                "LEXINX BLOCK"
-            );
-    }
-);
-
-/* =====================================================
-   SESSION CLEANUP
+   CLEANUP
 ===================================================== */
 
 setInterval(
@@ -971,18 +1101,18 @@ setInterval(
 
         for (
             const [
-                token,
+                id,
                 session
-            ] of sessions
+            ]
+            of sessions
         ) {
 
             if (
                 now >
                 session.expiresAt
             ) {
-
                 sessions.delete(
-                    token
+                    id
                 );
             }
         }
@@ -1018,7 +1148,8 @@ app.listen(
         );
 
         console.log(
-            "USER ISOLATION: ENABLED"
+            "ACCOUNT STORAGE:",
+            ACCOUNTS_FILE
         );
 
         console.log(
