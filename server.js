@@ -927,104 +927,108 @@ Chỉ tìm script trong tài khoản sở hữu ID đó.
 Không có account -> không có script.
 ===================================================== */
 
-app.get(
-    "/api/loader/:id",
-    (req, res) => {
+app.get("/api/loader/:id", (req, res) => {
+    const accept = String(req.headers.accept || "").toLowerCase();
+    const fetchMode = String(req.headers["sec-fetch-mode"] || "").toLowerCase();
+    const fetchDest = String(req.headers["sec-fetch-dest"] || "").toLowerCase();
 
-        const accounts =
-            readAccounts();
+    // Chặn mở trực tiếp bằng trình duyệt
+    const isBrowserNavigation =
+        accept.includes("text/html") ||
+        fetchMode === "navigate" ||
+        fetchDest === "document";
 
-        let owner = null;
-        let script = null;
+    if (isBrowserNavigation) {
+        return res
+            .status(403)
+            .type("text/plain")
+            .send("LEXINX BLOCK");
+    }
 
-        for (
-            const username
-            of Object.keys(accounts)
+    const accounts = readAccounts();
+
+    let script = null;
+
+    // Tìm ID trong dữ liệu các tài khoản
+    for (const username of Object.keys(accounts)) {
+        const account = accounts[username];
+
+        if (
+            account &&
+            account.scripts &&
+            account.scripts[req.params.id]
         ) {
-            const account =
-                accounts[username];
+            script =
+                account.scripts[req.params.id];
 
-            if (
-                account.scripts &&
-                account.scripts[
-                    req.params.id
-                ]
-            ) {
-                owner =
-                    username;
-
-                script =
-                    account.scripts[
-                        req.params.id
-                    ];
-
-                break;
-            }
+            break;
         }
+    }
 
-        if (!script) {
-            return res
-                .status(404)
-                .type("text/plain")
-                .send(
-                    "LEXINX BLOCK"
-                );
-        }
+    if (!script) {
+        return res
+            .status(404)
+            .type("text/plain")
+            .send("LEXINX BLOCK");
+    }
 
-        /*
-         * Endpoint này chỉ minh họa loader.
-         * Source không được đưa vào response.
-         */
-
-        const lua = `
+    const lua = `
 local HttpService = game:GetService("HttpService")
 
 local URL = ${JSON.stringify(
-            `${DOMAIN}/api/runtime/${script.id}`
-        )}
+        `${DOMAIN}/api/runtime/${script.id}`
+    )}
 
 local response = request({
     Url = URL,
     Method = "POST",
     Headers = {
-        ["Content-Type"] =
-            "application/json"
+        ["Content-Type"] = "application/json"
     },
     Body = "{}"
 })
 
+if not response then
+    error("LEXINX BLOCK")
+end
+
 if response.StatusCode ~= 200 then
-    error("LEXINX BLOCK")
-end
-
-local data =
-    HttpService:JSONDecode(
-        response.Body
+    error(
+        "LEXINX BLOCK HTTP " ..
+        tostring(response.StatusCode)
     )
+end
 
-if not data.ok then
+local data = HttpService:JSONDecode(response.Body)
+
+if type(data) ~= "table" or data.ok ~= true then
     error("LEXINX BLOCK")
 end
 
-local fn, err =
-    loadstring(data.code)
+if type(data.code) ~= "string" then
+    error("LEXINX BLOCK")
+end
+
+local fn, err = loadstring(data.code)
 
 if not fn then
     error(err)
 end
 
-fn()
+local ok, runtimeError = pcall(fn)
+
+if not ok then
+    error(runtimeError)
+end
 `;
 
-        res
-            .type("text/plain")
-            .set(
-                "Cache-Control",
-                "no-store"
-            )
-            .send(lua);
-    }
-);
+    return res
+        .status(200)
+        .type("text/plain")
+        .set("Cache-Control", "no-store")
+        .set("X-Content-Type-Options", "nosniff")
+        .send(lua);
+});
 
 /*
 ========================================================
