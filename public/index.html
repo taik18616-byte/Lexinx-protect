@@ -1,257 +1,378 @@
 <!DOCTYPE html>
 <html lang="vi">
 <head>
-    <meta charset="UTF-8">
+<meta charset="UTF-8">
 
-    <meta
-        name="viewport"
-        content="width=device-width, initial-scale=1.0"
-    >
+<meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+>
 
-    <title>LEXINX Protect</title>
+<title>LEXINX Protect</title>
 
-    <style>
-        * {
-            box-sizing: border-box;
-        }
+<style>
+* {
+    box-sizing: border-box;
+}
 
-        body {
-            margin: 0;
-            min-height: 100vh;
-            background: #080808;
-            color: #fff;
-            font-family:
-                Arial,
-                sans-serif;
-        }
+body {
+    margin: 0;
+    min-height: 100vh;
+    background: #070707;
+    color: #fff;
+    font-family: Arial, Helvetica, sans-serif;
+}
 
-        button,
-        input,
-        textarea {
-            font: inherit;
-        }
+button,
+input,
+textarea {
+    font: inherit;
+}
 
-        button {
-            cursor: pointer;
-        }
+button {
+    cursor: pointer;
+}
 
-        .hidden {
-            display: none !important;
-        }
+.hidden {
+    display: none !important;
+}
 
-        .center {
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }
+/* =========================
+   AUTH
+========================= */
 
-        .card {
-            width: 100%;
-            max-width: 420px;
-            background: #111;
-            border: 1px solid #292929;
-            border-radius: 18px;
-            padding: 28px;
-        }
+.auth {
+    min-height: 100vh;
 
-        .logo {
-            text-align: center;
-            font-size: 30px;
-            font-weight: 800;
-        }
+    display: flex;
+    align-items: center;
+    justify-content: center;
 
-        .subtitle {
-            text-align: center;
-            color: #777;
-            margin-top: 6px;
-            margin-bottom: 25px;
-        }
+    padding: 20px;
+}
 
-        input,
-        textarea {
-            width: 100%;
-            padding: 12px;
-            margin-bottom: 12px;
-            border-radius: 10px;
-            border: 1px solid #303030;
-            background: #080808;
-            color: #fff;
-            outline: none;
-        }
+.auth-card {
+    width: 100%;
+    max-width: 410px;
 
-        input:focus,
-        textarea:focus {
-            border-color: #666;
-        }
+    padding: 30px;
 
-        button {
-            width: 100%;
-            padding: 12px;
-            border: 0;
-            border-radius: 10px;
-            background: #fff;
-            color: #000;
-            font-weight: 700;
-        }
+    background: #111;
+    border: 1px solid #292929;
 
-        button.secondary {
-            margin-top: 10px;
-            background: #191919;
-            color: #fff;
-            border: 1px solid #333;
-        }
+    border-radius: 18px;
 
-        .switch {
-            text-align: center;
-            color: #777;
-            margin-top: 18px;
-            cursor: pointer;
-        }
+    box-shadow:
+        0 25px 80px
+        rgba(0,0,0,.55);
+}
 
-        .switch span {
-            color: #fff;
-            font-weight: bold;
-        }
+.logo {
+    text-align: center;
 
-        .message {
-            margin-top: 12px;
-            text-align: center;
-            color: #ff6b6b;
-        }
+    font-size: 32px;
+    font-weight: 900;
 
-        .dashboard {
-            max-width: 1150px;
-            margin: auto;
-            padding: 25px;
-        }
+    letter-spacing: 2px;
 
-        .topbar {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 20px;
-            margin-bottom: 25px;
-        }
+    margin-bottom: 5px;
+}
 
-        .brand {
-            font-size: 26px;
-            font-weight: 800;
-        }
+.subtitle {
+    text-align: center;
 
-        .account {
-            color: #777;
-            margin-top: 5px;
-        }
+    color: #777;
 
-        .logout {
-            width: auto;
-            padding: 9px 18px;
-            background: #191919;
-            color: #fff;
-            border: 1px solid #333;
-        }
+    margin-bottom: 28px;
+}
 
-        .grid {
-            display: grid;
-            grid-template-columns:
-                minmax(0, 1fr)
-                minmax(0, 1fr);
-            gap: 20px;
-        }
+input,
+textarea {
+    width: 100%;
 
-        .panel {
-            background: #111;
-            border: 1px solid #292929;
-            border-radius: 16px;
-            padding: 20px;
-        }
+    color: #fff;
+    background: #080808;
 
-        .panel h2 {
-            margin-top: 0;
-        }
+    border: 1px solid #2c2c2c;
 
-        textarea {
-            min-height: 350px;
-            resize: vertical;
-            font-family: monospace;
-        }
+    border-radius: 10px;
 
-        .script-list {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
+    outline: none;
 
-        .script {
-            background: #080808;
-            border: 1px solid #292929;
-            border-radius: 10px;
-            padding: 13px;
-        }
+    padding: 12px;
 
-        .script-name {
-            font-weight: 700;
-        }
+    margin-bottom: 12px;
+}
 
-        .script-id {
-            color: #666;
-            font-size: 12px;
-            margin-top: 5px;
-            word-break: break-all;
-        }
+input:focus,
+textarea:focus {
+    border-color: #666;
+}
 
-        .actions {
-            display: flex;
-            gap: 8px;
-            margin-top: 12px;
-        }
+.auth button {
+    width: 100%;
 
-        .actions button {
-            padding: 8px;
-        }
+    padding: 12px;
 
-        .delete {
-            background: #301414;
-            color: #ff8585;
-            border: 1px solid #552020;
-        }
+    border: 0;
+    border-radius: 10px;
 
-        .empty {
-            color: #666;
-            text-align: center;
-            padding: 30px;
-        }
+    background: #fff;
+    color: #000;
 
-        @media (max-width: 800px) {
-            .grid {
-                grid-template-columns: 1fr;
-            }
+    font-weight: 700;
+}
 
-            .topbar {
-                flex-direction: column;
-                align-items: flex-start;
-            }
+.message {
+    min-height: 20px;
 
-            .logout {
-                width: 100%;
-            }
-        }
-    </style>
+    margin-top: 12px;
+
+    text-align: center;
+
+    font-size: 14px;
+}
+
+.error {
+    color: #ff6262;
+}
+
+.success {
+    color: #63e99b;
+}
+
+.switch {
+    text-align: center;
+
+    margin-top: 20px;
+
+    color: #777;
+
+    cursor: pointer;
+}
+
+.switch span {
+    color: #fff;
+    font-weight: 700;
+}
+
+/* =========================
+   DASHBOARD
+========================= */
+
+.dashboard {
+    width: 100%;
+    max-width: 1150px;
+
+    margin: auto;
+
+    padding: 25px;
+}
+
+.topbar {
+    display: flex;
+
+    justify-content: space-between;
+    align-items: center;
+
+    gap: 20px;
+
+    margin-bottom: 25px;
+}
+
+.brand {
+    font-size: 25px;
+    font-weight: 900;
+}
+
+.account-info {
+    color: #777;
+
+    margin-top: 4px;
+
+    font-size: 13px;
+}
+
+.logout {
+    width: auto !important;
+
+    padding: 9px 15px !important;
+
+    background: #191919 !important;
+    color: #fff !important;
+
+    border: 1px solid #333 !important;
+}
+
+.grid {
+    display: grid;
+
+    grid-template-columns:
+        minmax(0, 1fr)
+        minmax(0, 1fr);
+
+    gap: 20px;
+}
+
+.panel {
+    background: #111;
+
+    border: 1px solid #292929;
+
+    border-radius: 16px;
+
+    padding: 20px;
+}
+
+.panel h2 {
+    margin-top: 0;
+}
+
+textarea {
+    min-height: 360px;
+
+    resize: vertical;
+
+    font-family:
+        Consolas,
+        monospace;
+}
+
+.primary {
+    width: 100%;
+
+    padding: 12px;
+
+    border: 0;
+    border-radius: 10px;
+
+    background: #fff;
+    color: #000;
+
+    font-weight: 700;
+}
+
+.secondary {
+    width: 100%;
+
+    padding: 11px;
+
+    margin-top: 8px;
+
+    border-radius: 10px;
+
+    background: #191919;
+    color: #fff;
+
+    border: 1px solid #333;
+}
+
+.scripts {
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 10px;
+}
+
+.script {
+    background: #080808;
+
+    border: 1px solid #292929;
+
+    border-radius: 11px;
+
+    padding: 13px;
+}
+
+.script-name {
+    font-weight: 700;
+
+    margin-bottom: 6px;
+}
+
+.script-id {
+    color: #666;
+
+    font-size: 11px;
+
+    word-break: break-all;
+}
+
+.script-buttons {
+    display: flex;
+
+    gap: 7px;
+
+    margin-top: 10px;
+}
+
+.script-buttons button {
+    flex: 1;
+
+    padding: 8px;
+
+    border-radius: 8px;
+
+    background: #191919;
+
+    color: #fff;
+
+    border: 1px solid #333;
+}
+
+.script-buttons .danger {
+    background: #301313;
+
+    color: #ff7777;
+
+    border-color: #552020;
+}
+
+.empty {
+    padding: 35px 0;
+
+    text-align: center;
+
+    color: #666;
+}
+
+.loader-box {
+    margin-top: 15px;
+}
+
+.loader-box textarea {
+    min-height: 100px;
+}
+
+@media(max-width:800px) {
+
+    .grid {
+        grid-template-columns: 1fr;
+    }
+
+    .topbar {
+        align-items: flex-start;
+
+        flex-direction: column;
+    }
+
+}
+</style>
 </head>
 
 <body>
 
-<!-- ==================================================
-     AUTH
-================================================== -->
+<!-- =================================================
+     LOGIN / REGISTER
+================================================= -->
 
 <div
-    id="auth"
-    class="center"
+    id="authPage"
+    class="auth"
 >
-    <div class="card">
+
+    <div class="auth-card">
 
         <div class="logo">
             LEXINX
@@ -261,6 +382,7 @@
             Protect Dashboard
         </div>
 
+
         <!-- LOGIN -->
 
         <div id="loginBox">
@@ -268,14 +390,14 @@
             <input
                 id="loginUsername"
                 type="text"
-                placeholder="Username"
+                placeholder="Tên tài khoản"
                 autocomplete="username"
             >
 
             <input
                 id="loginPassword"
                 type="password"
-                placeholder="Password"
+                placeholder="Mật khẩu"
                 autocomplete="current-password"
             >
 
@@ -287,7 +409,7 @@
 
             <div
                 id="loginMessage"
-                class="message"
+                class="message error"
             ></div>
 
             <div
@@ -300,6 +422,7 @@
 
         </div>
 
+
         <!-- REGISTER -->
 
         <div
@@ -310,33 +433,33 @@
             <input
                 id="registerUsername"
                 type="text"
-                placeholder="Username"
+                placeholder="Tên tài khoản"
                 autocomplete="username"
             >
 
             <input
                 id="registerPassword"
                 type="password"
-                placeholder="Password"
+                placeholder="Mật khẩu"
                 autocomplete="new-password"
             >
 
             <input
                 id="registerPassword2"
                 type="password"
-                placeholder="Nhập lại password"
+                placeholder="Nhập lại mật khẩu"
                 autocomplete="new-password"
             >
 
             <button
-                onclick="registerAccount()"
+                onclick="register()"
             >
                 Tạo tài khoản
             </button>
 
             <div
                 id="registerMessage"
-                class="message"
+                class="message error"
             ></div>
 
             <div
@@ -350,14 +473,16 @@
         </div>
 
     </div>
+
 </div>
 
-<!-- ==================================================
-     DASHBOARD
-================================================== -->
+
+<!-- =================================================
+     PRIVATE DASHBOARD
+================================================= -->
 
 <div
-    id="dashboard"
+    id="dashboardPage"
     class="dashboard hidden"
 >
 
@@ -369,11 +494,24 @@
                 LEXINX Protect
             </div>
 
-            <div class="account">
-                Account:
-                <strong id="currentUser">
+            <div class="account-info">
+
+                Tài khoản:
+                <strong
+                    id="username"
+                >
                     -
                 </strong>
+
+                <br>
+
+                Account ID:
+                <span
+                    id="accountId"
+                >
+                    -
+                </span>
+
             </div>
 
         </div>
@@ -386,6 +524,7 @@
         </button>
 
     </div>
+
 
     <div class="grid">
 
@@ -405,10 +544,11 @@
 
             <textarea
                 id="scriptSource"
-                placeholder="Nhập Lua source..."
+                placeholder="Dán Lua source vào đây..."
             ></textarea>
 
             <button
+                class="primary"
                 onclick="saveScript()"
             >
                 Lưu Script
@@ -418,7 +558,7 @@
                 class="secondary"
                 onclick="clearEditor()"
             >
-                Xóa
+                Làm mới
             </button>
 
             <div
@@ -426,9 +566,29 @@
                 class="message"
             ></div>
 
+            <div
+                id="loaderBox"
+                class="loader-box hidden"
+            >
+
+                <textarea
+                    id="loaderText"
+                    readonly
+                ></textarea>
+
+                <button
+                    class="secondary"
+                    onclick="copyLoader()"
+                >
+                    Copy Loader
+                </button>
+
+            </div>
+
         </div>
 
-        <!-- SCRIPT LIST -->
+
+        <!-- SCRIPTS -->
 
         <div class="panel">
 
@@ -438,7 +598,7 @@
 
             <div
                 id="scriptList"
-                class="script-list"
+                class="scripts"
             >
                 <div class="empty">
                     Đang tải...
@@ -451,430 +611,534 @@
 
 </div>
 
+
 <script>
-    let editingID = null;
 
-    /* ==================================================
-       API
-    ================================================== */
+/* =====================================================
+   STATE
+===================================================== */
 
-    async function api(
-        url,
-        options = {}
+let editingID = null;
+
+
+/* =====================================================
+   API
+===================================================== */
+
+async function api(
+    url,
+    options = {}
+) {
+
+    const response =
+        await fetch(
+            url,
+            {
+                credentials:
+                    "same-origin",
+
+                ...options,
+
+                headers: {
+                    "Content-Type":
+                        "application/json",
+
+                    ...(options.headers || {})
+                }
+            }
+        );
+
+    let data = {};
+
+    try {
+        data =
+            await response.json();
+    }
+    catch {}
+
+    if (!response.ok) {
+
+        throw new Error(
+            data.error ||
+            "Request failed"
+        );
+    }
+
+    return data;
+}
+
+
+/* =====================================================
+   SHOW LOGIN
+===================================================== */
+
+function showLogin() {
+
+    document
+        .getElementById(
+            "loginBox"
+        )
+        .classList
+        .remove("hidden");
+
+    document
+        .getElementById(
+            "registerBox"
+        )
+        .classList
+        .add("hidden");
+}
+
+
+/* =====================================================
+   SHOW REGISTER
+===================================================== */
+
+function showRegister() {
+
+    document
+        .getElementById(
+            "loginBox"
+        )
+        .classList
+        .add("hidden");
+
+    document
+        .getElementById(
+            "registerBox"
+        )
+        .classList
+        .remove("hidden");
+}
+
+
+/* =====================================================
+   REGISTER
+===================================================== */
+
+async function register() {
+
+    const username =
+        document
+            .getElementById(
+                "registerUsername"
+            )
+            .value
+            .trim();
+
+    const password =
+        document
+            .getElementById(
+                "registerPassword"
+            )
+            .value;
+
+    const password2 =
+        document
+            .getElementById(
+                "registerPassword2"
+            )
+            .value;
+
+    const message =
+        document
+            .getElementById(
+                "registerMessage"
+            );
+
+    message.textContent = "";
+
+    if (
+        password !==
+        password2
     ) {
-        const response =
-            await fetch(
-                url,
+
+        message.textContent =
+            "Mật khẩu nhập lại không giống nhau.";
+
+        return;
+    }
+
+    try {
+
+        const data =
+            await api(
+                "/api/register",
                 {
-                    credentials:
-                        "same-origin",
+                    method: "POST",
 
-                    ...options,
-
-                    headers: {
-                        ...(options.body
-                            ? {
-                                "Content-Type":
-                                    "application/json"
-                            }
-                            : {}),
-
-                        ...(options.headers || {})
-                    }
+                    body:
+                        JSON.stringify({
+                            username,
+                            password
+                        })
                 }
             );
 
-        let data = {};
+        /*
+         * Đăng ký thành công:
+         * server tạo session.
+         * Sau đó chuyển thẳng
+         * vào URL riêng.
+         */
 
-        try {
-            data =
-                await response.json();
-        } catch {}
+        window.location.href =
+            data.url;
 
-        if (!response.ok) {
-            throw new Error(
-                data.error ||
-                "Request failed"
+    }
+    catch (error) {
+
+        message.textContent =
+            error.message;
+    }
+}
+
+
+/* =====================================================
+   LOGIN
+===================================================== */
+
+async function login() {
+
+    const username =
+        document
+            .getElementById(
+                "loginUsername"
+            )
+            .value
+            .trim();
+
+    const password =
+        document
+            .getElementById(
+                "loginPassword"
+            )
+            .value;
+
+    const message =
+        document
+            .getElementById(
+                "loginMessage"
             );
-        }
 
-        return data;
+    message.textContent = "";
+
+    try {
+
+        const data =
+            await api(
+                "/api/login",
+                {
+                    method: "POST",
+
+                    body:
+                        JSON.stringify({
+                            username,
+                            password
+                        })
+                }
+            );
+
+        /*
+         * Đăng nhập thành công:
+         * chuyển đến web riêng.
+         */
+
+        window.location.href =
+            data.url;
+
     }
+    catch (error) {
 
-    /* ==================================================
-       AUTH UI
-    ================================================== */
-
-    function showRegister() {
-        document
-            .getElementById(
-                "loginBox"
-            )
-            .classList
-            .add("hidden");
-
-        document
-            .getElementById(
-                "registerBox"
-            )
-            .classList
-            .remove("hidden");
+        message.textContent =
+            error.message;
     }
+}
 
-    function showLogin() {
-        document
-            .getElementById(
-                "registerBox"
-            )
-            .classList
-            .add("hidden");
 
-        document
-            .getElementById(
-                "loginBox"
-            )
-            .classList
-            .remove("hidden");
+/* =====================================================
+   LOGOUT
+===================================================== */
+
+async function logout() {
+
+    try {
+
+        await api(
+            "/api/logout",
+            {
+                method: "POST"
+            }
+        );
+
     }
+    catch {}
 
-    /* ==================================================
-       REGISTER
-    ================================================== */
+    /*
+     * Sau logout quay về
+     * trang đăng nhập.
+     */
 
-    async function registerAccount() {
+    window.location.href = "/";
+}
 
-        const username =
-            document
-                .getElementById(
-                    "registerUsername"
-                )
-                .value
-                .trim();
 
-        const password =
-            document
-                .getElementById(
-                    "registerPassword"
-                )
-                .value;
+/* =====================================================
+   LOAD CURRENT USER
+===================================================== */
 
-        const password2 =
-            document
-                .getElementById(
-                    "registerPassword2"
-                )
-                .value;
+async function checkAuth() {
 
-        const message =
-            document
-                .getElementById(
-                    "registerMessage"
-                );
+    try {
 
-        message.textContent = "";
+        const data =
+            await api(
+                "/api/me"
+            );
+
+        /*
+         * Có session nhưng đang ở /
+         * thì chuyển về URL riêng.
+         */
 
         if (
-            password !==
-            password2
+            data.url &&
+            window.location.pathname === "/"
         ) {
-            message.textContent =
-                "Hai password không giống nhau";
+
+            window.location.href =
+                data.url;
+
             return;
         }
 
-        try {
+        showDashboard(
+            data
+        );
 
-            const data =
-                await api(
-                    "/api/register",
-                    {
-                        method: "POST",
-
-                        body:
-                            JSON.stringify({
-                                username,
-                                password
-                            })
-                    }
-                );
-
-            /*
-             * Tự động chuyển tới
-             * trang riêng của tài khoản.
-             */
-
-            window.location.href =
-                data.url;
-
-        } catch (error) {
-
-            message.textContent =
-                error.message;
-        }
     }
+    catch {
 
-    /* ==================================================
-       LOGIN
-    ================================================== */
+        /*
+         * Không có session:
+         * bắt buộc đăng nhập.
+         */
 
-    async function login() {
-
-        const username =
-            document
-                .getElementById(
-                    "loginUsername"
-                )
-                .value
-                .trim();
-
-        const password =
-            document
-                .getElementById(
-                    "loginPassword"
-                )
-                .value;
-
-        const message =
-            document
-                .getElementById(
-                    "loginMessage"
-                );
-
-        message.textContent = "";
-
-        try {
-
-            const data =
-                await api(
-                    "/api/login",
-                    {
-                        method: "POST",
-
-                        body:
-                            JSON.stringify({
-                                username,
-                                password
-                            })
-                    }
-                );
-
-            /*
-             * Tự động chuyển tới
-             * web riêng của tài khoản.
-             */
-
-            window.location.href =
-                data.url;
-
-        } catch (error) {
-
-            message.textContent =
-                error.message;
-        }
+        showAuth();
     }
+}
 
-    /* ==================================================
-       LOGOUT
-    ================================================== */
 
-    async function logout() {
+/* =====================================================
+   SHOW AUTH
+===================================================== */
 
-        try {
-            await api(
-                "/api/logout",
-                {
-                    method: "POST"
-                }
+function showAuth() {
+
+    document
+        .getElementById(
+            "authPage"
+        )
+        .classList
+        .remove("hidden");
+
+    document
+        .getElementById(
+            "dashboardPage"
+        )
+        .classList
+        .add("hidden");
+}
+
+
+/* =====================================================
+   SHOW DASHBOARD
+===================================================== */
+
+function showDashboard(
+    data
+) {
+
+    document
+        .getElementById(
+            "authPage"
+        )
+        .classList
+        .add("hidden");
+
+    document
+        .getElementById(
+            "dashboardPage"
+        )
+        .classList
+        .remove("hidden");
+
+    document
+        .getElementById(
+            "username"
+        )
+        .textContent =
+            data.username || "-";
+
+    document
+        .getElementById(
+            "accountId"
+        )
+        .textContent =
+            data.accountId || "-";
+
+    loadScripts();
+}
+
+
+/* =====================================================
+   LOAD SCRIPTS
+===================================================== */
+
+async function loadScripts() {
+
+    const list =
+        document
+            .getElementById(
+                "scriptList"
             );
-        } catch {}
 
-        window.location.href =
-            "/";
-    }
+    try {
 
-    /* ==================================================
-       LOAD USER
-    ================================================== */
+        const data =
+            await api(
+                "/api/scripts"
+            );
 
-    async function loadUser() {
-
-        try {
-
-            const data =
-                await api(
-                    "/api/me"
-                );
-
-            document
-                .getElementById(
-                    "currentUser"
-                )
-                .textContent =
-                    data.username;
-
-            document
-                .getElementById(
-                    "auth"
-                )
-                .classList
-                .add("hidden");
-
-            document
-                .getElementById(
-                    "dashboard"
-                )
-                .classList
-                .remove("hidden");
-
-            await loadScripts();
-
-        } catch {
-
-            window.location.href =
-                "/";
-        }
-    }
-
-    /* ==================================================
-       LOAD SCRIPTS
-    ================================================== */
-
-    async function loadScripts() {
-
-        const list =
-            document
-                .getElementById(
-                    "scriptList"
-                );
-
-        try {
-
-            const data =
-                await api(
-                    "/api/scripts"
-                );
-
-            if (
-                !data.scripts.length
-            ) {
-                list.innerHTML =
-                    `<div class="empty">
-                        Chưa có script
-                    </div>`;
-
-                return;
-            }
+        if (
+            !data.scripts ||
+            data.scripts.length === 0
+        ) {
 
             list.innerHTML =
-                data.scripts
-                    .map(
-                        script => `
-                            <div class="script">
+                `
+                <div class="empty">
+                    Bạn chưa có script.
+                </div>
+                `;
 
-                                <div class="script-name">
-                                    ${escapeHTML(
-                                        script.name
-                                    )}
-                                </div>
+            return;
+        }
 
-                                <div class="script-id">
-                                    ID:
-                                    ${escapeHTML(
-                                        script.id
-                                    )}
-                                </div>
+        list.innerHTML =
+            data.scripts
+                .map(
+                    script => {
 
-                                <div class="actions">
+                        return `
+                        <div class="script">
 
-                                    <button
-                                        onclick="editScript('${script.id}')"
-                                    >
-                                        Edit
-                                    </button>
+                            <div class="script-name">
+                                ${escapeHTML(
+                                    script.name
+                                )}
+                            </div>
 
-                                    <button
-                                        class="delete"
-                                        onclick="deleteScript('${script.id}')"
-                                    >
-                                        Delete
-                                    </button>
+                            <div class="script-id">
+                                ID:
+                                ${escapeHTML(
+                                    script.id
+                                )}
+                            </div>
 
-                                </div>
+                            <div class="script-buttons">
+
+                                <button
+                                    onclick="editScript(
+                                        '${script.id}'
+                                    )"
+                                >
+                                    Edit
+                                </button>
+
+                                <button
+                                    onclick='copyText(
+                                        ${JSON.stringify(
+                                            script.loader
+                                        )}
+                                    )'
+                                >
+                                    Copy Loader
+                                </button>
+
+                                <button
+                                    class="danger"
+                                    onclick="deleteScript(
+                                        '${script.id}'
+                                    )"
+                                >
+                                    Delete
+                                </button>
 
                             </div>
-                        `
-                    )
-                    .join("");
 
-        } catch (error) {
-
-            list.innerHTML =
-                `<div class="message">
-                    ${escapeHTML(
-                        error.message
-                    )}
-                </div>`;
-        }
-    }
-
-    /* ==================================================
-       SAVE
-    ================================================== */
-
-    async function saveScript() {
-
-        const name =
-            document
-                .getElementById(
-                    "scriptName"
-                )
-                .value
-                .trim();
-
-        const source =
-            document
-                .getElementById(
-                    "scriptSource"
-                )
-                .value;
-
-        const message =
-            document
-                .getElementById(
-                    "editorMessage"
-                );
-
-        message.textContent = "";
-
-        try {
-
-            if (!editingID) {
-
-                await api(
-                    "/api/create",
-                    {
-                        method:
-                            "POST",
-
-                        body:
-                            JSON.stringify({
-                                name,
-                                source
-                            })
+                        </div>
+                        `;
                     }
-                );
+                )
+                .join("");
 
-                message.textContent =
-                    "Đã tạo script";
+    }
+    catch (error) {
 
-            } else {
+        list.innerHTML =
+            `
+            <div class="error">
+                ${escapeHTML(
+                    error.message
+                )}
+            </div>
+            `;
+    }
+}
 
+
+/* =====================================================
+   SAVE
+===================================================== */
+
+async function saveScript() {
+
+    const name =
+        document
+            .getElementById(
+                "scriptName"
+            )
+            .value
+            .trim();
+
+    const source =
+        document
+            .getElementById(
+                "scriptSource"
+            )
+            .value;
+
+    const message =
+        document
+            .getElementById(
+                "editorMessage"
+            );
+
+    message.textContent = "";
+
+    try {
+
+        let data;
+
+        if (editingID) {
+
+            data =
                 await api(
                     "/api/edit/" +
                     editingID,
                     {
-                        method:
-                            "POST",
+                        method: "POST",
 
                         body:
                             JSON.stringify({
@@ -884,183 +1148,282 @@
                     }
                 );
 
-                message.textContent =
-                    "Đã cập nhật script";
-            }
-
-            clearEditor();
-
-            await loadScripts();
-
-        } catch (error) {
-
             message.textContent =
-                error.message;
+                "Đã cập nhật script.";
+
         }
-    }
+        else {
 
-    /* ==================================================
-       EDIT
-    ================================================== */
-
-    async function editScript(id) {
-
-        try {
-
-            const data =
+            data =
                 await api(
-                    "/api/script/" +
-                    id
+                    "/api/create",
+                    {
+                        method: "POST",
+
+                        body:
+                            JSON.stringify({
+                                name,
+                                source
+                            })
+                    }
                 );
 
-            editingID =
-                id;
+            message.textContent =
+                "Đã tạo script.";
 
             document
                 .getElementById(
-                    "editorTitle"
-                )
-                .textContent =
-                    "Edit Script";
-
-            document
-                .getElementById(
-                    "scriptName"
+                    "loaderText"
                 )
                 .value =
-                    data.script.name;
+                    data.loader;
 
             document
                 .getElementById(
-                    "scriptSource"
+                    "loaderBox"
                 )
-                .value =
-                    data.script.source;
-
-        } catch (error) {
-
-            alert(
-                error.message
-            );
+                .classList
+                .remove("hidden");
         }
+
+        clearFields();
+
+        loadScripts();
+
     }
+    catch (error) {
 
-    /* ==================================================
-       DELETE
-    ================================================== */
+        message.textContent =
+            error.message;
+    }
+}
 
-    async function deleteScript(id) {
 
-        if (
-            !confirm(
-                "Bạn chắc chắn muốn xóa script này?"
-            )
-        ) {
-            return;
-        }
+/* =====================================================
+   EDIT
+===================================================== */
 
-        try {
+async function editScript(
+    id
+) {
 
+    try {
+
+        const data =
             await api(
-                "/api/delete/" +
-                id,
-                {
-                    method:
-                        "DELETE"
-                }
+                "/api/script/" +
+                id
             );
 
-            if (
-                editingID === id
-            ) {
-                clearEditor();
-            }
-
-            await loadScripts();
-
-        } catch (error) {
-
-            alert(
-                error.message
-            );
-        }
-    }
-
-    /* ==================================================
-       CLEAR
-    ================================================== */
-
-    function clearEditor() {
-
-        editingID = null;
+        editingID = id;
 
         document
             .getElementById(
                 "editorTitle"
             )
             .textContent =
-                "Tạo Script";
+                "Edit Script";
 
         document
             .getElementById(
                 "scriptName"
             )
-            .value = "";
+            .value =
+                data.script.name;
 
         document
             .getElementById(
                 "scriptSource"
             )
-            .value = "";
+            .value =
+                data.script.source;
 
-        document
-            .getElementById(
-                "editorMessage"
-            )
-            .textContent = "";
+        window.scrollTo({
+            top: 0,
+            behavior: "smooth"
+        });
+
     }
+    catch (error) {
 
-    /* ==================================================
-       ESCAPE
-    ================================================== */
-
-    function escapeHTML(
-        value
-    ) {
-        return String(value)
-            .replace(
-                /&/g,
-                "&amp;"
-            )
-            .replace(
-                /</g,
-                "&lt;"
-            )
-            .replace(
-                />/g,
-                "&gt;"
-            )
-            .replace(
-                /"/g,
-                "&quot;"
-            )
-            .replace(
-                /'/g,
-                "&#039;"
-            );
+        alert(
+            error.message
+        );
     }
+}
 
-    /* ==================================================
-       START
-    ================================================== */
+
+/* =====================================================
+   DELETE
+===================================================== */
+
+async function deleteScript(
+    id
+) {
 
     if (
-        location.pathname.includes(
-            "/dashboard"
+        !confirm(
+            "Bạn chắc chắn muốn xóa script này?"
         )
     ) {
-        loadUser();
+        return;
     }
+
+    try {
+
+        await api(
+            "/api/delete/" +
+            id,
+            {
+                method: "DELETE"
+            }
+        );
+
+        loadScripts();
+
+    }
+    catch (error) {
+
+        alert(
+            error.message
+        );
+    }
+}
+
+
+/* =====================================================
+   CLEAR
+===================================================== */
+
+function clearFields() {
+
+    editingID = null;
+
+    document
+        .getElementById(
+            "editorTitle"
+        )
+        .textContent =
+            "Tạo Script";
+
+    document
+        .getElementById(
+            "scriptName"
+        )
+        .value = "";
+
+    document
+        .getElementById(
+            "scriptSource"
+        )
+        .value = "";
+}
+
+
+function clearEditor() {
+
+    clearFields();
+
+    document
+        .getElementById(
+            "editorMessage"
+        )
+        .textContent = "";
+
+    document
+        .getElementById(
+            "loaderBox"
+        )
+        .classList
+        .add("hidden");
+}
+
+
+/* =====================================================
+   COPY
+===================================================== */
+
+async function copyText(
+    text
+) {
+
+    try {
+
+        await navigator
+            .clipboard
+            .writeText(text);
+
+        alert(
+            "Đã copy loader."
+        );
+
+    }
+    catch {
+
+        prompt(
+            "Copy loader:",
+            text
+        );
+    }
+}
+
+
+function copyLoader() {
+
+    const text =
+        document
+            .getElementById(
+                "loaderText"
+            )
+            .value;
+
+    copyText(text);
+}
+
+
+/* =====================================================
+   ESCAPE
+===================================================== */
+
+function escapeHTML(
+    value
+) {
+
+    return String(value)
+
+        .replace(
+            /&/g,
+            "&amp;"
+        )
+
+        .replace(
+            /</g,
+            "&lt;"
+        )
+
+        .replace(
+            />/g,
+            "&gt;"
+        )
+
+        .replace(
+            /"/g,
+            "&quot;"
+        )
+
+        .replace(
+            /'/g,
+            "&#039;"
+        );
+}
+
+
+/* =====================================================
+   START
+===================================================== */
+
+checkAuth();
+
 </script>
 
 </body>
