@@ -10,17 +10,9 @@ const DOMAIN =
     process.env.DOMAIN ||
     "https://lexinx-protect.onrender.com";
 
-const TURNSTILE_SECRET =
-    process.env.TURNSTILE_SECRET_KEY || "";
-
-const DATA_DIR =
-    path.join(__dirname, "data");
-
-const DB_FILE =
-    path.join(DATA_DIR, "accounts.json");
-
-const PUBLIC_DIR =
-    path.join(__dirname, "public");
+const DATA_DIR = path.join(__dirname, "data");
+const DB_FILE = path.join(DATA_DIR, "accounts.json");
+const PUBLIC_DIR = path.join(__dirname, "public");
 
 const SESSION_TTL =
     7 * 24 * 60 * 60 * 1000;
@@ -54,6 +46,10 @@ app.use(
         extended: true,
         limit: "15mb"
     })
+);
+
+app.use(
+    express.static(PUBLIC_DIR)
 );
 
 /* =====================================================
@@ -95,14 +91,6 @@ function randomHex(bytes = 32) {
         .toString("hex");
 }
 
-function createAccountID() {
-    return randomHex(16);
-}
-
-function createScriptID() {
-    return randomHex(12);
-}
-
 /* =====================================================
    PASSWORD
 ===================================================== */
@@ -119,11 +107,8 @@ function hashPassword(password) {
         );
 
     return {
-        salt:
-            salt.toString("hex"),
-
-        hash:
-            hash.toString("hex")
+        salt: salt.toString("hex"),
+        hash: hash.toString("hex")
     };
 }
 
@@ -165,22 +150,57 @@ function verifyPassword(
 }
 
 /* =====================================================
-   COOKIE
+   USERNAME
 ===================================================== */
 
+function validUsername(username) {
+    return (
+        typeof username === "string" &&
+        /^[A-Za-z0-9_]{3,24}$/.test(
+            username
+        )
+    );
+}
+
+function validPassword(password) {
+    return (
+        typeof password === "string" &&
+        password.length >= 6 &&
+        password.length <= 128
+    );
+}
+
+/* =====================================================
+   SESSIONS
+===================================================== */
+
+const sessions = new Map();
+
+function createSession(username) {
+    const sessionID =
+        randomHex(48);
+
+    sessions.set(
+        sessionID,
+        {
+            username,
+            createdAt: Date.now(),
+            expiresAt:
+                Date.now() +
+                SESSION_TTL
+        }
+    );
+
+    return sessionID;
+}
+
 function parseCookies(req) {
-    const result = {};
-
+    const cookies = {};
     const header =
-        req.headers.cookie;
-
-    if (!header) {
-        return result;
-    }
+        req.headers.cookie || "";
 
     for (
-        const item
-        of header.split(";")
+        const item of header.split(";")
     ) {
         const index =
             item.indexOf("=");
@@ -199,69 +219,13 @@ function parseCookies(req) {
                 .slice(index + 1)
                 .trim();
 
-        result[key] =
-            decodeURIComponent(value);
+        cookies[key] =
+            decodeURIComponent(
+                value
+            );
     }
 
-    return result;
-}
-
-/* =====================================================
-   SESSION
-===================================================== */
-
-const sessions = new Map();
-
-function createSession(username) {
-    const sessionID =
-        randomHex(48);
-
-    sessions.set(
-        sessionID,
-        {
-            username,
-            createdAt:
-                Date.now(),
-            expiresAt:
-                Date.now() +
-                SESSION_TTL
-        }
-    );
-
-    return sessionID;
-}
-
-function setSessionCookie(
-    res,
-    sessionID
-) {
-    res.setHeader(
-        "Set-Cookie",
-        [
-            `lexinx_session=${encodeURIComponent(sessionID)}`,
-            "Path=/",
-            "HttpOnly",
-            "Secure",
-            "SameSite=Lax",
-            `Max-Age=${Math.floor(
-                SESSION_TTL / 1000
-            )}`
-        ].join("; ")
-    );
-}
-
-function clearSessionCookie(res) {
-    res.setHeader(
-        "Set-Cookie",
-        [
-            "lexinx_session=",
-            "Path=/",
-            "HttpOnly",
-            "Secure",
-            "SameSite=Lax",
-            "Max-Age=0"
-        ].join("; ")
-    );
+    return cookies;
 }
 
 function getSession(req) {
@@ -276,7 +240,9 @@ function getSession(req) {
     }
 
     const session =
-        sessions.get(sessionID);
+        sessions.get(
+            sessionID
+        );
 
     if (!session) {
         return null;
@@ -294,10 +260,46 @@ function getSession(req) {
     }
 
     return {
-        ...session,
-        sessionID
+        sessionID,
+        username:
+            session.username
     };
 }
+
+function setSession(
+    res,
+    sessionID
+) {
+    res.setHeader(
+        "Set-Cookie",
+        [
+            `lexinx_session=${encodeURIComponent(
+                sessionID
+            )}`,
+            "Path=/",
+            "HttpOnly",
+            "SameSite=Lax",
+            "Max-Age=604800"
+        ].join("; ")
+    );
+}
+
+function clearSession(res) {
+    res.setHeader(
+        "Set-Cookie",
+        [
+            "lexinx_session=",
+            "Path=/",
+            "HttpOnly",
+            "SameSite=Lax",
+            "Max-Age=0"
+        ].join("; ")
+    );
+}
+
+/* =====================================================
+   AUTH MIDDLEWARE
+===================================================== */
 
 function requireAuth(
     req,
@@ -317,133 +319,14 @@ function requireAuth(
             });
     }
 
-    req.session =
-        session;
+    req.user = session;
 
     next();
 }
 
 /* =====================================================
-   TURNSTILE
+   CLEAN NAME
 ===================================================== */
-
-async function verifyTurnstile(
-    token,
-    remoteIP
-) {
-    if (!TURNSTILE_SECRET) {
-        console.error(
-            "TURNSTILE_SECRET_KEY is missing"
-        );
-
-        return false;
-    }
-
-    if (
-        typeof token !==
-            "string" ||
-        !token ||
-        token.length > 2048
-    ) {
-        return false;
-    }
-
-    try {
-        const response =
-            await fetch(
-                "https://challenges.cloudflare.com/turnstile/v0/siteverify",
-                {
-                    method: "POST",
-
-                    headers: {
-                        "Content-Type":
-                            "application/json"
-                    },
-
-                    body:
-                        JSON.stringify({
-                            secret:
-                                TURNSTILE_SECRET,
-
-                            response:
-                                token,
-
-                            remoteip:
-                                remoteIP
-                        })
-                }
-            );
-
-        if (!response.ok) {
-            return false;
-        }
-
-        const result =
-            await response.json();
-
-        if (
-            result.success !==
-            true
-        ) {
-            console.warn(
-                "Turnstile rejected:",
-                result["error-codes"]
-            );
-
-            return false;
-        }
-
-        return true;
-
-    } catch (error) {
-
-        console.error(
-            "Turnstile error:",
-            error.message
-        );
-
-        return false;
-    }
-}
-
-function getClientIP(req) {
-    return (
-        req.headers[
-            "cf-connecting-ip"
-        ] ||
-        req.headers[
-            "x-forwarded-for"
-        ] ||
-        req.socket.remoteAddress ||
-        ""
-    );
-}
-
-/* =====================================================
-   VALIDATION
-===================================================== */
-
-function validUsername(
-    username
-) {
-    return (
-        typeof username ===
-            "string" &&
-        /^[A-Za-z0-9_]{3,24}$/
-            .test(username)
-    );
-}
-
-function validPassword(
-    password
-) {
-    return (
-        typeof password ===
-            "string" &&
-        password.length >= 6 &&
-        password.length <= 128
-    );
-}
 
 function cleanName(name) {
     return String(
@@ -457,29 +340,38 @@ function cleanName(name) {
 }
 
 /* =====================================================
-   WEB
+   HOME
 ===================================================== */
 
-app.use(
-    express.static(
-        PUBLIC_DIR
-    )
-);
+app.get("/", (req, res) => {
+    const session =
+        getSession(req);
 
-/*
-   Root luôn là authentication page.
-*/
-app.get(
-    "/",
-    (req, res) => {
-        res.sendFile(
-            path.join(
-                PUBLIC_DIR,
-                "index.html"
-            )
-        );
+    if (session) {
+        const db =
+            readDB();
+
+        const account =
+            db[
+                session.username
+            ];
+
+        if (account) {
+            return res.redirect(
+                `/acc/${encodeURIComponent(
+                    account.username
+                )}/${account.accountId}/dashboard`
+            );
+        }
     }
-);
+
+    res.sendFile(
+        path.join(
+            PUBLIC_DIR,
+            "index.html"
+        )
+    );
+});
 
 /* =====================================================
    REGISTER
@@ -487,12 +379,10 @@ app.get(
 
 app.post(
     "/api/register",
-    async (req, res) => {
-
+    (req, res) => {
         const {
             username,
-            password,
-            turnstileToken
+            password
         } = req.body || {};
 
         if (
@@ -505,7 +395,7 @@ app.post(
                 .json({
                     ok: false,
                     error:
-                        "Username phải dài 3-24 ký tự và chỉ gồm chữ, số, _"
+                        "Username phải dài 3-24 ký tự và chỉ gồm A-Z, a-z, 0-9, _"
                 });
         }
 
@@ -519,32 +409,14 @@ app.post(
                 .json({
                     ok: false,
                     error:
-                        "Password phải dài từ 6-128 ký tự"
-                });
-        }
-
-        const verified =
-            await verifyTurnstile(
-                turnstileToken,
-                getClientIP(req)
-            );
-
-        if (!verified) {
-            return res
-                .status(403)
-                .json({
-                    ok: false,
-                    error:
-                        "Cloudflare verification failed"
+                        "Password phải dài từ 6 đến 128 ký tự"
                 });
         }
 
         const db =
             readDB();
 
-        if (
-            db[username]
-        ) {
+        if (db[username]) {
             return res
                 .status(409)
                 .json({
@@ -554,24 +426,22 @@ app.post(
                 });
         }
 
-        const accountID =
-            createAccountID();
-
         const passwordData =
             hashPassword(
                 password
             );
 
+        const accountId =
+            randomHex(16);
+
         db[username] = {
             username,
 
-            accountId:
-                accountID,
+            accountId,
 
             password: {
                 salt:
                     passwordData.salt,
-
                 hash:
                     passwordData.hash
             },
@@ -589,22 +459,22 @@ app.post(
                 username
             );
 
-        setSessionCookie(
+        setSession(
             res,
             sessionID
         );
 
-        const url =
-            `${DOMAIN}/acc/${encodeURIComponent(
-                username
-            )}/${accountID}/dashboard`;
-
-        return res.json({
+        res.json({
             ok: true,
+
             username,
-            accountId:
-                accountID,
-            url
+
+            accountId,
+
+            url:
+                `${DOMAIN}/acc/${encodeURIComponent(
+                    username
+                )}/${accountId}/dashboard`
         });
     }
 );
@@ -615,12 +485,10 @@ app.post(
 
 app.post(
     "/api/login",
-    async (req, res) => {
-
+    (req, res) => {
         const {
             username,
-            password,
-            turnstileToken
+            password
         } = req.body || {};
 
         if (
@@ -635,22 +503,6 @@ app.post(
                     ok: false,
                     error:
                         "Thông tin đăng nhập không hợp lệ"
-                });
-        }
-
-        const verified =
-            await verifyTurnstile(
-                turnstileToken,
-                getClientIP(req)
-            );
-
-        if (!verified) {
-            return res
-                .status(403)
-                .json({
-                    ok: false,
-                    error:
-                        "Cloudflare verification failed"
                 });
         }
 
@@ -681,22 +533,23 @@ app.post(
                 username
             );
 
-        setSessionCookie(
+        setSession(
             res,
             sessionID
         );
 
-        const url =
-            `${DOMAIN}/acc/${encodeURIComponent(
-                username
-            )}/${account.accountId}/dashboard`;
-
-        return res.json({
+        res.json({
             ok: true,
+
             username,
+
             accountId:
                 account.accountId,
-            url
+
+            url:
+                `${DOMAIN}/acc/${encodeURIComponent(
+                    account.username
+                )}/${account.accountId}/dashboard`
         });
     }
 );
@@ -708,7 +561,6 @@ app.post(
 app.post(
     "/api/logout",
     (req, res) => {
-
         const session =
             getSession(req);
 
@@ -718,9 +570,7 @@ app.post(
             );
         }
 
-        clearSessionCookie(
-            res
-        );
+        clearSession(res);
 
         res.json({
             ok: true
@@ -729,20 +579,19 @@ app.post(
 );
 
 /* =====================================================
-   CURRENT ACCOUNT
+   CURRENT USER
 ===================================================== */
 
 app.get(
     "/api/me",
     requireAuth,
     (req, res) => {
-
         const db =
             readDB();
 
         const account =
             db[
-                req.session.username
+                req.user.username
             ];
 
         if (!account) {
@@ -760,33 +609,40 @@ app.get(
                 account.username,
 
             accountId:
-                account.accountId
+                account.accountId,
+
+            url:
+                `${DOMAIN}/acc/${encodeURIComponent(
+                    account.username
+                )}/${account.accountId}/dashboard`
         });
     }
 );
 
 /* =====================================================
-   ACCOUNT DASHBOARD
+   PRIVATE ACCOUNT DASHBOARD
 ===================================================== */
 
 app.get(
     "/acc/:username/:accountId/dashboard",
     (req, res) => {
+        const session =
+            getSession(req);
 
-        const {
-            username,
-            accountId
-        } = req.params;
+        if (!session) {
+            return res.redirect(
+                "/"
+            );
+        }
 
         const db =
             readDB();
 
         const account =
-            db[username];
+            db[
+                req.params.username
+            ];
 
-        /*
-          Account phải tồn tại.
-        */
         if (!account) {
             return res
                 .status(404)
@@ -796,12 +652,9 @@ app.get(
                 );
         }
 
-        /*
-          Account ID phải khớp.
-        */
         if (
             account.accountId !==
-            accountId
+            req.params.accountId
         ) {
             return res
                 .status(403)
@@ -811,79 +664,24 @@ app.get(
                 );
         }
 
-        /*
-          Phải có session.
-        */
-        const session =
-            getSession(req);
-
         if (
-            !session ||
             session.username !==
-                username
+            account.username
         ) {
-            return res.redirect(
-                "/"
-            );
+            return res
+                .status(403)
+                .type("text/plain")
+                .send(
+                    "LEXINX BLOCK"
+                );
         }
 
-        return res.sendFile(
+        res.sendFile(
             path.join(
                 PUBLIC_DIR,
                 "index.html"
             )
         );
-    }
-);
-
-/* =====================================================
-   LIST SCRIPTS
-===================================================== */
-
-app.get(
-    "/api/scripts",
-    requireAuth,
-    (req, res) => {
-
-        const db =
-            readDB();
-
-        const account =
-            db[
-                req.session.username
-            ];
-
-        if (!account) {
-            return res
-                .status(401)
-                .json({
-                    ok: false
-                });
-        }
-
-        const scripts =
-            Object.values(
-                account.scripts || {}
-            )
-            .reverse()
-            .map(script => ({
-                id:
-                    script.id,
-
-                name:
-                    script.name,
-
-                createdAt:
-                    script.createdAt,
-
-                updatedAt:
-                    script.updatedAt
-            }));
-
-        res.json({
-            ok: true,
-            scripts
-        });
     }
 );
 
@@ -895,7 +693,6 @@ app.post(
     "/api/create",
     requireAuth,
     (req, res) => {
-
         const {
             name,
             source
@@ -911,7 +708,7 @@ app.post(
                 .json({
                     ok: false,
                     error:
-                        "Script is empty"
+                        "Script rỗng"
                 });
         }
 
@@ -920,7 +717,7 @@ app.post(
 
         const account =
             db[
-                req.session.username
+                req.user.username
             ];
 
         if (!account) {
@@ -932,7 +729,7 @@ app.post(
         }
 
         const id =
-            createScriptID();
+            randomHex(12);
 
         account.scripts[id] = {
             id,
@@ -953,26 +750,86 @@ app.post(
 
         res.json({
             ok: true,
-            id
+
+            id,
+
+            name:
+                account.scripts[id]
+                    .name,
+
+            createdAt:
+                account.scripts[id]
+                    .createdAt
         });
     }
 );
 
 /* =====================================================
-   GET SCRIPT FOR EDITOR
+   LIST SCRIPTS
+===================================================== */
+
+app.get(
+    "/api/scripts",
+    requireAuth,
+    (req, res) => {
+        const db =
+            readDB();
+
+        const account =
+            db[
+                req.user.username
+            ];
+
+        if (!account) {
+            return res
+                .status(401)
+                .json({
+                    ok: false
+                });
+        }
+
+        const scripts =
+            Object.values(
+                account.scripts || {}
+            )
+                .reverse()
+                .map(
+                    script => ({
+                        id:
+                            script.id,
+
+                        name:
+                            script.name,
+
+                        createdAt:
+                            script.createdAt,
+
+                        updatedAt:
+                            script.updatedAt
+                    })
+                );
+
+        res.json({
+            ok: true,
+            scripts
+        });
+    }
+);
+
+/* =====================================================
+   GET SCRIPT
 ===================================================== */
 
 app.get(
     "/api/script/:id",
     requireAuth,
     (req, res) => {
-
         const db =
             readDB();
 
         const account =
             db[
-                req.session.username
+                req.user.username
             ];
 
         if (!account) {
@@ -994,14 +851,29 @@ app.get(
                 .json({
                     ok: false,
                     error:
-                        "Script not found"
+                        "Script không tồn tại"
                 });
         }
 
         res.json({
             ok: true,
 
-            script
+            script: {
+                id:
+                    script.id,
+
+                name:
+                    script.name,
+
+                source:
+                    script.source,
+
+                createdAt:
+                    script.createdAt,
+
+                updatedAt:
+                    script.updatedAt
+            }
         });
     }
 );
@@ -1014,13 +886,12 @@ app.post(
     "/api/edit/:id",
     requireAuth,
     (req, res) => {
-
         const db =
             readDB();
 
         const account =
             db[
-                req.session.username
+                req.user.username
             ];
 
         if (!account) {
@@ -1042,13 +913,13 @@ app.post(
                 .json({
                     ok: false,
                     error:
-                        "Script not found"
+                        "Script không tồn tại"
                 });
         }
 
         if (
             typeof req.body?.name ===
-                "string"
+            "string"
         ) {
             script.name =
                 cleanName(
@@ -1058,8 +929,20 @@ app.post(
 
         if (
             typeof req.body?.source ===
-                "string"
+            "string"
         ) {
+            if (
+                !req.body.source.trim()
+            ) {
+                return res
+                    .status(400)
+                    .json({
+                        ok: false,
+                        error:
+                            "Script rỗng"
+                    });
+            }
+
             script.source =
                 req.body.source;
         }
@@ -1070,7 +953,13 @@ app.post(
         writeDB(db);
 
         res.json({
-            ok: true
+            ok: true,
+
+            id:
+                script.id,
+
+            name:
+                script.name
         });
     }
 );
@@ -1083,13 +972,12 @@ app.delete(
     "/api/delete/:id",
     requireAuth,
     (req, res) => {
-
         const db =
             readDB();
 
         const account =
             db[
-                req.session.username
+                req.user.username
             ];
 
         if (!account) {
@@ -1125,28 +1013,18 @@ app.delete(
 );
 
 /* =====================================================
-   UNKNOWN ROUTES
+   UNKNOWN API
 ===================================================== */
 
 app.use(
+    "/api",
     (req, res) => {
-
-        if (
-            req.path.startsWith(
-                "/api/"
-            )
-        ) {
-            return res
-                .status(404)
-                .type("text/plain")
-                .send(
-                    "LEXINX BLOCK"
-                );
-        }
-
-        return res.redirect(
-            "/"
-        );
+        res
+            .status(404)
+            .type("text/plain")
+            .send(
+                "LEXINX BLOCK"
+            );
     }
 );
 
@@ -1156,7 +1034,6 @@ app.use(
 
 setInterval(
     () => {
-
         const now =
             Date.now();
 
@@ -1175,7 +1052,6 @@ setInterval(
                 );
             }
         }
-
     },
     60 * 1000
 );
@@ -1187,34 +1063,26 @@ setInterval(
 app.listen(
     PORT,
     () => {
-
         console.log(
-            "================================="
+            "================================"
         );
 
         console.log(
-            "LEXINX WEB ONLINE"
+            "LEXINX PROTECT ONLINE"
         );
 
         console.log(
-            "Domain:",
+            "DOMAIN:",
             DOMAIN
         );
 
         console.log(
-            "Port:",
+            "PORT:",
             PORT
         );
 
         console.log(
-            "Turnstile:",
-            TURNSTILE_SECRET
-                ? "CONFIGURED"
-                : "MISSING"
-        );
-
-        console.log(
-            "================================="
+            "================================"
         );
     }
 );
