@@ -26,10 +26,7 @@ if (!fs.existsSync(DB_FILE)) {
 
 app.disable("x-powered-by");
 
-app.use(express.json({
-    limit: "25mb"
-}));
-
+app.use(express.json({ limit: "25mb" }));
 app.use(express.static(PUBLIC_DIR));
 
 /* =====================================================
@@ -55,7 +52,7 @@ function writeDB(db) {
 }
 
 /* =====================================================
-   RANDOM
+   HELPERS
 ===================================================== */
 
 function randomHex(bytes = 32) {
@@ -69,10 +66,6 @@ function cleanName(name) {
         .replace(/[^\w .-]/g, "_")
         .slice(0, 80);
 }
-
-/* =====================================================
-   HEADERS
-===================================================== */
 
 function secure(res) {
     return res
@@ -94,11 +87,7 @@ function block(res) {
         .send("LEXINX BLOCK");
 }
 
-/* =====================================================
-   BROWSER CHECK
-===================================================== */
-
-function browserNavigation(req) {
+function isBrowserNavigation(req) {
     const accept =
         String(
             req.headers.accept || ""
@@ -128,37 +117,28 @@ function browserNavigation(req) {
 const sessions = new Map();
 
 function createChallenge() {
-    const now = Date.now();
-
     return {
         token: randomHex(32),
         nonce: randomHex(16),
-        expiresAt: now + TOKEN_TTL,
+        expiresAt:
+            Date.now() + TOKEN_TTL,
         used: false
     };
 }
 
-function createSession(scriptID) {
-    const now = Date.now();
-
+function createSession(scriptId) {
     const session = {
         id: randomHex(32),
-
-        scriptID,
-
-        createdAt: now,
+        scriptId,
 
         expiresAt:
-            now + SESSION_TTL,
+            Date.now() + SESSION_TTL,
 
         stage: 2,
 
         l2: createChallenge(),
-
         l3: null,
-
         l4: null,
-
         l5: null
     };
 
@@ -217,19 +197,7 @@ function consumeChallenge(
     }
 
     if (
-        typeof token !== "string" ||
-        typeof nonce !== "string"
-    ) {
-        return false;
-    }
-
-    if (
-        token !== challenge.token
-    ) {
-        return false;
-    }
-
-    if (
+        token !== challenge.token ||
         nonce !== challenge.nonce
     ) {
         return false;
@@ -260,8 +228,10 @@ app.get("/", (req, res) => {
 app.post(
     "/api/create",
     (req, res) => {
+
         const source =
-            typeof req.body?.source === "string"
+            typeof req.body?.source ===
+            "string"
                 ? req.body.source
                 : "";
 
@@ -272,11 +242,13 @@ app.post(
             });
         }
 
-        const name =
-            cleanName(req.body?.name);
-
         const id =
             randomHex(12);
+
+        const name =
+            cleanName(
+                req.body?.name
+            );
 
         const db =
             readDB();
@@ -285,8 +257,22 @@ app.post(
             id,
             name,
             source,
-            createdAt: Date.now(),
-            updatedAt: Date.now()
+
+            /*
+             * Bootstrapper/config riêng
+             * cho từng script.
+             */
+            bootstrapper: {
+                scriptId: id,
+                name,
+                version: "1.0.0"
+            },
+
+            createdAt:
+                Date.now(),
+
+            updatedAt:
+                Date.now()
         };
 
         writeDB(db);
@@ -298,13 +284,27 @@ app.post(
 
             name,
 
-            endpoint:
-                `${DOMAIN}/api/loader/${id}`,
-
             loader:
                 `loadstring(game:HttpGet(${JSON.stringify(
                     `${DOMAIN}/api/loader/${id}`
-                )}))()`
+                )}))()`,
+
+            endpoints: {
+                loader:
+                    `${DOMAIN}/api/loader/${id}`,
+
+                l3:
+                    `${DOMAIN}/api/l3/${id}`,
+
+                l4:
+                    `${DOMAIN}/api/l4/${id}`,
+
+                l5:
+                    `${DOMAIN}/api/l5/${id}`,
+
+                data:
+                    `${DOMAIN}/api/data/${id}`
+            }
         });
     }
 );
@@ -316,6 +316,7 @@ app.post(
 app.post(
     "/api/edit/:id",
     (req, res) => {
+
         const db =
             readDB();
 
@@ -325,7 +326,8 @@ app.post(
         if (!script) {
             return res.status(404).json({
                 ok: false,
-                error: "Script not found"
+                error:
+                    "Script not found"
             });
         }
 
@@ -338,7 +340,8 @@ app.post(
             ) {
                 return res.status(400).json({
                     ok: false,
-                    error: "Script is empty"
+                    error:
+                        "Script is empty"
                 });
             }
 
@@ -357,6 +360,19 @@ app.post(
                 );
         }
 
+        script.bootstrapper = {
+            scriptId:
+                script.id,
+
+            name:
+                script.name,
+
+            version:
+                String(
+                    Date.now()
+                )
+        };
+
         script.updatedAt =
             Date.now();
 
@@ -365,9 +381,8 @@ app.post(
         secure(res).json({
             ok: true,
 
-            id: script.id,
-
-            name: script.name,
+            id:
+                script.id,
 
             loader:
                 `loadstring(game:HttpGet(${JSON.stringify(
@@ -379,6 +394,7 @@ app.post(
 
 /* =====================================================
    L1
+   /api/loader/:id
 ===================================================== */
 
 app.get(
@@ -386,7 +402,7 @@ app.get(
     (req, res) => {
 
         if (
-            browserNavigation(req)
+            isBrowserNavigation(req)
         ) {
             return block(res);
         }
@@ -406,179 +422,126 @@ app.get(
                 script.id
             );
 
-        /*
-         * L1 được tạo động.
-         * L1 nhận challenge L2 rồi
-         * tự chạy toàn bộ chain.
-         */
-
         const lua = `
 local HttpService = game:GetService("HttpService")
-
-local DOMAIN = ${JSON.stringify(DOMAIN)}
 
 local SESSION = ${JSON.stringify(
             session.id
         )}
 
-local L2_TOKEN = ${JSON.stringify(
+local TOKEN = ${JSON.stringify(
             session.l2.token
         )}
 
-local L2_NONCE = ${JSON.stringify(
+local NONCE = ${JSON.stringify(
             session.l2.nonce
         )}
 
-local function postJSON(url, body)
+local URL = ${JSON.stringify(
+            `${DOMAIN}/api/l3/${script.id}`
+        )}
 
-    local ok, response = pcall(function()
+local response = request({
+    Url = URL,
+    Method = "POST",
 
-        return request({
-            Url = url,
+    Headers = {
+        ["Content-Type"] =
+            "application/json"
+    },
 
-            Method = "POST",
-
-            Headers = {
-                ["Content-Type"] =
-                    "application/json"
-            },
-
-            Body =
-                HttpService:JSONEncode(body)
-        })
-
-    end)
-
-    if not ok then
-        error("LEXINX BLOCK")
-    end
-
-    if not response then
-        error("LEXINX BLOCK")
-    end
-
-    if response.StatusCode ~= 200 then
-        error(
-            "LEXINX BLOCK HTTP " ..
-            tostring(response.StatusCode)
-        )
-    end
-
-    local decoded, data =
-        pcall(function()
-
-            return HttpService:JSONDecode(
-                response.Body
-            )
-
-        end)
-
-    if not decoded then
-        error("LEXINX BLOCK")
-    end
-
-    if type(data) ~= "table" then
-        error("LEXINX BLOCK")
-    end
-
-    if data.ok ~= true then
-        error("LEXINX BLOCK")
-    end
-
-    return data
-end
-
---------------------------------------------------------
--- L2 -> L3
---------------------------------------------------------
-
-local L3 = postJSON(
-    DOMAIN .. "/api/l3",
-    {
+    Body = HttpService:JSONEncode({
         session = SESSION,
-        token = L2_TOKEN,
-        nonce = L2_NONCE
-    }
-)
+        token = TOKEN,
+        nonce = NONCE
+    })
+})
 
-if L3.stage ~= 3 then
+if response.StatusCode ~= 200 then
     error("LEXINX BLOCK")
 end
 
---------------------------------------------------------
--- L3 -> L4
---------------------------------------------------------
-
-local L4 = postJSON(
-    DOMAIN .. "/api/l4",
-    {
-        session = L3.session,
-        token = L3.token,
-        nonce = L3.nonce
-    }
-)
-
-if L4.stage ~= 4 then
-    error("LEXINX BLOCK")
-end
-
---------------------------------------------------------
--- L4 -> L5
---------------------------------------------------------
-
-local L5 = postJSON(
-    DOMAIN .. "/api/l5",
-    {
-        session = L4.session,
-        token = L4.token,
-        nonce = L4.nonce
-    }
-)
-
-if L5.stage ~= 5 then
-    error("LEXINX BLOCK")
-end
-
---------------------------------------------------------
--- L5 -> SOURCE
---------------------------------------------------------
-
-local RESULT = postJSON(
-    DOMAIN .. "/api/data",
-    {
-        session = L5.session,
-        token = L5.token,
-        nonce = L5.nonce
-    }
-)
-
-if type(RESULT.code) ~= "string" then
-    error("LEXINX BLOCK: SOURCE MISSING")
-end
-
---------------------------------------------------------
--- EXECUTE
---------------------------------------------------------
-
-local fn, compileError =
-    loadstring(RESULT.code)
-
-if not fn then
-    error(
-        "LEXINX COMPILE ERROR: " ..
-        tostring(compileError)
+local data =
+    HttpService:JSONDecode(
+        response.Body
     )
+
+if not data.ok then
+    error("LEXINX BLOCK")
 end
 
-local success, runtimeError =
-    pcall(fn)
+local function post(url, body)
 
-if not success then
-    error(
-        "LEXINX RUNTIME ERROR: " ..
-        tostring(runtimeError)
-    )
+    local r = request({
+        Url = url,
+        Method = "POST",
+
+        Headers = {
+            ["Content-Type"] =
+                "application/json"
+        },
+
+        Body =
+            HttpService:JSONEncode(body)
+    })
+
+    if r.StatusCode ~= 200 then
+        error("LEXINX BLOCK")
+    end
+
+    local d =
+        HttpService:JSONDecode(
+            r.Body
+        )
+
+    if not d.ok then
+        error("LEXINX BLOCK")
+    end
+
+    return d
 end
+
+local l4 = post(
+    ${JSON.stringify(
+        `${DOMAIN}/api/l4/${script.id}`
+    )},
+    {
+        session = data.session,
+        token = data.token,
+        nonce = data.nonce
+    }
+)
+
+local l5 = post(
+    ${JSON.stringify(
+        `${DOMAIN}/api/l5/${script.id}`
+    )},
+    {
+        session = l4.session,
+        token = l4.token,
+        nonce = l4.nonce
+    }
+)
+
+local bootstrap = post(
+    ${JSON.stringify(
+        `${DOMAIN}/api/data/${script.id}`
+    )},
+    {
+        session = l5.session,
+        token = l5.token,
+        nonce = l5.nonce
+    }
+)
+
+if type(bootstrap.bootstrapper) ~= "table" then
+    error("LEXINX BLOCK")
+end
+
+print(
+    "LEXINX bootstrapper:",
+    bootstrap.bootstrapper.scriptId
+)
 `;
 
         secure(res)
@@ -588,22 +551,32 @@ end
 );
 
 /* =====================================================
-   L2 -> L3
+   L3
+   /api/l3/:id
 ===================================================== */
 
 app.get(
-    "/api/l3",
+    "/api/l3/:id",
     (req, res) => {
         return block(res);
     }
 );
 
 app.post(
-    "/api/l3",
+    "/api/l3/:id",
     (req, res) => {
 
         if (
-            browserNavigation(req)
+            isBrowserNavigation(req)
+        ) {
+            return block(res);
+        }
+
+        const db =
+            readDB();
+
+        if (
+            !db[req.params.id]
         ) {
             return block(res);
         }
@@ -612,12 +585,20 @@ app.post(
             session,
             token,
             nonce
-        } = req.body || {};
+        } =
+            req.body || {};
 
         const s =
             getSession(session);
 
         if (!s) {
+            return block(res);
+        }
+
+        if (
+            s.scriptId !==
+            req.params.id
+        ) {
             return block(res);
         }
 
@@ -645,37 +626,45 @@ app.post(
 
             stage: 3,
 
-            session: s.id,
+            session:
+                s.id,
 
             token:
                 s.l3.token,
 
             nonce:
-                s.l3.nonce,
-
-            next:
-                `${DOMAIN}/api/l4`
+                s.l3.nonce
         });
     }
 );
 
 /* =====================================================
-   L3 -> L4
+   L4
+   /api/l4/:id
 ===================================================== */
 
 app.get(
-    "/api/l4",
+    "/api/l4/:id",
     (req, res) => {
         return block(res);
     }
 );
 
 app.post(
-    "/api/l4",
+    "/api/l4/:id",
     (req, res) => {
 
         if (
-            browserNavigation(req)
+            isBrowserNavigation(req)
+        ) {
+            return block(res);
+        }
+
+        const db =
+            readDB();
+
+        if (
+            !db[req.params.id]
         ) {
             return block(res);
         }
@@ -684,12 +673,20 @@ app.post(
             session,
             token,
             nonce
-        } = req.body || {};
+        } =
+            req.body || {};
 
         const s =
             getSession(session);
 
         if (!s) {
+            return block(res);
+        }
+
+        if (
+            s.scriptId !==
+            req.params.id
+        ) {
             return block(res);
         }
 
@@ -717,37 +714,45 @@ app.post(
 
             stage: 4,
 
-            session: s.id,
+            session:
+                s.id,
 
             token:
                 s.l4.token,
 
             nonce:
-                s.l4.nonce,
-
-            next:
-                `${DOMAIN}/api/l5`
+                s.l4.nonce
         });
     }
 );
 
 /* =====================================================
-   L4 -> L5
+   L5
+   /api/l5/:id
 ===================================================== */
 
 app.get(
-    "/api/l5",
+    "/api/l5/:id",
     (req, res) => {
         return block(res);
     }
 );
 
 app.post(
-    "/api/l5",
+    "/api/l5/:id",
     (req, res) => {
 
         if (
-            browserNavigation(req)
+            isBrowserNavigation(req)
+        ) {
+            return block(res);
+        }
+
+        const db =
+            readDB();
+
+        if (
+            !db[req.params.id]
         ) {
             return block(res);
         }
@@ -756,12 +761,20 @@ app.post(
             session,
             token,
             nonce
-        } = req.body || {};
+        } =
+            req.body || {};
 
         const s =
             getSession(session);
 
         if (!s) {
+            return block(res);
+        }
+
+        if (
+            s.scriptId !==
+            req.params.id
+        ) {
             return block(res);
         }
 
@@ -789,38 +802,49 @@ app.post(
 
             stage: 5,
 
-            session: s.id,
+            session:
+                s.id,
 
             token:
                 s.l5.token,
 
             nonce:
-                s.l5.nonce,
-
-            next:
-                `${DOMAIN}/api/data`
+                s.l5.nonce
         });
     }
 );
 
 /* =====================================================
-   L5 -> SOURCE
+   DATA
+   /api/data/:id
+
+   L5 thành công → bootstrapper
 ===================================================== */
 
 app.get(
-    "/api/data",
+    "/api/data/:id",
     (req, res) => {
         return block(res);
     }
 );
 
 app.post(
-    "/api/data",
+    "/api/data/:id",
     (req, res) => {
 
         if (
-            browserNavigation(req)
+            isBrowserNavigation(req)
         ) {
+            return block(res);
+        }
+
+        const db =
+            readDB();
+
+        const script =
+            db[req.params.id];
+
+        if (!script) {
             return block(res);
         }
 
@@ -828,12 +852,20 @@ app.post(
             session,
             token,
             nonce
-        } = req.body || {};
+        } =
+            req.body || {};
 
         const s =
             getSession(session);
 
         if (!s) {
+            return block(res);
+        }
+
+        if (
+            s.scriptId !==
+            req.params.id
+        ) {
             return block(res);
         }
 
@@ -851,37 +883,32 @@ app.post(
             return block(res);
         }
 
-        const db =
-            readDB();
-
-        const script =
-            db[s.scriptID];
-
-        if (!script) {
-            sessions.delete(s.id);
-
-            return res.status(404).json({
-                ok: false,
-                error: "Script not found"
-            });
-        }
-
         /*
-         * Hủy session ngay khi challenge
-         * cuối được consume.
+         * Session kết thúc.
          */
 
-        sessions.delete(s.id);
+        sessions.delete(
+            s.id
+        );
+
+        /*
+         * L5 trả bootstrapper,
+         * không trả source trực tiếp.
+         */
 
         secure(res).json({
             ok: true,
-            code: script.source
+
+            stage: 5,
+
+            bootstrapper:
+                script.bootstrapper
         });
     }
 );
 
 /* =====================================================
-   LIST SCRIPTS
+   LIST
 ===================================================== */
 
 app.get(
@@ -895,9 +922,11 @@ app.get(
             Object.values(db)
                 .reverse()
                 .map(script => ({
-                    id: script.id,
+                    id:
+                        script.id,
 
-                    name: script.name,
+                    name:
+                        script.name,
 
                     createdAt:
                         script.createdAt,
@@ -934,7 +963,8 @@ app.delete(
         ) {
             return res.status(404).json({
                 ok: false,
-                error: "Script not found"
+                error:
+                    "Script not found"
             });
         }
 
@@ -1013,7 +1043,7 @@ app.listen(
     () => {
 
         console.log(
-            "======================================"
+            "================================"
         );
 
         console.log(
@@ -1031,24 +1061,15 @@ app.listen(
         );
 
         console.log(
-            "FLOW:",
-            "L1 -> L2 -> L3 -> L4 -> L5 -> SOURCE"
+            "FLOW:"
         );
 
         console.log(
-            "SESSION TTL:",
-            SESSION_TTL,
-            "ms"
+            "L1 -> L3/:id -> L4/:id -> L5/:id -> DATA/:id"
         );
 
         console.log(
-            "TOKEN TTL:",
-            TOKEN_TTL,
-            "ms"
-        );
-
-        console.log(
-            "======================================"
+            "================================"
         );
     }
 );
