@@ -4,323 +4,227 @@ const fs = require("fs");
 const path = require("path");
 
 const app = express();
-
 const PORT = process.env.PORT || 3000;
-const DOMAIN =
-    process.env.DOMAIN ||
-    "https://Lexinx-protect.onrender.com";
+
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.static(path.join(__dirname, "public")));
 
 const DATA_DIR = path.join(__dirname, "data");
-const PUBLIC_DIR = path.join(__dirname, "public");
+const USERS_FILE = path.join(DATA_DIR, "users.json");
 
-const FILES = {
-    users: path.join(DATA_DIR, "users.json"),
-    scripts: path.join(DATA_DIR, "scripts.json"),
-    sessions: path.join(DATA_DIR, "sessions.json"),
-    keys: path.join(DATA_DIR, "keys.json")
-};
-
-fs.mkdirSync(DATA_DIR, { recursive: true });
-fs.mkdirSync(PUBLIC_DIR, { recursive: true });
-
-for (const file of Object.values(FILES)) {
-    if (!fs.existsSync(file)) {
-        fs.writeFileSync(file, "{}", "utf8");
-    }
+if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-app.use(express.json({ limit: "15mb" }));
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(PUBLIC_DIR));
+if (!fs.existsSync(USERS_FILE)) {
+    fs.writeFileSync(USERS_FILE, "{}", "utf8");
+}
 
-/* =========================================================
-   DATABASE
-========================================================= */
-
-function readJSON(file) {
+function loadUsers() {
     try {
-        return JSON.parse(fs.readFileSync(file, "utf8"));
+        const raw = fs.readFileSync(USERS_FILE, "utf8");
+        return JSON.parse(raw || "{}");
     } catch {
         return {};
     }
 }
 
-function writeJSON(file, data) {
-    fs.writeFileSync(
-        file,
-        JSON.stringify(data, null, 2),
-        "utf8"
-    );
+function saveUsers(users) {
+    const tmp = USERS_FILE + ".tmp";
+    fs.writeFileSync(tmp, JSON.stringify(users, null, 2), "utf8");
+    fs.renameSync(tmp, USERS_FILE);
 }
 
-function readUsers() {
-    return readJSON(FILES.users);
+function makeId() {
+    return crypto.randomBytes(10).toString("hex");
 }
 
-function readScripts() {
-    return readJSON(FILES.scripts);
+function hashPassword(password, salt = crypto.randomBytes(16).toString("hex")) {
+    const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+    return { salt, hash };
 }
 
-function readSessions() {
-    return readJSON(FILES.sessions);
+function verifyPassword(password, salt, expectedHash) {
+    try {
+        const actual = crypto.scryptSync(password, salt, 64).toString("hex");
+
+        const a = Buffer.from(actual, "hex");
+        const b = Buffer.from(expectedHash, "hex");
+
+        return a.length === b.length && crypto.timingSafeEqual(a, b);
+    } catch {
+        return false;
+    }
 }
 
-function readKeys() {
-    return readJSON(FILES.keys);
-}
-
-/* =========================================================
-   UTILITIES
-========================================================= */
-
-function randomID(bytes = 16) {
-    return crypto.randomBytes(bytes).toString("hex");
-}
-
-function hash(value) {
-    return crypto
-        .createHash("sha256")
-        .update(String(value))
-        .digest("hex");
-}
-
-function cleanName(value) {
+function cleanUsername(value) {
     return String(value || "")
         .trim()
-        .replace(/[^\w.-]/g, "_")
-        .slice(0, 32);
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, "");
 }
 
-function now() {
-    return Date.now();
+function validUsername(username) {
+    return /^[a-z0-9_]{3,24}$/.test(username);
 }
 
-function browserBlocked(req) {
-    const ua = String(req.headers["user-agent"] || "").toLowerCase();
-
-    /*
-      Các request không có User-Agent thường đến từ
-      executor/request/game HTTP client.
-    */
-
-    if (!ua) {
-        return false;
-    }
-
-    const browserWords = [
-        "mozilla",
-        "chrome",
-        "safari",
-        "firefox",
-        "edge",
-        "opera",
-        "android webview"
-    ];
-
-    return browserWords.some(x => ua.includes(x));
+function validPassword(password) {
+    return typeof password === "string" && password.length >= 6 && password.length <= 128;
 }
-
-function block(res) {
-    return res
-        .status(403)
-        .type("text/plain")
-        .set("Cache-Control", "no-store")
-        .send("LEXINX BLOCK");
-}
-
-function safeCompare(a, b) {
-    if (
-        typeof a !== "string" ||
-        typeof b !== "string" ||
-        a.length !== b.length
-    ) {
-        return false;
-    }
-
-    return crypto.timingSafeEqual(
-        Buffer.from(a),
-        Buffer.from(b)
-    );
-}
-
-/* =========================================================
-   SESSION
-========================================================= */
-
-const SESSION_TTL = 5 * 60 * 1000;
-
-function createSession(userId, scriptId) {
-    const sessions = readSessions();
-
-    const session = randomID(32);
-    const token = randomID(32);
-
-    sessions[session] = {
-        session,
-        token,
-        userId,
-        scriptId,
-
-        stage: 2,
-
-        createdAt: now(),
-        expiresAt: now() + SESSION_TTL,
-
-        used: false
-    };
-
-    writeJSON(FILES.sessions, sessions);
-
-    return sessions[session];
-}
-
-function getSession(session, token) {
-    const sessions = readSessions();
-    const data = sessions[session];
-
-    if (!data) {
-        return null;
-    }
-
-    if (!safeCompare(data.token, token)) {
-        return null;
-    }
-
-    if (data.used) {
-        return null;
-    }
-
-    if (data.expiresAt < now()) {
-        delete sessions[session];
-        writeJSON(FILES.sessions, sessions);
-        return null;
-    }
-
-    return data;
-}
-
-function advanceStage(data, expectedStage, nextStage) {
-    if (data.stage !== expectedStage) {
-        return false;
-    }
-
-    const sessions = readSessions();
-
-    if (!sessions[data.session]) {
-        return false;
-    }
-
-    sessions[data.session].stage = nextStage;
-
-    writeJSON(FILES.sessions, sessions);
-
-    return true;
-}
-
-/* =========================================================
-   HOME
-========================================================= */
-
-app.get("/", (req, res) => {
-    res.sendFile(
-        path.join(PUBLIC_DIR, "index.html")
-    );
-});
-
-/* =========================================================
-   ACCOUNT
-========================================================= */
 
 /*
-POST /api/account/register
-
-{
-    "username": "test",
-    "password": "123456"
-}
+    =========================
+       HEALTH CHECK
+    =========================
 */
 
-app.post("/api/account/register", (req, res) => {
-    const username = cleanName(req.body?.username);
-    const password = String(req.body?.password || "");
-
-    if (username.length < 3) {
-        return res.status(400).json({
-            ok: false,
-            error: "Username must contain at least 3 characters"
-        });
-    }
-
-    if (password.length < 6) {
-        return res.status(400).json({
-            ok: false,
-            error: "Password must contain at least 6 characters"
-        });
-    }
-
-    const users = readUsers();
-
-    const exists = Object.values(users).some(
-        user =>
-            user.username.toLowerCase() ===
-            username.toLowerCase()
-    );
-
-    if (exists) {
-        return res.status(409).json({
-            ok: false,
-            error: "Username already exists"
-        });
-    }
-
-    const id = randomID(12);
-
-    users[id] = {
-        id,
-        username,
-        passwordHash: hash(password),
-        createdAt: now(),
-        scripts: []
-    };
-
-    writeJSON(FILES.users, users);
-
+app.get("/api/health", (req, res) => {
     res.json({
         ok: true,
-        user: {
-            id,
-            username
-        }
+        service: "LEXINX Protect",
+        time: new Date().toISOString()
     });
 });
 
 /*
-POST /api/account/login
+    =========================
+       REGISTER
+    =========================
 */
 
-app.post("/api/account/login", (req, res) => {
-    const username = cleanName(req.body?.username);
-    const password = String(req.body?.password || "");
+app.post("/api/auth/register", (req, res) => {
+    try {
+        const username = cleanUsername(req.body.username);
+        const password = String(req.body.password || "");
 
-    const users = readUsers();
+        if (!validUsername(username)) {
+            return res.status(400).json({
+                ok: false,
+                error: "Tên tài khoản phải dài 3-24 ký tự và chỉ gồm a-z, 0-9, _."
+            });
+        }
 
-    const user = Object.values(users).find(
-        item =>
-            item.username.toLowerCase() ===
-            username.toLowerCase()
-    );
+        if (!validPassword(password)) {
+            return res.status(400).json({
+                ok: false,
+                error: "Mật khẩu phải có ít nhất 6 ký tự."
+            });
+        }
 
-    if (!user) {
-        return res.status(401).json({
+        const users = loadUsers();
+
+        if (users[username]) {
+            return res.status(409).json({
+                ok: false,
+                error: "Tài khoản đã tồn tại."
+            });
+        }
+
+        const id = makeId();
+        const passwordData = hashPassword(password);
+
+        users[username] = {
+            id,
+            username,
+            passwordHash: passwordData.hash,
+            passwordSalt: passwordData.salt,
+            createdAt: new Date().toISOString()
+        };
+
+        saveUsers(users);
+
+        return res.status(201).json({
+            ok: true,
+            message: "Tạo tài khoản thành công.",
+            user: {
+                id,
+                username
+            },
+            redirect: `/acc/${encodeURIComponent(username)}/${id}`
+        });
+
+    } catch (err) {
+        console.error("REGISTER ERROR:", err);
+
+        return res.status(500).json({
             ok: false,
-            error: "Invalid username or password"
+            error: "Server error khi tạo tài khoản."
         });
     }
+});
 
-    if (!safeCompare(user.passwordHash, hash(password))) {
-        return res.status(401).json({
+/*
+    =========================
+       LOGIN
+    =========================
+*/
+
+app.post("/api/auth/login", (req, res) => {
+    try {
+        const username = cleanUsername(req.body.username);
+        const password = String(req.body.password || "");
+
+        const users = loadUsers();
+        const user = users[username];
+
+        if (!user) {
+            return res.status(401).json({
+                ok: false,
+                error: "Sai tên tài khoản hoặc mật khẩu."
+            });
+        }
+
+        const valid = verifyPassword(
+            password,
+            user.passwordSalt,
+            user.passwordHash
+        );
+
+        if (!valid) {
+            return res.status(401).json({
+                ok: false,
+                error: "Sai tên tài khoản hoặc mật khẩu."
+            });
+        }
+
+        return res.json({
+            ok: true,
+            message: "Đăng nhập thành công.",
+            user: {
+                id: user.id,
+                username: user.username
+            },
+            redirect: `/acc/${encodeURIComponent(user.username)}/${user.id}`
+        });
+
+    } catch (err) {
+        console.error("LOGIN ERROR:", err);
+
+        return res.status(500).json({
             ok: false,
-            error: "Invalid username or password"
+            error: "Server error khi đăng nhập."
+        });
+    }
+});
+
+/*
+    =========================
+       USER INFO
+    =========================
+*/
+
+app.get("/api/auth/user/:username/:id", (req, res) => {
+    const username = cleanUsername(req.params.username);
+    const id = String(req.params.id);
+
+    const users = loadUsers();
+    const user = users[username];
+
+    if (!user || user.id !== id) {
+        return res.status(404).json({
+            ok: false,
+            error: "Không tìm thấy tài khoản."
         });
     }
 
@@ -328,643 +232,249 @@ app.post("/api/account/login", (req, res) => {
         ok: true,
         user: {
             id: user.id,
-            username: user.username
-        },
-
-        accountURL:
-            `${DOMAIN}/acc/${encodeURIComponent(user.username)}/${user.id}`
+            username: user.username,
+            createdAt: user.createdAt
+        }
     });
 });
 
-/* =========================================================
-   USER PAGE
-========================================================= */
-
-app.get("/acc/:username/:id", (req, res) => {
-    const users = readUsers();
-    const user = users[req.params.id];
-
-    if (!user) {
-        return res.status(404).send("Account not found");
-    }
-
-    if (
-        user.username.toLowerCase() !==
-        String(req.params.username).toLowerCase()
-    ) {
-        return res.status(404).send("Account not found");
-    }
-
-    res.sendFile(
-        path.join(PUBLIC_DIR, "index.html")
-    );
-});
-
-/* =========================================================
-   CREATE SCRIPT
-========================================================= */
-
 /*
-POST /api/scripts/create
-
-{
-    "userId": "...",
-    "name": "My Script",
-    "source": "print('hello')"
-}
+    =========================
+       PRIVATE ACCOUNT PAGE
+    =========================
 */
 
-app.post("/api/scripts/create", (req, res) => {
-    const userId = String(req.body?.userId || "");
-    const name = cleanName(req.body?.name || "Script");
-    const source =
-        typeof req.body?.source === "string"
-            ? req.body.source
-            : "";
+app.get("/acc/:username/:id", (req, res) => {
+    const username = cleanUsername(req.params.username);
+    const id = String(req.params.id);
 
-    const users = readUsers();
-    const scripts = readScripts();
+    const users = loadUsers();
+    const user = users[username];
 
-    if (!users[userId]) {
-        return res.status(401).json({
-            ok: false,
-            error: "Invalid account"
-        });
+    if (!user || user.id !== id) {
+        return res.status(404).send(`
+            <!doctype html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <title>LEXINX - Not Found</title>
+                <style>
+                    body {
+                        background:#050505;
+                        color:white;
+                        font-family:Arial,sans-serif;
+                        display:flex;
+                        justify-content:center;
+                        align-items:center;
+                        height:100vh;
+                        margin:0;
+                    }
+                </style>
+            </head>
+            <body>
+                <h2>Account not found</h2>
+            </body>
+            </html>
+        `);
     }
 
-    if (!source.trim()) {
+    res.sendFile(path.join(__dirname, "public", "account.html"));
+});
+
+/*
+    =========================
+       SCRIPT API
+       Dùng cho hệ thống loader
+    =========================
+*/
+
+const scripts = Object.create(null);
+
+/*
+    Tạo script:
+    POST /api/scripts
+
+    Body:
+    {
+        "id": "abc123",
+        "source": "print('hello')"
+    }
+
+    Lưu ý:
+    source chỉ nằm server.
+*/
+
+app.post("/api/scripts", (req, res) => {
+    const id = String(req.body.id || "").trim();
+    const source = String(req.body.source || "");
+
+    if (!id || !source) {
         return res.status(400).json({
             ok: false,
-            error: "Script is empty"
+            error: "Thiếu id hoặc source."
         });
     }
-
-    const id = randomID(12);
 
     scripts[id] = {
         id,
-        name,
-        owner: userId,
         source,
-        createdAt: now(),
-        updatedAt: now()
+        createdAt: new Date().toISOString()
     };
 
-    users[userId].scripts =
-        Array.isArray(users[userId].scripts)
-            ? users[userId].scripts
-            : [];
+    res.json({
+        ok: true,
+        id,
+        message: "Script saved."
+    });
+});
 
-    users[userId].scripts.push(id);
+/*
+    Kiểm tra script tồn tại.
+    Endpoint này không trả source.
+*/
 
-    writeJSON(FILES.scripts, scripts);
-    writeJSON(FILES.users, users);
+app.get("/api/scripts/:id/exists", (req, res) => {
+    const id = String(req.params.id);
 
     res.json({
         ok: true,
-
-        script: {
-            id,
-            name,
-            owner: userId
-        },
-
-        loader:
-            `loadstring(game:HttpGet("${DOMAIN}/api/loader/${id}"))()`
+        exists: !!scripts[id]
     });
 });
 
-/* =========================================================
-   EDIT SCRIPT
-========================================================= */
+/*
+    =========================
+       LOADER BLOCK
+    =========================
 
-app.post("/api/scripts/:id/edit", (req, res) => {
-    const scripts = readScripts();
+    Truy cập bằng browser bình thường:
+       GET /api/loader/:id
 
-    const script = scripts[req.params.id];
+    -> 403.
 
-    if (!script) {
-        return res.status(404).json({
-            ok: false,
-            error: "Script not found"
-        });
-    }
+    Loader có thể gửi:
+       X-LEXINX-LOADER: 1
 
-    const source =
-        typeof req.body?.source === "string"
-            ? req.body.source
-            : null;
-
-    const name =
-        typeof req.body?.name === "string"
-            ? cleanName(req.body.name)
-            : null;
-
-    if (source !== null) {
-        if (!source.trim()) {
-            return res.status(400).json({
-                ok: false,
-                error: "Script cannot be empty"
-            });
-        }
-
-        script.source = source;
-    }
-
-    if (name !== null && name.length > 0) {
-        script.name = name;
-    }
-
-    script.updatedAt = now();
-
-    writeJSON(FILES.scripts, scripts);
-
-    res.json({
-        ok: true,
-        script: {
-            id: script.id,
-            name: script.name,
-            updatedAt: script.updatedAt
-        }
-    });
-});
-
-/* =========================================================
-   LIST USER SCRIPTS
-========================================================= */
-
-app.get("/api/account/:userId/scripts", (req, res) => {
-    const users = readUsers();
-    const scripts = readScripts();
-
-    const user = users[req.params.userId];
-
-    if (!user) {
-        return res.status(404).json({
-            ok: false,
-            error: "Account not found"
-        });
-    }
-
-    const result = (user.scripts || [])
-        .map(id => scripts[id])
-        .filter(Boolean)
-        .map(script => ({
-            id: script.id,
-            name: script.name,
-            createdAt: script.createdAt,
-            updatedAt: script.updatedAt,
-
-            loader:
-                `loadstring(game:HttpGet("${DOMAIN}/api/loader/${script.id}"))()`
-        }));
-
-    res.json({
-        ok: true,
-        scripts: result
-    });
-});
-
-/* =========================================================
-   DELETE SCRIPT
-========================================================= */
-
-app.delete("/api/scripts/:id", (req, res) => {
-    const scripts = readScripts();
-
-    if (!scripts[req.params.id]) {
-        return res.status(404).json({
-            ok: false,
-            error: "Script not found"
-        });
-    }
-
-    delete scripts[req.params.id];
-
-    writeJSON(FILES.scripts, scripts);
-
-    res.json({
-        ok: true
-    });
-});
-
-/* =========================================================
-   L1
-   SHORT LOADER
-========================================================= */
+    Nhưng header này không phải cơ chế bảo mật tuyệt đối;
+    client có thể giả mạo header.
+*/
 
 app.get("/api/loader/:id", (req, res) => {
+    const id = String(req.params.id);
 
-    if (browserBlocked(req)) {
-        return block(res);
+    if (req.get("X-LEXINX-LOADER") !== "1") {
+        return res.status(403).send("LEXINX BLOCK");
     }
 
-    const scripts = readScripts();
-    const script = scripts[req.params.id];
-
-    if (!script) {
-        return res.status(404)
-            .type("text/plain")
-            .send("LEXINX SCRIPT NOT FOUND");
+    if (!scripts[id]) {
+        return res.status(404).send("SCRIPT NOT FOUND");
     }
-
-    const sessionData =
-        createSession(
-            script.owner,
-            script.id
-        );
 
     /*
-       L1 trả code Lua nhỏ.
-
-       Không trả source.
+        Không trả source ở endpoint loader.
+        Chỉ trả thông tin cần thiết.
     */
 
-    const lua = `
-local HttpService = game:GetService("HttpService")
-
-local BASE = ${JSON.stringify(DOMAIN)}
-local SESSION = ${JSON.stringify(sessionData.session)}
-local TOKEN = ${JSON.stringify(sessionData.token)}
-local ID = ${JSON.stringify(script.id)}
-
-local function request()
-    local fn =
-        (type(request) == "function" and request)
-        or (syn and syn.request)
-        or (http and http.request)
-
-    if not fn then
-        error("LEXINX: HTTP request unavailable", 0)
-    end
-
-    return fn({
-        Url = BASE .. "/api/l2/" .. ID,
-        Method = "POST",
-        Headers = {
-            ["Content-Type"] = "application/json"
-        },
-        Body = HttpService:JSONEncode({
-            session = SESSION,
-            token = TOKEN
-        })
-    })
-end
-
-local response = request()
-
-if not response or response.StatusCode ~= 200 then
-    error("LEXINX: Stage 2 blocked", 0)
-end
-
-local data = HttpService:JSONDecode(response.Body)
-
-if not data.ok then
-    error("LEXINX: Stage 2 rejected", 0)
-end
-
-local fn = loadstring(data.code)
-
-if not fn then
-    error("LEXINX: Stage 2 compile failed", 0)
-end
-
-return fn()
-`;
-
-    res
-        .status(200)
-        .type("text/plain")
-        .set("Cache-Control", "no-store")
-        .set("X-Content-Type-Options", "nosniff")
-        .send(lua);
+    res.json({
+        ok: true,
+        id,
+        stage: 1,
+        next: `/api/l2/${encodeURIComponent(id)}`
+    });
 });
 
-/* =========================================================
-   L2
-========================================================= */
+/*
+    =========================
+       L2
+    =========================
+*/
 
 app.post("/api/l2/:id", (req, res) => {
+    const id = String(req.params.id);
 
-    if (browserBlocked(req)) {
-        return block(res);
-    }
-
-    const session =
-        getSession(
-            req.body?.session,
-            req.body?.token
-        );
-
-    if (!session) {
-        return res.status(403).json({
+    if (!scripts[id]) {
+        return res.status(404).json({
             ok: false,
-            error: "LEXINX BLOCK"
+            error: "SCRIPT NOT FOUND"
         });
     }
 
-    if (session.scriptId !== req.params.id) {
-        return res.status(403).json({
+    const session = crypto.randomBytes(24).toString("hex");
+
+    res.json({
+        ok: true,
+        stage: 2,
+        session,
+        next: `/api/l3/${encodeURIComponent(id)}`
+    });
+});
+
+/*
+    =========================
+       L3
+    =========================
+*/
+
+app.post("/api/l3/:id", (req, res) => {
+    const id = String(req.params.id);
+
+    if (!scripts[id]) {
+        return res.status(404).json({
             ok: false,
-            error: "LEXINX BLOCK"
+            error: "SCRIPT NOT FOUND"
         });
     }
 
-    if (!advanceStage(session, 2, 3)) {
-        return res.status(403).json({
-            ok: false,
-            error: "LEXINX STAGE BLOCK"
-        });
-    }
-
-    const code = `
-local HttpService = game:GetService("HttpService")
-
-local BASE = ${JSON.stringify(DOMAIN)}
-local SESSION = ${JSON.stringify(session.session)}
-local TOKEN = ${JSON.stringify(session.token)}
-local ID = ${JSON.stringify(session.scriptId)}
-
-local function req()
-    local fn =
-        (type(request) == "function" and request)
-        or (syn and syn.request)
-        or (http and http.request)
-
-    if not fn then
-        error("LEXINX: HTTP unavailable", 0)
-    end
-
-    return fn({
-        Url = BASE .. "/api/l3/" .. ID,
-        Method = "POST",
-        Headers = {
-            ["Content-Type"] = "application/json"
-        },
-        Body = HttpService:JSONEncode({
-            session = SESSION,
-            token = TOKEN
-        })
-    })
-end
-
-local r = req()
-
-if not r or r.StatusCode ~= 200 then
-    error("LEXINX: Stage 3 blocked", 0)
-end
-
-local d = HttpService:JSONDecode(r.Body)
-
-if not d.ok then
-    error("LEXINX: Stage 3 rejected", 0)
-end
-
-local f = loadstring(d.code)
-
-if not f then
-    error("LEXINX: Stage 3 compile failed", 0)
-end
-
-return f()
-`;
+    const token = crypto.randomBytes(32).toString("hex");
 
     res.json({
         ok: true,
         stage: 3,
-        code
+        token,
+        next: `/api/l4/${encodeURIComponent(id)}`
     });
 });
 
-/* =========================================================
-   L3
-========================================================= */
+/*
+    =========================
+       L4
+    =========================
+*/
 
-app.post("/api/l3/:id", (req, res) => {
+app.post("/api/l4/:id", (req, res) => {
+    const id = String(req.params.id);
 
-    if (browserBlocked(req)) {
-        return block(res);
-    }
-
-    const session =
-        getSession(
-            req.body?.session,
-            req.body?.token
-        );
-
-    if (!session) {
-        return res.status(403).json({
+    if (!scripts[id]) {
+        return res.status(404).json({
             ok: false,
-            error: "LEXINX BLOCK"
+            error: "SCRIPT NOT FOUND"
         });
     }
 
-    if (
-        session.scriptId !== req.params.id ||
-        session.stage !== 3
-    ) {
-        return res.status(403).json({
-            ok: false,
-            error: "LEXINX STAGE BLOCK"
-        });
-    }
-
-    if (!advanceStage(session, 3, 4)) {
-        return res.status(403).json({
-            ok: false,
-            error: "LEXINX STAGE BLOCK"
-        });
-    }
-
-    const code = `
-local HttpService = game:GetService("HttpService")
-
-local BASE = ${JSON.stringify(DOMAIN)}
-local SESSION = ${JSON.stringify(session.session)}
-local TOKEN = ${JSON.stringify(session.token)}
-local ID = ${JSON.stringify(session.scriptId)}
-
-local function req()
-    local fn =
-        (type(request) == "function" and request)
-        or (syn and syn.request)
-        or (http and http.request)
-
-    if not fn then
-        error("LEXINX: HTTP unavailable", 0)
-    end
-
-    return fn({
-        Url = BASE .. "/api/l4/" .. ID,
-        Method = "POST",
-        Headers = {
-            ["Content-Type"] = "application/json"
-        },
-        Body = HttpService:JSONEncode({
-            session = SESSION,
-            token = TOKEN
-        })
-    })
-end
-
-local r = req()
-
-if not r or r.StatusCode ~= 200 then
-    error("LEXINX: Stage 4 blocked", 0)
-end
-
-local d = HttpService:JSONDecode(r.Body)
-
-if not d.ok then
-    error("LEXINX: Stage 4 rejected", 0)
-end
-
-local f = loadstring(d.code)
-
-if not f then
-    error("LEXINX: Stage 4 compile failed", 0)
-end
-
-return f()
-`;
+    const challenge = crypto.randomBytes(32).toString("hex");
 
     res.json({
         ok: true,
         stage: 4,
-        code
+        challenge,
+        next: `/api/l5/${encodeURIComponent(id)}`
     });
 });
 
-/* =========================================================
-   L4
-========================================================= */
+/*
+    =========================
+       L5
+    =========================
 
-app.post("/api/l4/:id", (req, res) => {
+    Đây mới là endpoint trả source.
 
-    if (browserBlocked(req)) {
-        return block(res);
-    }
-
-    const session =
-        getSession(
-            req.body?.session,
-            req.body?.token
-        );
-
-    if (!session) {
-        return res.status(403).json({
-            ok: false,
-            error: "LEXINX BLOCK"
-        });
-    }
-
-    if (
-        session.scriptId !== req.params.id ||
-        session.stage !== 4
-    ) {
-        return res.status(403).json({
-            ok: false,
-            error: "LEXINX STAGE BLOCK"
-        });
-    }
-
-    if (!advanceStage(session, 4, 5)) {
-        return res.status(403).json({
-            ok: false,
-            error: "LEXINX STAGE BLOCK"
-        });
-    }
-
-    const code = `
-local HttpService = game:GetService("HttpService")
-
-local BASE = ${JSON.stringify(DOMAIN)}
-local SESSION = ${JSON.stringify(session.session)}
-local TOKEN = ${JSON.stringify(session.token)}
-local ID = ${JSON.stringify(session.scriptId)}
-
-local fn =
-    (type(request) == "function" and request)
-    or (syn and syn.request)
-    or (http and http.request)
-
-if not fn then
-    error("LEXINX: HTTP unavailable", 0)
-end
-
-local response = fn({
-    Url = BASE .. "/api/l5/" .. ID,
-    Method = "POST",
-    Headers = {
-        ["Content-Type"] = "application/json"
-    },
-    Body = HttpService:JSONEncode({
-        session = SESSION,
-        token = TOKEN
-    })
-})
-
-if not response or response.StatusCode ~= 200 then
-    error("LEXINX: Stage 5 blocked", 0)
-end
-
-local data = HttpService:JSONDecode(response.Body)
-
-if not data.ok or type(data.source) ~= "string" then
-    error("LEXINX: Payload unavailable", 0)
-end
-
-local execute = loadstring(data.source)
-
-if not execute then
-    error("LEXINX: Payload compile failed", 0)
-end
-
-return execute()
-`;
-
-    res.json({
-        ok: true,
-        stage: 5,
-        code
-    });
-});
-
-/* =========================================================
-   L5 — SOURCE
-========================================================= */
+    Không expose source ở L2/L3/L4.
+*/
 
 app.post("/api/l5/:id", (req, res) => {
+    const id = String(req.params.id);
 
-    if (browserBlocked(req)) {
-        return block(res);
-    }
-
-    const session =
-        getSession(
-            req.body?.session,
-            req.body?.token
-        );
-
-    if (!session) {
-        return res.status(403).json({
-            ok: false,
-            error: "LEXINX BLOCK"
-        });
-    }
-
-    if (
-        session.scriptId !== req.params.id ||
-        session.stage !== 5
-    ) {
-        return res.status(403).json({
-            ok: false,
-            error: "LEXINX STAGE BLOCK"
-        });
-    }
-
-    const scripts = readScripts();
-    const script = scripts[req.params.id];
+    const script = scripts[id];
 
     if (!script) {
         return res.status(404).json({
@@ -973,116 +483,41 @@ app.post("/api/l5/:id", (req, res) => {
         });
     }
 
-    /*
-       Đây là điểm DUY NHẤT trả source.
-    */
-
-    const sessions = readSessions();
-
-    sessions[session.session].used = true;
-
-    writeJSON(FILES.sessions, sessions);
-
-    res
-        .status(200)
-        .json({
-            ok: true,
-            stage: 5,
-            source: script.source
-        });
+    res.json({
+        ok: true,
+        stage: 5,
+        code: script.source
+    });
 });
 
-/* =========================================================
-   DIRECT API BLOCK
-========================================================= */
-
-app.get("/api/l2/:id", (req, res) => {
-    return block(res);
-});
-
-app.get("/api/l3/:id", (req, res) => {
-    return block(res);
-});
-
-app.get("/api/l4/:id", (req, res) => {
-    return block(res);
-});
-
-app.get("/api/l5/:id", (req, res) => {
-    return block(res);
-});
-
-/* =========================================================
-   GLOBAL 404
-========================================================= */
+/*
+    =========================
+       404
+    =========================
+*/
 
 app.use((req, res) => {
-    res
-        .status(404)
-        .type("text/plain")
-        .send("LEXINX BLOCK");
+    res.status(404).send("LEXINX 404");
 });
 
-/* =========================================================
-   CLEAN EXPIRED SESSIONS
-========================================================= */
+/*
+    =========================
+       ERROR HANDLER
+    =========================
+*/
 
-setInterval(() => {
+app.use((err, req, res, next) => {
+    console.error("SERVER ERROR:", err);
 
-    const sessions = readSessions();
-    const current = now();
-
-    let changed = false;
-
-    for (const id of Object.keys(sessions)) {
-        const session = sessions[id];
-
-        if (
-            session.expiresAt < current ||
-            session.used === true
-        ) {
-            delete sessions[id];
-            changed = true;
-        }
-    }
-
-    if (changed) {
-        writeJSON(FILES.sessions, sessions);
-    }
-
-}, 60 * 1000);
-
-/* =========================================================
-   START
-========================================================= */
+    res.status(500).json({
+        ok: false,
+        error: "Internal server error."
+    });
+});
 
 app.listen(PORT, () => {
-
-    console.log(
-        "======================================"
-    );
-
-    console.log(
-        "LEXINX PROTECT SERVER"
-    );
-
-    console.log(
-        `PORT   : ${PORT}`
-    );
-
-    console.log(
-        `DOMAIN : ${DOMAIN}`
-    );
-
-    console.log(
-        "FLOW   : L1 -> L2 -> L3 -> L4 -> L5"
-    );
-
-    console.log(
-        "SOURCE : L5 ONLY"
-    );
-
-    console.log(
-        "======================================"
-    );
+    console.log("=================================");
+    console.log(" LEXINX Protect Server");
+    console.log(" Port:", PORT);
+    console.log("=================================");
 });
