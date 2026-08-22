@@ -1,588 +1,292 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="vi">
 <head>
-<meta charset="UTF-8">
-
-<meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
->
-
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>LEXINX Protect</title>
 
 <style>
-* {
-    box-sizing: border-box;
+*{box-sizing:border-box}
+
+body{
+    margin:0;
+    background:#070707;
+    color:#eee;
+    font-family:Arial,sans-serif;
 }
 
-body {
-    margin: 0;
-    min-height: 100vh;
-    background: #070707;
-    color: #fff;
-    font-family: Arial, Helvetica, sans-serif;
+.wrap{
+    width:min(1100px,94%);
+    margin:35px auto;
 }
 
-button,
-input,
-textarea {
-    font: inherit;
+.card{
+    background:#111;
+    border:1px solid #292929;
+    border-radius:14px;
+    padding:20px;
+    margin-bottom:15px;
 }
 
-button {
-    cursor: pointer;
+h1,h2{
+    margin-top:0;
 }
 
-.hidden {
-    display: none !important;
-}
-
-/* =========================
-   AUTH
-========================= */
-
-.auth {
-    min-height: 100vh;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    padding: 20px;
-}
-
-.auth-card {
-    width: 100%;
-    max-width: 410px;
-
-    padding: 30px;
-
-    background: #111;
-    border: 1px solid #292929;
-
-    border-radius: 18px;
-
-    box-shadow:
-        0 25px 80px
-        rgba(0,0,0,.55);
-}
-
-.logo {
-    text-align: center;
-
-    font-size: 32px;
-    font-weight: 900;
-
-    letter-spacing: 2px;
-
-    margin-bottom: 5px;
-}
-
-.subtitle {
-    text-align: center;
-
-    color: #777;
-
-    margin-bottom: 28px;
-}
-
-input,
-textarea {
-    width: 100%;
-
-    color: #fff;
-    background: #080808;
-
-    border: 1px solid #2c2c2c;
-
-    border-radius: 10px;
-
-    outline: none;
-
-    padding: 12px;
-
-    margin-bottom: 12px;
+input,textarea{
+    width:100%;
+    background:#050505;
+    color:#eee;
+    border:1px solid #333;
+    border-radius:8px;
+    outline:0;
+    padding:12px;
+    font:14px Consolas,monospace;
 }
 
 input:focus,
-textarea:focus {
-    border-color: #666;
+textarea:focus{
+    border-color:#777;
 }
 
-.auth button {
-    width: 100%;
-
-    padding: 12px;
-
-    border: 0;
-    border-radius: 10px;
-
-    background: #fff;
-    color: #000;
-
-    font-weight: 700;
+input{
+    margin-bottom:10px;
 }
 
-.message {
-    min-height: 20px;
-
-    margin-top: 12px;
-
-    text-align: center;
-
-    font-size: 14px;
+textarea{
+    min-height:300px;
+    resize:vertical;
 }
 
-.error {
-    color: #ff6262;
+button{
+    background:#eee;
+    color:#111;
+    border:0;
+    border-radius:8px;
+    padding:11px 16px;
+    font-weight:bold;
+    cursor:pointer;
+    margin:4px;
 }
 
-.success {
-    color: #63e99b;
+button.secondary{
+    background:#222;
+    color:#eee;
+    border:1px solid #333;
 }
 
-.switch {
-    text-align: center;
-
-    margin-top: 20px;
-
-    color: #777;
-
-    cursor: pointer;
+button.danger{
+    background:#421818;
+    color:#ff9999;
 }
 
-.switch span {
-    color: #fff;
-    font-weight: 700;
+button:hover{
+    opacity:.82;
 }
 
-/* =========================
-   DASHBOARD
-========================= */
-
-.dashboard {
-    width: 100%;
-    max-width: 1150px;
-
-    margin: auto;
-
-    padding: 25px;
+.hidden{
+    display:none!important;
 }
 
-.topbar {
-    display: flex;
-
-    justify-content: space-between;
-    align-items: center;
-
-    gap: 20px;
-
-    margin-bottom: 25px;
+.status{
+    background:#0d0d0d;
+    border:1px solid #292929;
+    border-radius:8px;
+    padding:12px;
+    margin-top:12px;
+    white-space:pre-wrap;
+    color:#aaa;
 }
 
-.brand {
-    font-size: 25px;
-    font-weight: 900;
+.ok{
+    color:#7dff91;
 }
 
-.account-info {
-    color: #777;
-
-    margin-top: 4px;
-
-    font-size: 13px;
+.err{
+    color:#ff7070;
 }
 
-.logout {
-    width: auto !important;
-
-    padding: 9px 15px !important;
-
-    background: #191919 !important;
-    color: #fff !important;
-
-    border: 1px solid #333 !important;
+.account-url{
+    color:#888;
+    word-break:break-all;
 }
 
-.grid {
-    display: grid;
-
-    grid-template-columns:
-        minmax(0, 1fr)
-        minmax(0, 1fr);
-
-    gap: 20px;
+.script{
+    border:1px solid #292929;
+    background:#0b0b0b;
+    border-radius:10px;
+    padding:14px;
+    margin:10px 0;
 }
 
-.panel {
-    background: #111;
-
-    border: 1px solid #292929;
-
-    border-radius: 16px;
-
-    padding: 20px;
+.script-name{
+    font-weight:bold;
+    margin-bottom:7px;
 }
 
-.panel h2 {
-    margin-top: 0;
+.loader{
+    width:100%;
+    background:#050505;
+    color:#bbb;
+    border:1px solid #292929;
+    border-radius:7px;
+    padding:10px;
+    font:12px Consolas,monospace;
+    word-break:break-all;
 }
 
-textarea {
-    min-height: 360px;
-
-    resize: vertical;
-
-    font-family:
-        Consolas,
-        monospace;
+.row{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
 }
 
-.primary {
-    width: 100%;
-
-    padding: 12px;
-
-    border: 0;
-    border-radius: 10px;
-
-    background: #fff;
-    color: #000;
-
-    font-weight: 700;
+.small{
+    color:#777;
+    font-size:12px;
 }
 
-.secondary {
-    width: 100%;
-
-    padding: 11px;
-
-    margin-top: 8px;
-
-    border-radius: 10px;
-
-    background: #191919;
-    color: #fff;
-
-    border: 1px solid #333;
-}
-
-.scripts {
-    display: flex;
-
-    flex-direction: column;
-
-    gap: 10px;
-}
-
-.script {
-    background: #080808;
-
-    border: 1px solid #292929;
-
-    border-radius: 11px;
-
-    padding: 13px;
-}
-
-.script-name {
-    font-weight: 700;
-
-    margin-bottom: 6px;
-}
-
-.script-id {
-    color: #666;
-
-    font-size: 11px;
-
-    word-break: break-all;
-}
-
-.script-buttons {
-    display: flex;
-
-    gap: 7px;
-
-    margin-top: 10px;
-}
-
-.script-buttons button {
-    flex: 1;
-
-    padding: 8px;
-
-    border-radius: 8px;
-
-    background: #191919;
-
-    color: #fff;
-
-    border: 1px solid #333;
-}
-
-.script-buttons .danger {
-    background: #301313;
-
-    color: #ff7777;
-
-    border-color: #552020;
-}
-
-.empty {
-    padding: 35px 0;
-
-    text-align: center;
-
-    color: #666;
-}
-
-.loader-box {
-    margin-top: 15px;
-}
-
-.loader-box textarea {
-    min-height: 100px;
-}
-
-@media(max-width:800px) {
-
-    .grid {
-        grid-template-columns: 1fr;
+@media(max-width:700px){
+    .wrap{
+        width:96%;
+        margin:15px auto;
     }
-
-    .topbar {
-        align-items: flex-start;
-
-        flex-direction: column;
-    }
-
 }
 </style>
 </head>
 
 <body>
 
-<!-- =================================================
-     LOGIN / REGISTER
-================================================= -->
+<div class="wrap">
 
-<div
-    id="authPage"
-    class="auth"
->
+    <!-- AUTH -->
 
-    <div class="auth-card">
+    <section id="auth">
 
-        <div class="logo">
-            LEXINX
-        </div>
+        <div class="card">
 
-        <div class="subtitle">
-            Protect Dashboard
-        </div>
+            <h1>LEXINX Protect</h1>
 
-
-        <!-- LOGIN -->
-
-        <div id="loginBox">
+            <p class="small">
+                Create an account or login.
+            </p>
 
             <input
-                id="loginUsername"
-                type="text"
-                placeholder="Tên tài khoản"
+                id="username"
                 autocomplete="username"
+                placeholder="Username"
             >
 
             <input
-                id="loginPassword"
+                id="password"
                 type="password"
-                placeholder="Mật khẩu"
                 autocomplete="current-password"
+                placeholder="Password"
             >
 
-            <button
-                onclick="login()"
-            >
-                Đăng nhập
-            </button>
+            <div class="row">
 
-            <div
-                id="loginMessage"
-                class="message error"
-            ></div>
+                <button onclick="register()">
+                    CREATE ACCOUNT
+                </button>
 
-            <div
-                class="switch"
-                onclick="showRegister()"
-            >
-                Chưa có tài khoản?
-                <span>Đăng ký</span>
-            </div>
-
-        </div>
-
-
-        <!-- REGISTER -->
-
-        <div
-            id="registerBox"
-            class="hidden"
-        >
-
-            <input
-                id="registerUsername"
-                type="text"
-                placeholder="Tên tài khoản"
-                autocomplete="username"
-            >
-
-            <input
-                id="registerPassword"
-                type="password"
-                placeholder="Mật khẩu"
-                autocomplete="new-password"
-            >
-
-            <input
-                id="registerPassword2"
-                type="password"
-                placeholder="Nhập lại mật khẩu"
-                autocomplete="new-password"
-            >
-
-            <button
-                onclick="register()"
-            >
-                Tạo tài khoản
-            </button>
-
-            <div
-                id="registerMessage"
-                class="message error"
-            ></div>
-
-            <div
-                class="switch"
-                onclick="showLogin()"
-            >
-                Đã có tài khoản?
-                <span>Đăng nhập</span>
-            </div>
-
-        </div>
-
-    </div>
-
-</div>
-
-
-<!-- =================================================
-     PRIVATE DASHBOARD
-================================================= -->
-
-<div
-    id="dashboardPage"
-    class="dashboard hidden"
->
-
-    <div class="topbar">
-
-        <div>
-
-            <div class="brand">
-                LEXINX Protect
-            </div>
-
-            <div class="account-info">
-
-                Tài khoản:
-                <strong
-                    id="username"
+                <button
+                    class="secondary"
+                    onclick="login()"
                 >
-                    -
-                </strong>
+                    LOGIN
+                </button>
 
-                <br>
+            </div>
 
-                Account ID:
-                <span
-                    id="accountId"
-                >
-                    -
-                </span>
+            <div
+                id="authStatus"
+                class="status"
+            >
+                Ready.
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <!-- DASHBOARD -->
+
+    <section
+        id="dashboard"
+        class="hidden"
+    >
+
+        <div class="card">
+
+            <div class="row">
+
+                <div style="flex:1">
+
+                    <h1>
+                        LEXINX Dashboard
+                    </h1>
+
+                    <div>
+                        Account:
+                        <b id="accountName">
+                            -
+                        </b>
+                    </div>
+
+                    <div
+                        id="accountURL"
+                        class="account-url"
+                    >
+                        -
+                    </div>
+
+                </div>
+
+                <div>
+
+                    <button
+                        class="secondary"
+                        onclick="logout()"
+                    >
+                        LOGOUT
+                    </button>
+
+                </div>
 
             </div>
 
         </div>
 
-        <button
-            class="logout"
-            onclick="logout()"
-        >
-            Đăng xuất
-        </button>
 
-    </div>
+        <!-- CREATE -->
 
+        <div class="card">
 
-    <div class="grid">
-
-        <!-- EDITOR -->
-
-        <div class="panel">
-
-            <h2 id="editorTitle">
-                Tạo Script
+            <h2>
+                Upload / Create Script
             </h2>
 
             <input
                 id="scriptName"
-                type="text"
-                placeholder="Tên script"
+                placeholder="Script name"
             >
 
             <textarea
                 id="scriptSource"
-                placeholder="Dán Lua source vào đây..."
+                spellcheck="false"
+                placeholder="Paste Lua / Luau source..."
             ></textarea>
 
-            <button
-                class="primary"
-                onclick="saveScript()"
-            >
-                Lưu Script
-            </button>
-
-            <button
-                class="secondary"
-                onclick="clearEditor()"
-            >
-                Làm mới
+            <button onclick="createScript()">
+                CREATE SCRIPT
             </button>
 
             <div
-                id="editorMessage"
-                class="message"
-            ></div>
-
-            <div
-                id="loaderBox"
-                class="loader-box hidden"
+                id="createStatus"
+                class="status"
             >
-
-                <textarea
-                    id="loaderText"
-                    readonly
-                ></textarea>
-
-                <button
-                    class="secondary"
-                    onclick="copyLoader()"
-                >
-                    Copy Loader
-                </button>
-
+                Ready.
             </div>
 
         </div>
@@ -590,24 +294,30 @@ textarea {
 
         <!-- SCRIPTS -->
 
-        <div class="panel">
+        <div class="card">
 
-            <h2>
-                Script của tôi
-            </h2>
+            <div class="row">
 
-            <div
-                id="scriptList"
-                class="scripts"
-            >
-                <div class="empty">
-                    Đang tải...
-                </div>
+                <h2 style="flex:1">
+                    My Scripts
+                </h2>
+
+                <button
+                    class="secondary"
+                    onclick="loadScripts()"
+                >
+                    REFRESH
+                </button>
+
+            </div>
+
+            <div id="scripts">
+                Loading...
             </div>
 
         </div>
 
-    </div>
+    </section>
 
 </div>
 
@@ -615,98 +325,124 @@ textarea {
 <script>
 
 /* =====================================================
-   STATE
+   HELPERS
 ===================================================== */
 
-let editingID = null;
+const $ = id =>
+    document.getElementById(id);
 
+function setStatus(
+    element,
+    message,
+    ok = false
+){
 
-/* =====================================================
-   API
-===================================================== */
+    element.className =
+        "status " +
+        (ok ? "ok" : "err");
+
+    element.textContent =
+        message;
+}
 
 async function api(
     url,
     options = {}
-) {
+){
 
-    const response =
-        await fetch(
-            url,
-            {
-                credentials:
-                    "same-origin",
+    try{
 
-                ...options,
-
-                headers: {
-                    "Content-Type":
-                        "application/json",
-
-                    ...(options.headers || {})
+        const response =
+            await fetch(
+                url,
+                {
+                    credentials:"same-origin",
+                    ...options,
+                    headers:{
+                        "Content-Type":
+                            "application/json",
+                        ...(options.headers || {})
+                    }
                 }
-            }
-        );
+            );
 
-    let data = {};
+        const text =
+            await response.text();
 
-    try {
-        data =
-            await response.json();
+        let data;
+
+        try{
+            data =
+                text
+                ? JSON.parse(text)
+                : {};
+        }catch{
+
+            throw new Error(
+                "Server returned invalid response: " +
+                text.slice(0,200)
+            );
+        }
+
+        if(!response.ok){
+
+            throw new Error(
+                data.error ||
+                `HTTP ${response.status}`
+            );
+        }
+
+        return data;
+
+    }catch(error){
+
+        if(
+            error instanceof TypeError
+        ){
+
+            throw new Error(
+                "Request failed. " +
+                "Kiểm tra Render/server hoặc endpoint."
+            );
+        }
+
+        throw error;
     }
-    catch {}
-
-    if (!response.ok) {
-
-        throw new Error(
-            data.error ||
-            "Request failed"
-        );
-    }
-
-    return data;
 }
 
 
 /* =====================================================
-   SHOW LOGIN
+   AUTH STATE
 ===================================================== */
 
-function showLogin() {
+function showDashboard(data){
 
-    document
-        .getElementById(
-            "loginBox"
-        )
+    $("auth")
+        .classList
+        .add("hidden");
+
+    $("dashboard")
         .classList
         .remove("hidden");
 
-    document
-        .getElementById(
-            "registerBox"
-        )
-        .classList
-        .add("hidden");
+    $("accountName")
+        .textContent =
+        data.username || "-";
+
+    $("accountURL")
+        .textContent =
+        data.url || "-";
+
+    loadScripts();
 }
 
+function showAuth(){
 
-/* =====================================================
-   SHOW REGISTER
-===================================================== */
-
-function showRegister() {
-
-    document
-        .getElementById(
-            "loginBox"
-        )
+    $("dashboard")
         .classList
         .add("hidden");
 
-    document
-        .getElementById(
-            "registerBox"
-        )
+    $("auth")
         .classList
         .remove("hidden");
 }
@@ -716,80 +452,83 @@ function showRegister() {
    REGISTER
 ===================================================== */
 
-async function register() {
+async function register(){
 
     const username =
-        document
-            .getElementById(
-                "registerUsername"
-            )
-            .value
-            .trim();
+        $("username")
+        .value
+        .trim();
 
     const password =
-        document
-            .getElementById(
-                "registerPassword"
-            )
-            .value;
+        $("password")
+        .value;
 
-    const password2 =
-        document
-            .getElementById(
-                "registerPassword2"
-            )
-            .value;
+    const status =
+        $("authStatus");
 
-    const message =
-        document
-            .getElementById(
-                "registerMessage"
-            );
+    if(!username){
 
-    message.textContent = "";
-
-    if (
-        password !==
-        password2
-    ) {
-
-        message.textContent =
-            "Mật khẩu nhập lại không giống nhau.";
+        setStatus(
+            status,
+            "Enter username."
+        );
 
         return;
     }
 
-    try {
+    if(password.length < 6){
+
+        setStatus(
+            status,
+            "Password must contain at least 6 characters."
+        );
+
+        return;
+    }
+
+    status.className =
+        "status";
+
+    status.textContent =
+        "Creating account...";
+
+    try{
 
         const data =
             await api(
                 "/api/register",
                 {
-                    method: "POST",
-
-                    body:
-                        JSON.stringify({
-                            username,
-                            password
-                        })
+                    method:"POST",
+                    body:JSON.stringify({
+                        username,
+                        password
+                    })
                 }
             );
 
-        /*
-         * Đăng ký thành công:
-         * server tạo session.
-         * Sau đó chuyển thẳng
-         * vào URL riêng.
-         */
+        if(!data.ok){
 
-        window.location.href =
-            data.url;
+            throw new Error(
+                data.error ||
+                "Registration failed"
+            );
+        }
 
-    }
-    catch (error) {
+        setStatus(
+            status,
+            "Account created successfully.",
+            true
+        );
 
-        message.textContent =
-            error.message;
+        showDashboard(data);
+
+    }catch(error){
+
+        setStatus(
+            status,
+            "REGISTER ERROR:\n" +
+            error.message
+        );
     }
 }
 
@@ -798,60 +537,98 @@ async function register() {
    LOGIN
 ===================================================== */
 
-async function login() {
+async function login(){
 
     const username =
-        document
-            .getElementById(
-                "loginUsername"
-            )
-            .value
-            .trim();
+        $("username")
+        .value
+        .trim();
 
     const password =
-        document
-            .getElementById(
-                "loginPassword"
-            )
-            .value;
+        $("password")
+        .value;
 
-    const message =
-        document
-            .getElementById(
-                "loginMessage"
-            );
+    const status =
+        $("authStatus");
 
-    message.textContent = "";
+    if(!username ||
+       !password){
 
-    try {
+        setStatus(
+            status,
+            "Enter username and password."
+        );
+
+        return;
+    }
+
+    status.className =
+        "status";
+
+    status.textContent =
+        "Logging in...";
+
+    try{
 
         const data =
             await api(
                 "/api/login",
                 {
-                    method: "POST",
-
-                    body:
-                        JSON.stringify({
-                            username,
-                            password
-                        })
+                    method:"POST",
+                    body:JSON.stringify({
+                        username,
+                        password
+                    })
                 }
             );
 
-        /*
-         * Đăng nhập thành công:
-         * chuyển đến web riêng.
-         */
+        if(!data.ok){
 
-        window.location.href =
-            data.url;
+            throw new Error(
+                data.error ||
+                "Login failed"
+            );
+        }
 
+        setStatus(
+            status,
+            "Login successful.",
+            true
+        );
+
+        showDashboard(data);
+
+    }catch(error){
+
+        setStatus(
+            status,
+            "LOGIN ERROR:\n" +
+            error.message
+        );
     }
-    catch (error) {
+}
 
-        message.textContent =
-            error.message;
+
+/* =====================================================
+   CHECK SESSION
+===================================================== */
+
+async function checkSession(){
+
+    try{
+
+        const data =
+            await api(
+                "/api/me"
+            );
+
+        if(data.ok){
+            showDashboard(data);
+        }
+
+    }catch{
+
+        showAuth();
     }
 }
 
@@ -860,134 +637,117 @@ async function login() {
    LOGOUT
 ===================================================== */
 
-async function logout() {
+async function logout(){
 
-    try {
+    try{
 
         await api(
             "/api/logout",
             {
-                method: "POST"
+                method:"POST"
             }
         );
 
-    }
-    catch {}
+    }catch{}
 
-    /*
-     * Sau logout quay về
-     * trang đăng nhập.
-     */
+    showAuth();
 
-    window.location.href = "/";
+    $("authStatus")
+        .className =
+        "status";
+
+    $("authStatus")
+        .textContent =
+        "Logged out.";
 }
 
 
 /* =====================================================
-   LOAD CURRENT USER
+   CREATE SCRIPT
 ===================================================== */
 
-async function checkAuth() {
+async function createScript(){
 
-    try {
+    const name =
+        $("scriptName")
+        .value
+        .trim();
+
+    const source =
+        $("scriptSource")
+        .value;
+
+    const status =
+        $("createStatus");
+
+    if(!source.trim()){
+
+        setStatus(
+            status,
+            "Script source is empty."
+        );
+
+        return;
+    }
+
+    status.className =
+        "status";
+
+    status.textContent =
+        "Uploading...";
+
+    try{
 
         const data =
             await api(
-                "/api/me"
+                "/api/create",
+                {
+                    method:"POST",
+                    body:JSON.stringify({
+                        name,
+                        source
+                    })
+                }
             );
 
-        /*
-         * Có session nhưng đang ở /
-         * thì chuyển về URL riêng.
-         */
+        if(!data.ok){
 
-        if (
-            data.url &&
-            window.location.pathname === "/"
-        ) {
-
-            window.location.href =
-                data.url;
-
-            return;
+            throw new Error(
+                data.error ||
+                "Create failed"
+            );
         }
 
-        showDashboard(
-            data
+        setStatus(
+            status,
+            "SCRIPT CREATED\n\n" +
+            "ID: " +
+            data.id +
+            "\n\n" +
+            "Endpoint:\n" +
+            data.endpoint +
+            "\n\n" +
+            "Loader:\n" +
+            data.loader,
+            true
         );
 
+        $("scriptName")
+            .value = "";
+
+        $("scriptSource")
+            .value = "";
+
+        loadScripts();
+
+    }catch(error){
+
+        setStatus(
+            status,
+            "CREATE ERROR:\n" +
+            error.message
+        );
     }
-    catch {
-
-        /*
-         * Không có session:
-         * bắt buộc đăng nhập.
-         */
-
-        showAuth();
-    }
-}
-
-
-/* =====================================================
-   SHOW AUTH
-===================================================== */
-
-function showAuth() {
-
-    document
-        .getElementById(
-            "authPage"
-        )
-        .classList
-        .remove("hidden");
-
-    document
-        .getElementById(
-            "dashboardPage"
-        )
-        .classList
-        .add("hidden");
-}
-
-
-/* =====================================================
-   SHOW DASHBOARD
-===================================================== */
-
-function showDashboard(
-    data
-) {
-
-    document
-        .getElementById(
-            "authPage"
-        )
-        .classList
-        .add("hidden");
-
-    document
-        .getElementById(
-            "dashboardPage"
-        )
-        .classList
-        .remove("hidden");
-
-    document
-        .getElementById(
-            "username"
-        )
-        .textContent =
-            data.username || "-";
-
-    document
-        .getElementById(
-            "accountId"
-        )
-        .textContent =
-            data.accountId || "-";
-
-    loadScripts();
 }
 
 
@@ -995,205 +755,156 @@ function showDashboard(
    LOAD SCRIPTS
 ===================================================== */
 
-async function loadScripts() {
+async function loadScripts(){
 
-    const list =
-        document
-            .getElementById(
-                "scriptList"
-            );
+    const container =
+        $("scripts");
 
-    try {
+    container.textContent =
+        "Loading...";
+
+    try{
 
         const data =
             await api(
                 "/api/scripts"
             );
 
-        if (
+        if(
             !data.scripts ||
-            data.scripts.length === 0
-        ) {
+            !data.scripts.length
+        ){
 
-            list.innerHTML =
-                `
-                <div class="empty">
-                    Bạn chưa có script.
-                </div>
-                `;
+            container.innerHTML =
+                '<div class="small">' +
+                'No scripts yet.' +
+                '</div>';
 
             return;
         }
 
-        list.innerHTML =
-            data.scripts
-                .map(
-                    script => {
+        container.innerHTML =
+            "";
 
-                        return `
-                        <div class="script">
+        for(
+            const script
+            of data.scripts
+        ){
 
-                            <div class="script-name">
-                                ${escapeHTML(
-                                    script.name
-                                )}
-                            </div>
-
-                            <div class="script-id">
-                                ID:
-                                ${escapeHTML(
-                                    script.id
-                                )}
-                            </div>
-
-                            <div class="script-buttons">
-
-                                <button
-                                    onclick="editScript(
-                                        '${script.id}'
-                                    )"
-                                >
-                                    Edit
-                                </button>
-
-                                <button
-                                    onclick='copyText(
-                                        ${JSON.stringify(
-                                            script.loader
-                                        )}
-                                    )'
-                                >
-                                    Copy Loader
-                                </button>
-
-                                <button
-                                    class="danger"
-                                    onclick="deleteScript(
-                                        '${script.id}'
-                                    )"
-                                >
-                                    Delete
-                                </button>
-
-                            </div>
-
-                        </div>
-                        `;
-                    }
-                )
-                .join("");
-
-    }
-    catch (error) {
-
-        list.innerHTML =
-            `
-            <div class="error">
-                ${escapeHTML(
-                    error.message
-                )}
-            </div>
-            `;
-    }
-}
-
-
-/* =====================================================
-   SAVE
-===================================================== */
-
-async function saveScript() {
-
-    const name =
-        document
-            .getElementById(
-                "scriptName"
-            )
-            .value
-            .trim();
-
-    const source =
-        document
-            .getElementById(
-                "scriptSource"
-            )
-            .value;
-
-    const message =
-        document
-            .getElementById(
-                "editorMessage"
-            );
-
-    message.textContent = "";
-
-    try {
-
-        let data;
-
-        if (editingID) {
-
-            data =
-                await api(
-                    "/api/edit/" +
-                    editingID,
-                    {
-                        method: "POST",
-
-                        body:
-                            JSON.stringify({
-                                name,
-                                source
-                            })
-                    }
+            const box =
+                document.createElement(
+                    "div"
                 );
 
-            message.textContent =
-                "Đã cập nhật script.";
+            box.className =
+                "script";
 
-        }
-        else {
-
-            data =
-                await api(
-                    "/api/create",
-                    {
-                        method: "POST",
-
-                        body:
-                            JSON.stringify({
-                                name,
-                                source
-                            })
-                    }
+            const title =
+                document.createElement(
+                    "div"
                 );
 
-            message.textContent =
-                "Đã tạo script.";
+            title.className =
+                "script-name";
 
-            document
-                .getElementById(
-                    "loaderText"
-                )
-                .value =
-                    data.loader;
+            title.textContent =
+                script.name;
 
-            document
-                .getElementById(
-                    "loaderBox"
-                )
-                .classList
-                .remove("hidden");
+            const id =
+                document.createElement(
+                    "div"
+                );
+
+            id.className =
+                "small";
+
+            id.textContent =
+                "ID: " +
+                script.id;
+
+            const loader =
+                document.createElement(
+                    "div"
+                );
+
+            loader.className =
+                "loader";
+
+            loader.textContent =
+                script.loader;
+
+            const buttons =
+                document.createElement(
+                    "div"
+                );
+
+            buttons.className =
+                "row";
+
+            const copy =
+                document.createElement(
+                    "button"
+                );
+
+            copy.textContent =
+                "COPY LOADER";
+
+            copy.onclick =
+                () =>
+                    copyText(
+                        script.loader
+                    );
+
+            const edit =
+                document.createElement(
+                    "button"
+                );
+
+            edit.className =
+                "secondary";
+
+            edit.textContent =
+                "EDIT";
+
+            edit.onclick =
+                () =>
+                    editScript(
+                        script.id
+                    );
+
+            const del =
+                document.createElement(
+                    "button"
+                );
+
+            del.className =
+                "danger";
+
+            del.textContent =
+                "DELETE";
+
+            del.onclick =
+                () =>
+                    deleteScript(
+                        script.id
+                    );
+
+            buttons.appendChild(copy);
+            buttons.appendChild(edit);
+            buttons.appendChild(del);
+
+            box.appendChild(title);
+            box.appendChild(id);
+            box.appendChild(loader);
+            box.appendChild(buttons);
+
+            container.appendChild(box);
         }
 
-        clearFields();
+    }catch(error){
 
-        loadScripts();
-
-    }
-    catch (error) {
-
-        message.textContent =
+        container.textContent =
+            "LOAD ERROR: " +
             error.message;
     }
 }
@@ -1203,50 +914,61 @@ async function saveScript() {
    EDIT
 ===================================================== */
 
-async function editScript(
-    id
-) {
+async function editScript(id){
 
-    try {
+    try{
 
         const data =
             await api(
                 "/api/script/" +
-                id
+                encodeURIComponent(id)
             );
 
-        editingID = id;
+        if(!data.ok){
+            throw new Error(
+                data.error
+            );
+        }
 
-        document
-            .getElementById(
-                "editorTitle"
-            )
-            .textContent =
-                "Edit Script";
+        const script =
+            data.script;
 
-        document
-            .getElementById(
-                "scriptName"
-            )
-            .value =
-                data.script.name;
+        const name =
+            prompt(
+                "Script name:",
+                script.name
+            );
 
-        document
-            .getElementById(
-                "scriptSource"
-            )
-            .value =
-                data.script.source;
+        if(name === null)
+            return;
 
-        window.scrollTo({
-            top: 0,
-            behavior: "smooth"
-        });
+        const source =
+            prompt(
+                "Lua source:",
+                script.source
+            );
 
-    }
-    catch (error) {
+        if(source === null)
+            return;
+
+        await api(
+            "/api/edit/" +
+            encodeURIComponent(id),
+            {
+                method:"POST",
+                body:JSON.stringify({
+                    name,
+                    source
+                })
+            }
+        );
+
+        loadScripts();
+
+    }catch(error){
 
         alert(
+            "EDIT ERROR:\n" +
             error.message
         );
     }
@@ -1257,34 +979,32 @@ async function editScript(
    DELETE
 ===================================================== */
 
-async function deleteScript(
-    id
-) {
+async function deleteScript(id){
 
-    if (
+    if(
         !confirm(
-            "Bạn chắc chắn muốn xóa script này?"
+            "Delete this script?"
         )
-    ) {
+    ){
         return;
     }
 
-    try {
+    try{
 
         await api(
             "/api/delete/" +
-            id,
+            encodeURIComponent(id),
             {
-                method: "DELETE"
+                method:"DELETE"
             }
         );
 
         loadScripts();
 
-    }
-    catch (error) {
+    }catch(error){
 
         alert(
+            "DELETE ERROR:\n" +
             error.message
         );
     }
@@ -1292,129 +1012,46 @@ async function deleteScript(
 
 
 /* =====================================================
-   CLEAR
-===================================================== */
-
-function clearFields() {
-
-    editingID = null;
-
-    document
-        .getElementById(
-            "editorTitle"
-        )
-        .textContent =
-            "Tạo Script";
-
-    document
-        .getElementById(
-            "scriptName"
-        )
-        .value = "";
-
-    document
-        .getElementById(
-            "scriptSource"
-        )
-        .value = "";
-}
-
-
-function clearEditor() {
-
-    clearFields();
-
-    document
-        .getElementById(
-            "editorMessage"
-        )
-        .textContent = "";
-
-    document
-        .getElementById(
-            "loaderBox"
-        )
-        .classList
-        .add("hidden");
-}
-
-
-/* =====================================================
    COPY
 ===================================================== */
 
-async function copyText(
-    text
-) {
+async function copyText(text){
 
-    try {
+    try{
 
-        await navigator
-            .clipboard
+        await navigator.clipboard
             .writeText(text);
 
         alert(
-            "Đã copy loader."
+            "Loader copied."
         );
 
+    }catch{
+
+        const textarea =
+            document.createElement(
+                "textarea"
+            );
+
+        textarea.value =
+            text;
+
+        document.body.appendChild(
+            textarea
+        );
+
+        textarea.select();
+
+        document.execCommand(
+            "copy"
+        );
+
+        textarea.remove();
+
+        alert(
+            "Loader copied."
+        );
     }
-    catch {
-
-        prompt(
-            "Copy loader:",
-            text
-        );
-    }
-}
-
-
-function copyLoader() {
-
-    const text =
-        document
-            .getElementById(
-                "loaderText"
-            )
-            .value;
-
-    copyText(text);
-}
-
-
-/* =====================================================
-   ESCAPE
-===================================================== */
-
-function escapeHTML(
-    value
-) {
-
-    return String(value)
-
-        .replace(
-            /&/g,
-            "&amp;"
-        )
-
-        .replace(
-            /</g,
-            "&lt;"
-        )
-
-        .replace(
-            />/g,
-            "&gt;"
-        )
-
-        .replace(
-            /"/g,
-            "&quot;"
-        )
-
-        .replace(
-            /'/g,
-            "&#039;"
-        );
 }
 
 
@@ -1422,7 +1059,7 @@ function escapeHTML(
    START
 ===================================================== */
 
-checkAuth();
+checkSession();
 
 </script>
 
