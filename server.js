@@ -10,65 +10,76 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const HOST = "0.0.0.0";
 
-/* =========================================================
-   DATABASE
-========================================================= */
-
 const DATA_DIR = path.join(__dirname, "data");
 const DATA_FILE = path.join(DATA_DIR, "data.json");
+const PUBLIC_DIR = path.join(__dirname, "public");
+
+/* =========================================================
+   INIT
+========================================================= */
 
 if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.mkdirSync(DATA_DIR, {
+        recursive: true
+    });
 }
 
-function defaultDB() {
+if (!fs.existsSync(PUBLIC_DIR)) {
+    fs.mkdirSync(PUBLIC_DIR, {
+        recursive: true
+    });
+}
+
+function emptyDatabase() {
     return {
         users: {},
         scripts: {}
     };
 }
 
-function loadDB() {
+function loadDatabase() {
     try {
+
         if (!fs.existsSync(DATA_FILE)) {
-            return defaultDB();
+            return emptyDatabase();
         }
 
-        const raw =
-            fs.readFileSync(
-                DATA_FILE,
-                "utf8"
+        const data =
+            JSON.parse(
+                fs.readFileSync(
+                    DATA_FILE,
+                    "utf8"
+                )
             );
 
-        const parsed =
-            JSON.parse(raw);
-
         return {
-            users:
-                parsed.users || {},
-            scripts:
-                parsed.scripts || {}
+            users: data.users || {},
+            scripts: data.scripts || {}
         };
-    } catch (err) {
+
+    } catch (error) {
+
         console.error(
-            "Database load error:",
-            err.message
+            "Database error:",
+            error.message
         );
 
-        return defaultDB();
+        return emptyDatabase();
     }
 }
 
-let db = loadDB();
+let database =
+    loadDatabase();
 
-function saveDB() {
-    const temp =
+function saveDatabase() {
+
+    const temporary =
         DATA_FILE + ".tmp";
 
     fs.writeFileSync(
-        temp,
+        temporary,
         JSON.stringify(
-            db,
+            database,
             null,
             2
         ),
@@ -76,7 +87,7 @@ function saveDB() {
     );
 
     fs.renameSync(
-        temp,
+        temporary,
         DATA_FILE
     );
 }
@@ -85,7 +96,9 @@ function saveDB() {
    EXPRESS
 ========================================================= */
 
-app.disable("x-powered-by");
+app.disable(
+    "x-powered-by"
+);
 
 app.use(
     express.json({
@@ -113,11 +126,14 @@ function randomId(bytes = 16) {
 function hashPassword(password) {
     return crypto
         .createHash("sha256")
-        .update(String(password))
+        .update(
+            String(password)
+        )
         .digest("hex");
 }
 
 function cleanUsername(value) {
+
     return String(value || "")
         .trim()
         .replace(
@@ -128,6 +144,7 @@ function cleanUsername(value) {
 }
 
 function cleanId(value) {
+
     return String(value || "")
         .trim()
         .replace(
@@ -141,7 +158,8 @@ function cleanId(value) {
    SESSION
 ========================================================= */
 
-const sessions = new Map();
+const sessions =
+    new Map();
 
 function createSession(userId) {
 
@@ -160,14 +178,14 @@ function createSession(userId) {
     return token;
 }
 
-function getSession(req) {
+function getAuthenticatedUser(req) {
 
-    const header =
+    const authorization =
         req.headers.authorization;
 
     if (
-        !header ||
-        !header.startsWith(
+        !authorization ||
+        !authorization.startsWith(
             "Bearer "
         )
     ) {
@@ -175,7 +193,9 @@ function getSession(req) {
     }
 
     const token =
-        header.slice(7).trim();
+        authorization
+            .slice(7)
+            .trim();
 
     if (!token) {
         return null;
@@ -188,21 +208,27 @@ function getSession(req) {
         return null;
     }
 
-    const user =
+    const users =
         Object.values(
-            db.users
-        ).find(
-            x => x.id === session.userId
+            database.users
+        );
+
+    const user =
+        users.find(
+            item =>
+                item.id ===
+                session.userId
         );
 
     if (!user) {
+
         sessions.delete(token);
+
         return null;
     }
 
     return {
         token,
-        session,
         user
     };
 }
@@ -214,29 +240,37 @@ function requireAuth(
 ) {
 
     const auth =
-        getSession(req);
+        getAuthenticatedUser(req);
 
     if (!auth) {
-        return res.status(401).json({
-            ok: false,
-            error:
-                "Authentication required"
-        });
+
+        return res
+            .status(401)
+            .json({
+                ok: false,
+                error:
+                    "Authentication required"
+            });
     }
 
-    req.auth = auth;
-    req.user = auth.user;
+    req.auth =
+        auth;
+
+    req.user =
+        auth.user;
 
     next();
 }
 
 /* =========================================================
-   LEXINX PROTECT PAGE
+   LEXINX PROTECT BLOCK PAGE
 ========================================================= */
 
-function createStars(count = 220) {
+function generateStars(
+    count = 240
+) {
 
-    let html = "";
+    let result = "";
 
     for (
         let i = 0;
@@ -261,32 +295,27 @@ function createStars(count = 220) {
         const delay =
             Math.random() * -8;
 
-        const opacity =
-            0.15 +
-            Math.random() * 0.7;
-
-        html += `
+        result += `
 <span
-    class="star"
-    style="
-        left:${left.toFixed(2)}%;
-        top:${top.toFixed(2)}%;
-        width:${size.toFixed(1)}px;
-        height:${size.toFixed(1)}px;
-        opacity:${opacity.toFixed(2)};
-        animation-duration:${duration.toFixed(2)}s;
-        animation-delay:${delay.toFixed(2)}s;
-">
-</span>`;
+class="star"
+style="
+left:${left.toFixed(2)}%;
+top:${top.toFixed(2)}%;
+width:${size.toFixed(2)}px;
+height:${size.toFixed(2)}px;
+animation-duration:${duration.toFixed(2)}s;
+animation-delay:${delay.toFixed(2)}s;
+"></span>
+`;
     }
 
-    return html;
+    return result;
 }
 
 function blockPage() {
 
     const stars =
-        createStars(220);
+        generateStars();
 
     return `<!doctype html>
 
@@ -297,13 +326,13 @@ function blockPage() {
 <meta charset="utf-8">
 
 <meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
+name="viewport"
+content="width=device-width,initial-scale=1"
 >
 
 <meta
-    name="robots"
-    content="noindex,nofollow,noarchive"
+name="robots"
+content="noindex,nofollow,noarchive"
 >
 
 <title>LEXINX PROTECT</title>
@@ -316,10 +345,11 @@ function blockPage() {
 
 html,
 body {
-    margin: 0;
 
     width: 100%;
     height: 100%;
+
+    margin: 0;
 
     overflow: hidden;
 }
@@ -332,12 +362,10 @@ body {
         sans-serif;
 
     background: #050505;
-
-    color: #fff;
 }
 
 /* =====================================================
-   ANIMATED BACKGROUND
+   BACKGROUND
 ===================================================== */
 
 .scene {
@@ -352,37 +380,30 @@ body {
     background:
         radial-gradient(
             circle at 50% 50%,
-            #727272 0%,
-            #414141 22%,
-            #222 52%,
-            #090909 100%
+            #777 0%,
+            #4b4b4b 20%,
+            #282828 48%,
+            #080808 100%
         );
 
     animation:
-        backgroundMove
+        backgroundAnimation
         12s
         ease-in-out
         infinite
         alternate;
 }
 
-@keyframes backgroundMove {
+@keyframes backgroundAnimation {
 
     0% {
 
-        background-position:
-            0% 0%;
-    }
-
-    25% {
-
         background:
             radial-gradient(
-                circle at 30% 40%,
-                #686868 0%,
-                #363636 28%,
-                #1b1b1b 60%,
-                #050505 100%
+                circle at 25% 30%,
+                #666,
+                #303030 38%,
+                #090909 100%
             );
     }
 
@@ -390,23 +411,10 @@ body {
 
         background:
             radial-gradient(
-                circle at 70% 30%,
-                #777 0%,
-                #404040 30%,
-                #181818 65%,
-                #050505 100%
-            );
-    }
-
-    75% {
-
-        background:
-            radial-gradient(
-                circle at 40% 75%,
-                #626262 0%,
-                #323232 30%,
-                #151515 65%,
-                #050505 100%
+                circle at 70% 35%,
+                #777,
+                #383838 38%,
+                #090909 100%
             );
     }
 
@@ -414,82 +422,11 @@ body {
 
         background:
             radial-gradient(
-                circle at 80% 70%,
-                #737373 0%,
-                #383838 30%,
-                #171717 65%,
-                #050505 100%
+                circle at 45% 75%,
+                #666,
+                #292929 38%,
+                #070707 100%
             );
-    }
-}
-
-/* =====================================================
-   MOVING GLOW
-===================================================== */
-
-.glow {
-
-    position: absolute;
-
-    width: 55vw;
-    height: 55vw;
-
-    min-width: 350px;
-    min-height: 350px;
-
-    border-radius: 50%;
-
-    left: 50%;
-    top: 50%;
-
-    transform:
-        translate(-50%, -50%);
-
-    background:
-        radial-gradient(
-            circle,
-            rgba(255,255,255,.14),
-            rgba(255,255,255,.04) 35%,
-            transparent 70%
-        );
-
-    filter:
-        blur(25px);
-
-    animation:
-        glowPulse
-        7s
-        ease-in-out
-        infinite;
-}
-
-@keyframes glowPulse {
-
-    0% {
-
-        transform:
-            translate(-50%, -50%)
-            scale(.85);
-
-        opacity: .45;
-    }
-
-    50% {
-
-        transform:
-            translate(-50%, -50%)
-            scale(1.15);
-
-        opacity: .9;
-    }
-
-    100% {
-
-        transform:
-            translate(-50%, -50%)
-            scale(.85);
-
-        opacity: .45;
     }
 }
 
@@ -502,8 +439,6 @@ body {
     position: absolute;
 
     inset: 0;
-
-    overflow: hidden;
 }
 
 .star {
@@ -517,21 +452,21 @@ body {
     background: #fff;
 
     box-shadow:
-        0 0 5px
+        0 0 7px
         rgba(255,255,255,.8);
 
     animation:
-        starPulse
+        starAnimation
         ease-in-out
         infinite;
 }
 
-@keyframes starPulse {
+@keyframes starAnimation {
 
     0% {
 
         transform:
-            scale(.3);
+            scale(.25);
 
         opacity: .05;
     }
@@ -547,66 +482,130 @@ body {
     100% {
 
         transform:
-            scale(.3);
+            scale(.25);
 
         opacity: .05;
     }
 }
 
 /* =====================================================
-   PARTICLE LINES
+   MOVING LIGHT
+===================================================== */
+
+.light {
+
+    position: absolute;
+
+    width: 600px;
+    height: 600px;
+
+    left: 50%;
+    top: 50%;
+
+    transform:
+        translate(-50%,-50%);
+
+    border-radius: 50%;
+
+    background:
+        radial-gradient(
+            circle,
+            rgba(255,255,255,.16),
+            rgba(255,255,255,.04) 38%,
+            transparent 70%
+        );
+
+    filter:
+        blur(25px);
+
+    animation:
+        lightAnimation
+        7s
+        ease-in-out
+        infinite;
+}
+
+@keyframes lightAnimation {
+
+    0% {
+
+        transform:
+            translate(-50%,-50%)
+            scale(.8);
+
+        opacity: .4;
+    }
+
+    50% {
+
+        transform:
+            translate(-50%,-50%)
+            scale(1.25);
+
+        opacity: 1;
+    }
+
+    100% {
+
+        transform:
+            translate(-50%,-50%)
+            scale(.8);
+
+        opacity: .4;
+    }
+}
+
+/* =====================================================
+   MOVING LINES
 ===================================================== */
 
 .lines {
 
     position: absolute;
 
-    inset: -30%;
+    inset: -50%;
 
-    opacity: .08;
+    opacity: .07;
 
     background:
         repeating-linear-gradient(
-            115deg,
-            transparent 0px,
-            transparent 80px,
-            #fff 81px,
-            transparent 82px,
-            transparent 160px
+            120deg,
+            transparent 0,
+            transparent 90px,
+            #fff 91px,
+            transparent 92px
         );
 
     animation:
-        lineMove
-        18s
+        linesAnimation
+        20s
         linear
         infinite;
 }
 
-@keyframes lineMove {
+@keyframes linesAnimation {
 
     from {
 
         transform:
-            translate3d(
+            translate(
                 -8%,
-                -8%,
-                0
+                -8%
             );
     }
 
     to {
 
         transform:
-            translate3d(
+            translate(
                 8%,
-                8%,
-                0
+                8%
             );
     }
 }
 
 /* =====================================================
-   CENTER CARD
+   CENTER
 ===================================================== */
 
 .center {
@@ -617,81 +616,87 @@ body {
     top: 50%;
 
     transform:
-        translate(-50%, -50%);
+        translate(-50%,-50%);
 
     width:
-        min(94vw, 900px);
+        min(94vw, 950px);
 
-    min-height: 430px;
+    min-height: 480px;
 
-    display: flex;
+    display:
+        flex;
 
-    flex-direction: column;
+    flex-direction:
+        column;
 
-    align-items: center;
+    align-items:
+        center;
 
-    justify-content: center;
+    justify-content:
+        center;
 
-    text-align: center;
+    text-align:
+        center;
 
     padding:
-        70px 40px;
+        70px 35px;
 
-    border-radius: 28px;
+    border-radius:
+        30px;
 
     background:
         linear-gradient(
             145deg,
-            rgba(110,110,110,.48),
-            rgba(35,35,35,.58)
+            rgba(110,110,110,.52),
+            rgba(25,25,25,.64)
         );
 
     border:
         1px solid
-        rgba(255,255,255,.18);
+        rgba(255,255,255,.17);
 
     box-shadow:
 
-        0 30px 100px
-        rgba(0,0,0,.75),
+        0 35px 120px
+        rgba(0,0,0,.8),
 
         inset 0 1px 0
         rgba(255,255,255,.12),
 
-        inset 0 0 80px
+        inset 0 0 90px
         rgba(255,255,255,.035);
 
     backdrop-filter:
-        blur(14px);
+        blur(15px);
 
     animation:
-        cardFloat
+        cardAnimation
         6s
         ease-in-out
         infinite;
 }
 
-@keyframes cardFloat {
+@keyframes cardAnimation {
 
     0% {
 
         transform:
-            translate(-50%, -50%)
-            translateY(0px);
+            translate(-50%,-50%)
+            translateY(0);
     }
 
     50% {
 
         transform:
-            translate(-50%, -50%)
-            translateY(-8px);
+            translate(-50%,-50%)
+            translateY(-9px);
     }
 
     100% {
 
         transform:
-            translate(-50%, -50%)
-            translateY(0px);
+            translate(-50%,-50%)
+            translateY(0);
     }
 }
 
@@ -705,9 +710,9 @@ body {
 
     font-size:
         clamp(
-            48px,
+            50px,
             9vw,
-            110px
+            115px
         );
 
     line-height: 1;
@@ -716,88 +721,83 @@ body {
 
     letter-spacing:
         clamp(
-            5px,
+            4px,
             1.2vw,
-            14px
+            15px
         );
-
-    color: #fff;
-
-    animation:
-        logoColor
-        6s
-        ease-in-out
-        infinite;
 
     user-select: none;
 
-    text-shadow:
-        0 0 12px
-        rgba(255,255,255,.18),
-
-        0 0 45px
-        rgba(255,255,255,.08);
+    animation:
+        logoAnimation
+        6s
+        ease-in-out
+        infinite;
 }
 
-@keyframes logoColor {
+@keyframes logoAnimation {
 
     0% {
 
-        color: #fff;
+        color: #ffffff;
 
         text-shadow:
-            0 0 20px
+            0 0 25px
             rgba(255,255,255,.45);
     }
 
-    25% {
+    20% {
 
-        color: #cfcfcf;
+        color: #dddddd;
     }
 
-    50% {
+    40% {
 
-        color: #707070;
+        color: #999999;
+    }
+
+    60% {
+
+        color: #555555;
 
         text-shadow:
-            0 0 4px
-            rgba(255,255,255,.05);
+            0 0 5px
+            rgba(255,255,255,.08);
     }
 
-    75% {
+    80% {
 
-        color: #dcdcdc;
+        color: #bbbbbb;
     }
 
     100% {
 
-        color: #fff;
+        color: #ffffff;
 
         text-shadow:
-            0 0 20px
+            0 0 25px
             rgba(255,255,255,.45);
     }
 }
 
 /* =====================================================
-   SUBTITLE
+   ANTI-SKID
 ===================================================== */
 
 .subtitle {
 
-    margin-top: 32px;
+    margin-top: 34px;
+
+    color: #aaa;
 
     font-size:
         clamp(
             13px,
             2vw,
-            19px
+            20px
         );
 
-    letter-spacing:
-        8px;
-
-    color: #aaa;
+    letter-spacing: 9px;
 
     text-transform:
         uppercase;
@@ -813,7 +813,7 @@ body {
 
     0% {
 
-        opacity: .3;
+        opacity: .25;
 
         transform:
             translateY(5px);
@@ -829,7 +829,7 @@ body {
 
     100% {
 
-        opacity: .3;
+        opacity: .25;
 
         transform:
             translateY(5px);
@@ -837,44 +837,43 @@ body {
 }
 
 /* =====================================================
-   STATUS
+   BLOCK
 ===================================================== */
 
 .status {
 
-    margin-top: 30px;
+    margin-top: 35px;
 
     padding:
-        11px 25px;
+        12px 28px;
 
     border-radius:
         999px;
 
+    background:
+        rgba(0,0,0,.25);
+
     border:
         1px solid
-        rgba(255,255,255,.16);
-
-    background:
-        rgba(0,0,0,.24);
+        rgba(255,255,255,.15);
 
     color: #888;
 
     font-size: 12px;
 
-    letter-spacing:
-        4px;
+    letter-spacing: 5px;
 
     animation:
-        statusPulse
+        statusAnimation
         3s
         ease-in-out
         infinite;
 }
 
-@keyframes statusPulse {
+@keyframes statusAnimation {
 
     0% {
-        opacity: .4;
+        opacity: .35;
     }
 
     50% {
@@ -882,7 +881,7 @@ body {
     }
 
     100% {
-        opacity: .4;
+        opacity: .35;
     }
 }
 
@@ -903,29 +902,24 @@ body {
         linear-gradient(
             90deg,
             transparent,
-            rgba(255,255,255,.2),
+            rgba(255,255,255,.25),
             transparent
         );
 
-    filter:
-        blur(.5px);
-
     animation:
-        scanMove
+        scanAnimation
         7s
         linear
         infinite;
 }
 
-@keyframes scanMove {
+@keyframes scanAnimation {
 
-    0% {
-
+    from {
         top: -5%;
     }
 
-    100% {
-
+    to {
         top: 105%;
     }
 }
@@ -944,10 +938,9 @@ body {
 
     background:
         radial-gradient(
-            ellipse at center,
+            ellipse,
             transparent 30%,
-            rgba(0,0,0,.25) 65%,
-            rgba(0,0,0,.72) 100%
+            rgba(0,0,0,.7) 100%
         );
 }
 
@@ -959,23 +952,20 @@ body {
 
     .center {
 
-        min-height:
-            340px;
+        min-height: 360px;
 
         padding:
-            45px 18px;
+            50px 18px;
     }
 
     .logo {
 
-        letter-spacing:
-            4px;
+        letter-spacing: 4px;
     }
 
     .subtitle {
 
-        letter-spacing:
-            4px;
+        letter-spacing: 4px;
     }
 }
 
@@ -993,7 +983,7 @@ body {
 
     <div class="lines"></div>
 
-    <div class="glow"></div>
+    <div class="light"></div>
 
     <div class="scan"></div>
 
@@ -1023,105 +1013,74 @@ body {
 }
 
 /* =========================================================
-   HOME
+   WEB ROOT
 ========================================================= */
 
-app.get("/", (req, res) => {
+app.get(
+    "/",
+    (req, res) => {
 
-    res.status(200).send(`
+        const index =
+            path.join(
+                PUBLIC_DIR,
+                "index.html"
+            );
+
+        if (
+            fs.existsSync(index)
+        ) {
+
+            return res.sendFile(
+                index
+            );
+        }
+
+        res.status(200).send(`
 <!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-
 <meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
+name="viewport"
+content="width=device-width,initial-scale=1"
 >
-
 <title>LEXINX PROTECT</title>
-
 <style>
-
-* {
-    box-sizing: border-box;
-}
-
 body {
-
-    margin: 0;
-
-    min-height: 100vh;
-
-    display: flex;
-
-    align-items: center;
-    justify-content: center;
-
-    background:
-        #0b0b0b;
-
-    color: #fff;
-
-    font-family:
-        Arial,
-        sans-serif;
+    margin:0;
+    min-height:100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#090909;
+    color:#fff;
+    font-family:Arial,sans-serif;
 }
-
 .box {
-
-    width:
-        min(90%, 650px);
-
-    padding:
-        50px;
-
-    text-align: center;
-
-    border:
-        1px solid #333;
-
-    border-radius:
-        20px;
-
-    background:
-        #151515;
-
-    box-shadow:
-        0 20px 60px
-        rgba(0,0,0,.6);
+    padding:50px;
+    text-align:center;
+    border:1px solid #333;
+    border-radius:20px;
+    background:#151515;
 }
-
 h1 {
-
-    margin: 0;
-
-    font-size: 42px;
+    margin:0;
 }
-
 p {
-
-    color: #888;
+    color:#888;
 }
-
 </style>
-
 </head>
-
 <body>
-
 <div class="box">
-
 <h1>LEXINX PROTECT</h1>
-
-<p>Script management server</p>
-
+<p>Web interface is ready.</p>
 </div>
-
 </body>
 </html>
 `);
-});
+    }
+);
 
 /* =========================================================
    REGISTER
@@ -1142,7 +1101,19 @@ app.post(
             );
 
         if (
-            username.length < 3 ||
+            username.length < 3
+        ) {
+
+            return res
+                .status(400)
+                .json({
+                    ok: false,
+                    error:
+                        "Username must contain at least 3 characters"
+                });
+        }
+
+        if (
             password.length < 6
         ) {
 
@@ -1151,14 +1122,16 @@ app.post(
                 .json({
                     ok: false,
                     error:
-                        "Username must contain at least 3 characters and password at least 6 characters"
+                        "Password must contain at least 6 characters"
                 });
         }
 
         const key =
             username.toLowerCase();
 
-        if (db.users[key]) {
+        if (
+            database.users[key]
+        ) {
 
             return res
                 .status(409)
@@ -1169,12 +1142,10 @@ app.post(
                 });
         }
 
-        const userId =
-            randomId(16);
-
         const user = {
 
-            id: userId,
+            id:
+                randomId(16),
 
             username,
 
@@ -1190,14 +1161,14 @@ app.post(
             scripts: []
         };
 
-        db.users[key] =
+        database.users[key] =
             user;
 
-        saveDB();
+        saveDatabase();
 
         const token =
             createSession(
-                userId
+                user.id
             );
 
         res.json({
@@ -1207,7 +1178,10 @@ app.post(
             token,
 
             user: {
-                id: user.id,
+
+                id:
+                    user.id,
+
                 username:
                     user.username
             }
@@ -1237,7 +1211,7 @@ app.post(
             username.toLowerCase();
 
         const user =
-            db.users[key];
+            database.users[key];
 
         if (
             !user ||
@@ -1268,7 +1242,10 @@ app.post(
             token,
 
             user: {
-                id: user.id,
+
+                id:
+                    user.id,
+
                 username:
                     user.username
             }
@@ -1296,7 +1273,7 @@ app.post(
 );
 
 /* =========================================================
-   CURRENT USER
+   CURRENT ACCOUNT
 ========================================================= */
 
 app.get(
@@ -1354,14 +1331,14 @@ app.post(
                 .json({
                     ok: false,
                     error:
-                        "Script name and source are required"
+                        "Name and source are required"
                 });
         }
 
         const scriptId =
             randomId(16);
 
-        db.scripts[
+        database.scripts[
             scriptId
         ] = {
 
@@ -1388,7 +1365,7 @@ app.post(
             scriptId
         );
 
-        saveDB();
+        saveDatabase();
 
         res.json({
 
@@ -1420,12 +1397,15 @@ app.get(
         const scripts =
             req.user.scripts
                 .map(
-                    id =>
-                        db.scripts[id]
+                    scriptId =>
+                        database.scripts[
+                            scriptId
+                        ]
                 )
                 .filter(Boolean)
                 .map(
                     script => ({
+
                         id:
                             script.id,
 
@@ -1467,7 +1447,7 @@ app.get(
             );
 
         const script =
-            db.scripts[
+            database.scripts[
                 scriptId
             ];
 
@@ -1536,7 +1516,7 @@ app.put(
             );
 
         const script =
-            db.scripts[
+            database.scripts[
                 scriptId
             ];
 
@@ -1598,7 +1578,7 @@ app.put(
             new Date()
                 .toISOString();
 
-        saveDB();
+        saveDatabase();
 
         res.json({
 
@@ -1625,7 +1605,7 @@ app.delete(
             );
 
         const script =
-            db.scripts[
+            database.scripts[
                 scriptId
             ];
 
@@ -1654,7 +1634,7 @@ app.delete(
                 });
         }
 
-        delete db.scripts[
+        delete database.scripts[
             scriptId
         ];
 
@@ -1664,7 +1644,7 @@ app.delete(
                     id !== scriptId
             );
 
-        saveDB();
+        saveDatabase();
 
         res.json({
 
@@ -1689,22 +1669,24 @@ app.get(
                 req.params.id
             );
 
+        /*
+         * Browser navigation receives
+         * the visual block page.
+         */
+
         const accept =
             String(
                 req.headers.accept || ""
             ).toLowerCase();
 
-        const isBrowser =
+        const browserRequest =
             accept.includes(
                 "text/html"
             );
 
-        /*
-         * Direct browser navigation:
-         * show the visual block page.
-         */
-
-        if (isBrowser) {
+        if (
+            browserRequest
+        ) {
 
             return res
                 .status(403)
@@ -1715,7 +1697,7 @@ app.get(
         }
 
         const script =
-            db.scripts[
+            database.scripts[
                 scriptId
             ];
 
@@ -1723,18 +1705,15 @@ app.get(
 
             return res
                 .status(404)
-                .type("text")
+                .type("text/plain")
                 .send(
                     "LEXINX BLOCK"
                 );
         }
 
         /*
-         * Return the stored payload.
-         *
-         * This endpoint does not expose
-         * the user's account information
-         * or management metadata.
+         * Return the stored script
+         * for the loader client.
          */
 
         return res
@@ -1784,17 +1763,17 @@ app.use(
 ========================================================= */
 
 app.use(
-    (err, req, res, next) => {
+    (error, req, res, next) => {
 
         console.error(
-            "SERVER ERROR:",
-            err
+            "LEXINX SERVER ERROR:",
+            error
         );
 
         if (
             res.headersSent
         ) {
-            return next(err);
+            return next(error);
         }
 
         res
@@ -1817,19 +1796,35 @@ app.listen(
     () => {
 
         console.log(
-            "================================="
+            "======================================"
         );
 
         console.log(
-            "      LEXINX PROTECT SERVER"
+            "        LEXINX PROTECT SERVER"
         );
 
         console.log(
-            "================================="
+            "======================================"
         );
 
         console.log(
-            `Listening on ${HOST}:${PORT}`
+            `Server: http://${HOST}:${PORT}`
+        );
+
+        console.log(
+            "Web: /"
+        );
+
+        console.log(
+            "Register: POST /api/register"
+        );
+
+        console.log(
+            "Login: POST /api/login"
+        );
+
+        console.log(
+            "Scripts: /api/scripts"
         );
 
         console.log(
