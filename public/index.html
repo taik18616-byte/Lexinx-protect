@@ -1,12 +1,15 @@
 <!doctype html>
-<html lang="vi">
+<html lang="en">
 <head>
-<meta charset="utf-8">
+<meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+
 <title>LEXINX Protect</title>
 
 <style>
-*{box-sizing:border-box}
+*{
+    box-sizing:border-box;
+}
 
 body{
     margin:0;
@@ -17,7 +20,7 @@ body{
 
 .wrap{
     width:min(1100px,94%);
-    margin:35px auto;
+    margin:30px auto;
 }
 
 .card{
@@ -32,20 +35,15 @@ h1,h2{
     margin-top:0;
 }
 
-input,textarea{
+input,
+textarea{
     width:100%;
     background:#050505;
     color:#eee;
     border:1px solid #333;
     border-radius:8px;
-    outline:0;
     padding:12px;
-    font:14px Consolas,monospace;
-}
-
-input:focus,
-textarea:focus{
-    border-color:#777;
+    outline:none;
 }
 
 input{
@@ -55,17 +53,23 @@ input{
 textarea{
     min-height:300px;
     resize:vertical;
+    font:13px/1.5 Consolas,monospace;
+}
+
+input:focus,
+textarea:focus{
+    border-color:#777;
 }
 
 button{
-    background:#eee;
-    color:#111;
     border:0;
     border-radius:8px;
     padding:11px 16px;
+    margin:4px;
     font-weight:bold;
     cursor:pointer;
-    margin:4px;
+    background:#eee;
+    color:#111;
 }
 
 button.secondary{
@@ -75,7 +79,7 @@ button.secondary{
 }
 
 button.danger{
-    background:#421818;
+    background:#401717;
     color:#ff9999;
 }
 
@@ -88,34 +92,41 @@ button:hover{
 }
 
 .status{
-    background:#0d0d0d;
+    margin-top:12px;
+    padding:12px;
+    background:#0c0c0c;
     border:1px solid #292929;
     border-radius:8px;
-    padding:12px;
-    margin-top:12px;
     white-space:pre-wrap;
     color:#aaa;
 }
 
-.ok{
-    color:#7dff91;
+.status.ok{
+    color:#8cff9b;
 }
 
-.err{
-    color:#ff7070;
+.status.error{
+    color:#ff7777;
+}
+
+.row{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
 }
 
 .account-url{
     color:#888;
     word-break:break-all;
+    margin-top:6px;
 }
 
 .script{
-    border:1px solid #292929;
     background:#0b0b0b;
+    border:1px solid #292929;
     border-radius:10px;
-    padding:14px;
-    margin:10px 0;
+    padding:15px;
+    margin-top:10px;
 }
 
 .script-name{
@@ -123,21 +134,21 @@ button:hover{
     margin-bottom:7px;
 }
 
-.loader{
-    width:100%;
-    background:#050505;
-    color:#bbb;
-    border:1px solid #292929;
-    border-radius:7px;
-    padding:10px;
+.script-id{
+    color:#777;
     font:12px Consolas,monospace;
     word-break:break-all;
 }
 
-.row{
-    display:flex;
-    gap:8px;
-    flex-wrap:wrap;
+.loader{
+    margin-top:10px;
+    padding:10px;
+    border:1px solid #292929;
+    border-radius:7px;
+    background:#050505;
+    color:#aaa;
+    font:12px Consolas,monospace;
+    word-break:break-all;
 }
 
 .small{
@@ -158,166 +169,211 @@ button:hover{
 
 <div class="wrap">
 
-    <!-- AUTH -->
+<!-- =====================================================
+     AUTH
+===================================================== -->
 
-    <section id="auth">
+<div id="auth">
 
-        <div class="card">
+    <div class="card">
 
-            <h1>LEXINX Protect</h1>
+        <h1>LEXINX Protect</h1>
 
-            <p class="small">
-                Create an account or login.
-            </p>
+        <p class="small">
+            Create an account or sign in to continue.
+        </p>
 
-            <input
-                id="username"
-                autocomplete="username"
-                placeholder="Username"
-            >
+        <input
+            id="username"
+            autocomplete="username"
+            placeholder="Username"
+        >
 
-            <input
-                id="password"
-                type="password"
-                autocomplete="current-password"
-                placeholder="Password"
-            >
+        <input
+            id="password"
+            type="password"
+            autocomplete="current-password"
+            placeholder="Password"
+        >
 
-            <div class="row">
+        <div class="row">
 
-                <button onclick="register()">
-                    CREATE ACCOUNT
-                </button>
-
-                <button
-                    class="secondary"
-                    onclick="login()"
-                >
-                    LOGIN
-                </button>
-
-            </div>
-
-            <div
-                id="authStatus"
-                class="status"
-            >
-                Ready.
-            </div>
-
-        </div>
-
-    </section>
-
-
-    <!-- DASHBOARD -->
-
-    <section
-        id="dashboard"
-        class="hidden"
-    >
-
-        <div class="card">
-
-            <div class="row">
-
-                <div style="flex:1">
-
-                    <h1>
-                        LEXINX Dashboard
-                    </h1>
-
-                    <div>
-                        Account:
-                        <b id="accountName">
-                            -
-                        </b>
-                    </div>
-
-                    <div
-                        id="accountURL"
-                        class="account-url"
-                    >
-                        -
-                    </div>
-
-                </div>
-
-                <div>
-
-                    <button
-                        class="secondary"
-                        onclick="logout()"
-                    >
-                        LOGOUT
-                    </button>
-
-                </div>
-
-            </div>
-
-        </div>
-
-
-        <!-- CREATE -->
-
-        <div class="card">
-
-            <h2>
-                Upload / Create Script
-            </h2>
-
-            <input
-                id="scriptName"
-                placeholder="Script name"
-            >
-
-            <textarea
-                id="scriptSource"
-                spellcheck="false"
-                placeholder="Paste Lua / Luau source..."
-            ></textarea>
-
-            <button onclick="createScript()">
-                CREATE SCRIPT
+            <button onclick="register()">
+                CREATE ACCOUNT
             </button>
 
-            <div
-                id="createStatus"
-                class="status"
+            <button
+                class="secondary"
+                onclick="login()"
             >
-                Ready.
-            </div>
+                LOGIN
+            </button>
 
         </div>
 
+        <div
+            id="authStatus"
+            class="status"
+        >
+            Ready.
+        </div>
 
-        <!-- SCRIPTS -->
+    </div>
 
-        <div class="card">
+</div>
 
-            <div class="row">
 
-                <h2 style="flex:1">
-                    My Scripts
-                </h2>
+<!-- =====================================================
+     DASHBOARD
+===================================================== -->
 
-                <button
-                    class="secondary"
-                    onclick="loadScripts()"
+<div
+    id="dashboard"
+    class="hidden"
+>
+
+    <div class="card">
+
+        <div class="row">
+
+            <div style="flex:1">
+
+                <h1>
+                    LEXINX Dashboard
+                </h1>
+
+                <div>
+                    Signed in as:
+                    <b id="accountName">-</b>
+                </div>
+
+                <div
+                    id="accountURL"
+                    class="account-url"
                 >
-                    REFRESH
-                </button>
+                    -
+                </div>
 
             </div>
 
-            <div id="scripts">
-                Loading...
-            </div>
+            <button
+                class="secondary"
+                onclick="logout()"
+            >
+                LOGOUT
+            </button>
 
         </div>
 
-    </section>
+    </div>
+
+
+    <!-- CREATE SCRIPT -->
+
+    <div class="card">
+
+        <h2>
+            Create Script
+        </h2>
+
+        <input
+            id="scriptName"
+            placeholder="Script name"
+        >
+
+        <textarea
+            id="scriptSource"
+            spellcheck="false"
+            placeholder="Paste your Lua / Luau source here..."
+        ></textarea>
+
+        <button onclick="createScript()">
+            CREATE SCRIPT
+        </button>
+
+        <div
+            id="createStatus"
+            class="status"
+        >
+            Ready.
+        </div>
+
+    </div>
+
+
+    <!-- EDITOR -->
+
+    <div
+        id="editor"
+        class="card hidden"
+    >
+
+        <h2>
+            Edit Script
+        </h2>
+
+        <input
+            id="editName"
+            placeholder="Script name"
+        >
+
+        <textarea
+            id="editSource"
+            spellcheck="false"
+            placeholder="Script source..."
+        ></textarea>
+
+        <div class="row">
+
+            <button onclick="saveEdit()">
+                SAVE CHANGES
+            </button>
+
+            <button
+                class="secondary"
+                onclick="cancelEdit()"
+            >
+                CANCEL
+            </button>
+
+        </div>
+
+        <div
+            id="editStatus"
+            class="status"
+        >
+            Ready.
+        </div>
+
+    </div>
+
+
+    <!-- SCRIPTS -->
+
+    <div class="card">
+
+        <div class="row">
+
+            <h2 style="flex:1">
+                My Scripts
+            </h2>
+
+            <button
+                class="secondary"
+                onclick="loadScripts()"
+            >
+                REFRESH
+            </button>
+
+        </div>
+
+        <div id="scripts">
+            Loading...
+        </div>
+
+    </div>
+
+</div>
 
 </div>
 
@@ -325,13 +381,61 @@ button:hover{
 <script>
 
 /* =====================================================
-   HELPERS
+   API
 ===================================================== */
 
-const $ = id =>
-    document.getElementById(id);
+async function api(
+    url,
+    options = {}
+){
 
-function setStatus(
+    const response =
+        await fetch(
+            url,
+            {
+                credentials:"same-origin",
+                ...options,
+                headers:{
+                    "Content-Type":
+                        "application/json",
+                    ...(options.headers || {})
+                }
+            }
+        );
+
+    const text =
+        await response.text();
+
+    let data = {};
+
+    try{
+        data =
+            text
+            ? JSON.parse(text)
+            : {};
+    }catch{
+        throw new Error(
+            `Server returned HTTP ${response.status}`
+        );
+    }
+
+    if(!response.ok){
+
+        throw new Error(
+            data.error ||
+            `HTTP ${response.status}`
+        );
+    }
+
+    return data;
+}
+
+
+/* =====================================================
+   STATUS
+===================================================== */
+
+function status(
     element,
     message,
     ok = false
@@ -339,110 +443,56 @@ function setStatus(
 
     element.className =
         "status " +
-        (ok ? "ok" : "err");
+        (ok ? "ok" : "error");
 
     element.textContent =
         message;
 }
 
-async function api(
-    url,
-    options = {}
-){
-
-    try{
-
-        const response =
-            await fetch(
-                url,
-                {
-                    credentials:"same-origin",
-                    ...options,
-                    headers:{
-                        "Content-Type":
-                            "application/json",
-                        ...(options.headers || {})
-                    }
-                }
-            );
-
-        const text =
-            await response.text();
-
-        let data;
-
-        try{
-            data =
-                text
-                ? JSON.parse(text)
-                : {};
-        }catch{
-
-            throw new Error(
-                "Server returned invalid response: " +
-                text.slice(0,200)
-            );
-        }
-
-        if(!response.ok){
-
-            throw new Error(
-                data.error ||
-                `HTTP ${response.status}`
-            );
-        }
-
-        return data;
-
-    }catch(error){
-
-        if(
-            error instanceof TypeError
-        ){
-
-            throw new Error(
-                "Request failed. " +
-                "Kiểm tra Render/server hoặc endpoint."
-            );
-        }
-
-        throw error;
-    }
-}
-
 
 /* =====================================================
-   AUTH STATE
+   SHOW DASHBOARD
 ===================================================== */
 
 function showDashboard(data){
 
-    $("auth")
+    document
+        .getElementById("auth")
         .classList
         .add("hidden");
 
-    $("dashboard")
+    document
+        .getElementById("dashboard")
         .classList
         .remove("hidden");
 
-    $("accountName")
+    document
+        .getElementById("accountName")
         .textContent =
         data.username || "-";
 
-    $("accountURL")
+    document
+        .getElementById("accountURL")
         .textContent =
         data.url || "-";
 
     loadScripts();
 }
 
+
+/* =====================================================
+   SHOW LOGIN
+===================================================== */
+
 function showAuth(){
 
-    $("dashboard")
+    document
+        .getElementById("dashboard")
         .classList
         .add("hidden");
 
-    $("auth")
+    document
+        .getElementById("auth")
         .classList
         .remove("hidden");
 }
@@ -455,22 +505,25 @@ function showAuth(){
 async function register(){
 
     const username =
-        $("username")
+        document
+        .getElementById("username")
         .value
         .trim();
 
     const password =
-        $("password")
+        document
+        .getElementById("password")
         .value;
 
-    const status =
-        $("authStatus");
+    const box =
+        document
+        .getElementById("authStatus");
 
     if(!username){
 
-        setStatus(
-            status,
-            "Enter username."
+        status(
+            box,
+            "Please enter a username."
         );
 
         return;
@@ -478,18 +531,18 @@ async function register(){
 
     if(password.length < 6){
 
-        setStatus(
-            status,
+        status(
+            box,
             "Password must contain at least 6 characters."
         );
 
         return;
     }
 
-    status.className =
+    box.className =
         "status";
 
-    status.textContent =
+    box.textContent =
         "Creating account...";
 
     try{
@@ -499,34 +552,22 @@ async function register(){
                 "/api/register",
                 {
                     method:"POST",
-                    body:JSON.stringify({
-                        username,
-                        password
-                    })
+
+                    body:
+                        JSON.stringify({
+                            username,
+                            password
+                        })
                 }
             );
-
-        if(!data.ok){
-
-            throw new Error(
-                data.error ||
-                "Registration failed"
-            );
-        }
-
-        setStatus(
-            status,
-            "Account created successfully.",
-            true
-        );
 
         showDashboard(data);
 
     }catch(error){
 
-        setStatus(
-            status,
-            "REGISTER ERROR:\n" +
+        status(
+            box,
+            "Registration failed:\n" +
             error.message
         );
     }
@@ -540,33 +581,35 @@ async function register(){
 async function login(){
 
     const username =
-        $("username")
+        document
+        .getElementById("username")
         .value
         .trim();
 
     const password =
-        $("password")
+        document
+        .getElementById("password")
         .value;
 
-    const status =
-        $("authStatus");
+    const box =
+        document
+        .getElementById("authStatus");
 
-    if(!username ||
-       !password){
+    if(!username || !password){
 
-        setStatus(
-            status,
-            "Enter username and password."
+        status(
+            box,
+            "Please enter your username and password."
         );
 
         return;
     }
 
-    status.className =
+    box.className =
         "status";
 
-    status.textContent =
-        "Logging in...";
+    box.textContent =
+        "Signing in...";
 
     try{
 
@@ -575,34 +618,22 @@ async function login(){
                 "/api/login",
                 {
                     method:"POST",
-                    body:JSON.stringify({
-                        username,
-                        password
-                    })
+
+                    body:
+                        JSON.stringify({
+                            username,
+                            password
+                        })
                 }
             );
-
-        if(!data.ok){
-
-            throw new Error(
-                data.error ||
-                "Login failed"
-            );
-        }
-
-        setStatus(
-            status,
-            "Login successful.",
-            true
-        );
 
         showDashboard(data);
 
     }catch(error){
 
-        setStatus(
-            status,
-            "LOGIN ERROR:\n" +
+        status(
+            box,
+            "Login failed:\n" +
             error.message
         );
     }
@@ -610,26 +641,26 @@ async function login(){
 
 
 /* =====================================================
-   CHECK SESSION
+   SESSION RESTORE
 ===================================================== */
 
-async function checkSession(){
+async function restoreSession(){
 
     try{
 
         const data =
-            await api(
-                "/api/me"
-            );
+            await api("/api/me");
 
         if(data.ok){
+
             showDashboard(data);
+
+            return;
         }
 
-    }catch{
+    }catch{}
 
-        showAuth();
-    }
+    showAuth();
 }
 
 
@@ -650,51 +681,56 @@ async function logout(){
 
     }catch{}
 
-    showAuth();
-
-    $("authStatus")
+    document
+        .getElementById("authStatus")
         .className =
         "status";
 
-    $("authStatus")
+    document
+        .getElementById("authStatus")
         .textContent =
-        "Logged out.";
+        "You have been logged out.";
+
+    showAuth();
 }
 
 
 /* =====================================================
-   CREATE SCRIPT
+   CREATE
 ===================================================== */
 
 async function createScript(){
 
     const name =
-        $("scriptName")
+        document
+        .getElementById("scriptName")
         .value
         .trim();
 
     const source =
-        $("scriptSource")
+        document
+        .getElementById("scriptSource")
         .value;
 
-    const status =
-        $("createStatus");
+    const box =
+        document
+        .getElementById("createStatus");
 
     if(!source.trim()){
 
-        setStatus(
-            status,
-            "Script source is empty."
+        status(
+            box,
+            "Script source cannot be empty."
         );
 
         return;
     }
 
-    status.className =
+    box.className =
         "status";
 
-    status.textContent =
-        "Uploading...";
+    box.textContent =
+        "Creating script...";
 
     try{
 
@@ -703,48 +739,43 @@ async function createScript(){
                 "/api/create",
                 {
                     method:"POST",
-                    body:JSON.stringify({
-                        name,
-                        source
-                    })
+
+                    body:
+                        JSON.stringify({
+                            name:
+                                name ||
+                                "Untitled Script",
+
+                            source
+                        })
                 }
             );
 
-        if(!data.ok){
-
-            throw new Error(
-                data.error ||
-                "Create failed"
-            );
-        }
-
-        setStatus(
-            status,
-            "SCRIPT CREATED\n\n" +
+        status(
+            box,
+            "Script created successfully.\n\n" +
             "ID: " +
             data.id +
-            "\n\n" +
-            "Endpoint:\n" +
-            data.endpoint +
-            "\n\n" +
-            "Loader:\n" +
+            "\n\nLoader:\n" +
             data.loader,
             true
         );
 
-        $("scriptName")
+        document
+            .getElementById("scriptName")
             .value = "";
 
-        $("scriptSource")
+        document
+            .getElementById("scriptSource")
             .value = "";
 
         loadScripts();
 
     }catch(error){
 
-        setStatus(
-            status,
-            "CREATE ERROR:\n" +
+        status(
+            box,
+            "Create failed:\n" +
             error.message
         );
     }
@@ -758,7 +789,8 @@ async function createScript(){
 async function loadScripts(){
 
     const container =
-        $("scripts");
+        document
+        .getElementById("scripts");
 
     container.textContent =
         "Loading...";
@@ -770,21 +802,20 @@ async function loadScripts(){
                 "/api/scripts"
             );
 
+        container.innerHTML = "";
+
         if(
             !data.scripts ||
-            !data.scripts.length
+            data.scripts.length === 0
         ){
 
             container.innerHTML =
                 '<div class="small">' +
-                'No scripts yet.' +
+                'You have no scripts yet.' +
                 '</div>';
 
             return;
         }
-
-        container.innerHTML =
-            "";
 
         for(
             const script
@@ -816,7 +847,7 @@ async function loadScripts(){
                 );
 
             id.className =
-                "small";
+                "script-id";
 
             id.textContent =
                 "ID: " +
@@ -868,7 +899,7 @@ async function loadScripts(){
 
             edit.onclick =
                 () =>
-                    editScript(
+                    openEditor(
                         script.id
                     );
 
@@ -904,17 +935,19 @@ async function loadScripts(){
     }catch(error){
 
         container.textContent =
-            "LOAD ERROR: " +
+            "Failed to load scripts: " +
             error.message;
     }
 }
 
 
 /* =====================================================
-   EDIT
+   OPEN EDITOR
 ===================================================== */
 
-async function editScript(id){
+let editingID = null;
+
+async function openEditor(id){
 
     try{
 
@@ -924,54 +957,113 @@ async function editScript(id){
                 encodeURIComponent(id)
             );
 
-        if(!data.ok){
-            throw new Error(
-                data.error
-            );
-        }
+        editingID =
+            id;
 
-        const script =
-            data.script;
+        document
+            .getElementById("editName")
+            .value =
+            data.script.name;
 
-        const name =
-            prompt(
-                "Script name:",
-                script.name
-            );
+        document
+            .getElementById("editSource")
+            .value =
+            data.script.source;
 
-        if(name === null)
-            return;
+        document
+            .getElementById("editor")
+            .classList
+            .remove("hidden");
 
-        const source =
-            prompt(
-                "Lua source:",
-                script.source
-            );
+        document
+            .getElementById("editor")
+            .scrollIntoView({
+                behavior:"smooth"
+            });
 
-        if(source === null)
-            return;
+    }catch(error){
+
+        alert(
+            "Failed to open script:\n" +
+            error.message
+        );
+    }
+}
+
+
+/* =====================================================
+   SAVE EDIT
+===================================================== */
+
+async function saveEdit(){
+
+    if(!editingID)
+        return;
+
+    const name =
+        document
+        .getElementById("editName")
+        .value
+        .trim();
+
+    const source =
+        document
+        .getElementById("editSource")
+        .value;
+
+    const box =
+        document
+        .getElementById("editStatus");
+
+    try{
 
         await api(
-            "/api/edit/" +
-            encodeURIComponent(id),
+            "/api/script/" +
+            encodeURIComponent(
+                editingID
+            ),
             {
-                method:"POST",
-                body:JSON.stringify({
-                    name,
-                    source
-                })
+                method:"PUT",
+
+                body:
+                    JSON.stringify({
+                        name,
+                        source
+                    })
             }
+        );
+
+        status(
+            box,
+            "Changes saved successfully.",
+            true
         );
 
         loadScripts();
 
     }catch(error){
 
-        alert(
-            "EDIT ERROR:\n" +
+        status(
+            box,
+            "Save failed:\n" +
             error.message
         );
     }
+}
+
+
+/* =====================================================
+   CANCEL EDIT
+===================================================== */
+
+function cancelEdit(){
+
+    editingID = null;
+
+    document
+        .getElementById("editor")
+        .classList
+        .add("hidden");
 }
 
 
@@ -983,7 +1075,7 @@ async function deleteScript(id){
 
     if(
         !confirm(
-            "Delete this script?"
+            "Delete this script permanently?"
         )
     ){
         return;
@@ -992,19 +1084,25 @@ async function deleteScript(id){
     try{
 
         await api(
-            "/api/delete/" +
+            "/api/script/" +
             encodeURIComponent(id),
             {
                 method:"DELETE"
             }
         );
 
+        if(
+            editingID === id
+        ){
+            cancelEdit();
+        }
+
         loadScripts();
 
     }catch(error){
 
         alert(
-            "DELETE ERROR:\n" +
+            "Delete failed:\n" +
             error.message
         );
     }
@@ -1023,33 +1121,33 @@ async function copyText(text){
             .writeText(text);
 
         alert(
-            "Loader copied."
+            "Loader copied to clipboard."
         );
 
     }catch{
 
-        const textarea =
+        const area =
             document.createElement(
                 "textarea"
             );
 
-        textarea.value =
+        area.value =
             text;
 
         document.body.appendChild(
-            textarea
+            area
         );
 
-        textarea.select();
+        area.select();
 
         document.execCommand(
             "copy"
         );
 
-        textarea.remove();
+        area.remove();
 
         alert(
-            "Loader copied."
+            "Loader copied to clipboard."
         );
     }
 }
@@ -1059,7 +1157,7 @@ async function copyText(text){
    START
 ===================================================== */
 
-checkSession();
+restoreSession();
 
 </script>
 
