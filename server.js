@@ -5,61 +5,116 @@ const crypto = require("crypto");
 
 const app = express();
 
-const PORT = process.env.PORT || 3000;
+const PORT =
+    process.env.PORT || 3000;
+
 const BASE_URL =
     process.env.BASE_URL ||
     "https://lexinx-protect.onrender.com";
 
-const DATA_DIR = path.join(__dirname, "data");
-const DB_FILE = path.join(DATA_DIR, "accounts.json");
-const PUBLIC_DIR = path.join(__dirname, "public");
+const DATA_DIR =
+    path.join(__dirname, "data");
 
-fs.mkdirSync(DATA_DIR, { recursive: true });
-fs.mkdirSync(PUBLIC_DIR, { recursive: true });
+const DB_FILE =
+    path.join(
+        DATA_DIR,
+        "accounts.json"
+    );
+
+const PUBLIC_DIR =
+    path.join(
+        __dirname,
+        "public"
+    );
+
+/* =========================================================
+   INIT
+========================================================= */
+
+fs.mkdirSync(
+    DATA_DIR,
+    {
+        recursive: true
+    }
+);
+
+fs.mkdirSync(
+    PUBLIC_DIR,
+    {
+        recursive: true
+    }
+);
 
 if (!fs.existsSync(DB_FILE)) {
-    fs.writeFileSync(DB_FILE, "{}", "utf8");
+
+    fs.writeFileSync(
+        DB_FILE,
+        "{}",
+        "utf8"
+    );
 }
 
-app.disable("x-powered-by");
+app.disable(
+    "x-powered-by"
+);
 
-app.use(express.json({
-    limit: "10mb"
-}));
+app.use(
+    express.json({
+        limit: "10mb"
+    })
+);
 
-app.use(express.urlencoded({
-    extended: true,
-    limit: "10mb"
-}));
+app.use(
+    express.urlencoded({
+        extended: true,
+        limit: "10mb"
+    })
+);
 
-app.use(express.static(PUBLIC_DIR));
+app.use(
+    express.static(
+        PUBLIC_DIR
+    )
+);
 
 /* =========================================================
    DATABASE
 ========================================================= */
 
 function readDB() {
+
     try {
+
         return JSON.parse(
-            fs.readFileSync(DB_FILE, "utf8")
+            fs.readFileSync(
+                DB_FILE,
+                "utf8"
+            )
         );
+
     } catch {
+
         return {};
     }
 }
 
 function writeDB(db) {
-    const tmp =
+
+    const temp =
         DB_FILE + ".tmp";
 
     fs.writeFileSync(
-        tmp,
-        JSON.stringify(db, null, 2),
+        temp,
+        JSON.stringify(
+            db,
+            null,
+            2
+        ),
         "utf8"
     );
 
     fs.renameSync(
-        tmp,
+        temp,
         DB_FILE
     );
 }
@@ -68,17 +123,22 @@ function writeDB(db) {
    RANDOM
 ========================================================= */
 
-function randomID(bytes = 24) {
+function randomID(
+    bytes = 32
+) {
+
     return crypto
         .randomBytes(bytes)
         .toString("hex");
 }
 
 /* =========================================================
-   PASSWORD
+   PASSWORD HASH
 ========================================================= */
 
-function hashPassword(password) {
+function hashPassword(
+    password
+) {
 
     const salt =
         crypto.randomBytes(16);
@@ -91,11 +151,16 @@ function hashPassword(password) {
         );
 
     return {
+
         salt:
-            salt.toString("hex"),
+            salt.toString(
+                "hex"
+            ),
 
         hash:
-            hash.toString("hex")
+            hash.toString(
+                "hex"
+            )
     };
 }
 
@@ -141,10 +206,12 @@ function verifyPassword(
 }
 
 /* =========================================================
-   COOKIES
+   COOKIE
 ========================================================= */
 
-function parseCookies(req) {
+function parseCookies(
+    req
+) {
 
     const result = {};
 
@@ -152,49 +219,63 @@ function parseCookies(req) {
         req.headers.cookie;
 
     if (!raw) {
+
         return result;
     }
 
     for (
-        const item
+        const part
         of raw.split(";")
     ) {
 
         const index =
-            item.indexOf("=");
+            part.indexOf("=");
 
         if (index === -1) {
             continue;
         }
 
         const key =
-            item
-                .slice(0, index)
+            part
+                .slice(
+                    0,
+                    index
+                )
                 .trim();
 
         const value =
-            item
-                .slice(index + 1)
+            part
+                .slice(
+                    index + 1
+                )
                 .trim();
 
         result[key] =
-            decodeURIComponent(value);
+            decodeURIComponent(
+                value
+            );
     }
 
     return result;
 }
 
 /* =========================================================
-   SESSIONS
+   ACCOUNT SESSIONS
 ========================================================= */
 
 const sessions =
     new Map();
 
-const SESSION_TIME =
-    30 * 24 * 60 * 60 * 1000;
+const SESSION_TTL =
+    30 *
+    24 *
+    60 *
+    60 *
+    1000;
 
-function createSession(username) {
+function createSession(
+    username
+) {
 
     const token =
         randomID(48);
@@ -203,20 +284,22 @@ function createSession(username) {
         token,
         {
             username,
+
             createdAt:
                 Date.now(),
-            lastActivity:
-                Date.now(),
+
             expires:
                 Date.now() +
-                SESSION_TIME
+                SESSION_TTL
         }
     );
 
     return token;
 }
 
-function getCurrentUser(req) {
+function getCurrentUser(
+    req
+) {
 
     const cookies =
         parseCookies(req);
@@ -225,13 +308,17 @@ function getCurrentUser(req) {
         cookies.lexinx_session;
 
     if (!token) {
+
         return null;
     }
 
     const session =
-        sessions.get(token);
+        sessions.get(
+            token
+        );
 
     if (!session) {
+
         return null;
     }
 
@@ -240,17 +327,16 @@ function getCurrentUser(req) {
         session.expires
     ) {
 
-        sessions.delete(token);
+        sessions.delete(
+            token
+        );
 
         return null;
     }
 
-    session.lastActivity =
-        Date.now();
-
     session.expires =
         Date.now() +
-        SESSION_TIME;
+        SESSION_TTL;
 
     return session.username;
 }
@@ -264,7 +350,9 @@ function setSession(
         "Set-Cookie",
         [
             "lexinx_session=" +
-                encodeURIComponent(token),
+                encodeURIComponent(
+                    token
+                ),
 
             "Path=/",
 
@@ -277,15 +365,21 @@ function setSession(
     );
 }
 
-function clearSession(res) {
+function clearSession(
+    res
+) {
 
     res.setHeader(
         "Set-Cookie",
         [
             "lexinx_session=",
+
             "Path=/",
+
             "HttpOnly",
+
             "SameSite=Lax",
+
             "Max-Age=0"
         ].join("; ")
     );
@@ -305,9 +399,11 @@ function requireAuth(
         return res
             .status(401)
             .json({
+
                 ok: false,
+
                 error:
-                    "Authentication required"
+                    "Authentication required."
             });
     }
 
@@ -321,7 +417,7 @@ function requireAuth(
    ACCOUNT URL
 ========================================================= */
 
-function getAccountURL(
+function accountURL(
     account
 ) {
 
@@ -364,8 +460,10 @@ function renderBlockPage() {
 
 html,
 body{
+
     width:100%;
     height:100%;
+
     margin:0;
 }
 
@@ -416,7 +514,7 @@ body{
     text-align:center;
 
     background:
-        rgba(32,32,32,.76);
+        rgba(32,32,32,.78);
 
     border:
         1px solid #3a3a3a;
@@ -683,6 +781,7 @@ draw();
 </script>
 
 </body>
+
 </html>`;
 }
 
@@ -733,7 +832,9 @@ app.post(
                 return res
                     .status(400)
                     .json({
+
                         ok: false,
+
                         error:
                             "Username must contain 3-24 letters, numbers, or underscores."
                     });
@@ -746,7 +847,9 @@ app.post(
                 return res
                     .status(400)
                     .json({
+
                         ok: false,
+
                         error:
                             "Password must contain at least 6 characters."
                     });
@@ -763,7 +866,9 @@ app.post(
                 return res
                     .status(409)
                     .json({
+
                         ok: false,
+
                         error:
                             "Username already exists."
                     });
@@ -820,7 +925,7 @@ app.post(
                     account.id,
 
                 url:
-                    getAccountURL(
+                    accountURL(
                         account
                     )
             });
@@ -828,13 +933,16 @@ app.post(
         } catch(error) {
 
             console.error(
+                "REGISTER:",
                 error
             );
 
             res
                 .status(500)
                 .json({
+
                     ok: false,
+
                     error:
                         "Internal server error."
                 });
@@ -884,7 +992,9 @@ app.post(
                 return res
                     .status(401)
                     .json({
+
                         ok: false,
+
                         error:
                             "Invalid username or password."
                     });
@@ -909,7 +1019,7 @@ app.post(
                     account.id,
 
                 url:
-                    getAccountURL(
+                    accountURL(
                         account
                     )
             });
@@ -917,13 +1027,16 @@ app.post(
         } catch(error) {
 
             console.error(
+                "LOGIN:",
                 error
             );
 
             res
                 .status(500)
                 .json({
+
                     ok: false,
+
                     error:
                         "Internal server error."
                 });
@@ -951,7 +1064,9 @@ app.get(
             return res
                 .status(404)
                 .json({
+
                     ok: false,
+
                     error:
                         "Account not found."
                 });
@@ -968,7 +1083,7 @@ app.get(
                 account.id,
 
             url:
-                getAccountURL(
+                accountURL(
                     account
                 )
         });
@@ -1088,7 +1203,9 @@ app.post(
             return res
                 .status(400)
                 .json({
+
                     ok: false,
+
                     error:
                         "Script source cannot be empty."
                 });
@@ -1105,7 +1222,9 @@ app.post(
             return res
                 .status(404)
                 .json({
+
                     ok: false,
+
                     error:
                         "Account not found."
                 });
@@ -1172,7 +1291,9 @@ app.get(
             return res
                 .status(404)
                 .json({
+
                     ok: false,
+
                     error:
                         "Account not found."
                 });
@@ -1180,8 +1301,7 @@ app.get(
 
         const scripts =
             Object.values(
-                account.scripts ||
-                {}
+                account.scripts || {}
             );
 
         res.json({
@@ -1247,7 +1367,9 @@ app.get(
             return res
                 .status(404)
                 .json({
+
                     ok: false,
+
                     error:
                         "Script not found."
                 });
@@ -1287,7 +1409,9 @@ app.put(
             return res
                 .status(404)
                 .json({
+
                     ok: false,
+
                     error:
                         "Script not found."
                 });
@@ -1323,7 +1447,9 @@ app.put(
                 return res
                     .status(400)
                     .json({
+
                         ok: false,
+
                         error:
                             "Source cannot be empty."
                     });
@@ -1371,7 +1497,9 @@ app.delete(
             return res
                 .status(404)
                 .json({
+
                     ok: false,
+
                     error:
                         "Script not found."
                 });
@@ -1390,7 +1518,7 @@ app.delete(
 );
 
 /* =========================================================
-   FIND SCRIPT
+   SCRIPT LOOKUP
 ========================================================= */
 
 function findScript(id) {
@@ -1412,7 +1540,9 @@ function findScript(id) {
         ) {
 
             return {
+
                 account,
+
                 script:
                     account.scripts[id]
             };
@@ -1423,7 +1553,74 @@ function findScript(id) {
 }
 
 /* =========================================================
-   LOADER
+   BOOTSTRAP SESSIONS
+========================================================= */
+
+const bootstrapSessions =
+    new Map();
+
+const BOOTSTRAP_TTL =
+    60 * 1000;
+
+function createBootstrap(
+    scriptID
+) {
+
+    const token =
+        randomID(32);
+
+    bootstrapSessions.set(
+        token,
+        {
+
+            scriptID,
+
+            createdAt:
+                Date.now(),
+
+            expires:
+                Date.now() +
+                BOOTSTRAP_TTL,
+
+            used: false
+        }
+    );
+
+    return token;
+}
+
+function getBootstrap(
+    token
+) {
+
+    const session =
+        bootstrapSessions.get(
+            token
+        );
+
+    if (!session) {
+
+        return null;
+    }
+
+    if (
+        session.used ||
+        Date.now() >
+            session.expires
+    ) {
+
+        bootstrapSessions.delete(
+            token
+        );
+
+        return null;
+    }
+
+    return session;
+}
+
+/* =========================================================
+   L1 LOADER
 ========================================================= */
 
 app.get(
@@ -1444,8 +1641,7 @@ app.get(
             ).toLowerCase();
 
         /*
-         * Browser navigation:
-         * return the graphical 403 page.
+         * Browser navigation is blocked.
          */
 
         if (
@@ -1484,19 +1680,29 @@ app.get(
         }
 
         /*
-         * Only the loader is returned.
-         * The stored source is not placed
-         * inside this response.
+         * Create one-time L2 token.
          */
 
-        const runtime =
+        const token =
+            createBootstrap(
+                found.script.id
+            );
+
+        const bootstrapURL =
             BASE_URL +
-            "/api/runtime/" +
-            found.script.id;
+            "/api/bootstrap/" +
+            token;
+
+        /*
+         * L1 contains only the
+         * bootstrap URL.
+         */
 
         const lua = `
 local response = request({
-    Url = ${JSON.stringify(runtime)},
+    Url = ${JSON.stringify(
+        bootstrapURL
+    )},
     Method = "POST",
     Headers = {
         ["Content-Type"] = "application/json"
@@ -1534,12 +1740,14 @@ if data.ok ~= true then
     error("LEXINX BLOCK")
 end
 
-if type(data.code) ~= "string" then
+if type(data.bootstrap) ~= "string" then
     error("LEXINX BLOCK")
 end
 
 local fn, err =
-    loadstring(data.code)
+    loadstring(
+        data.bootstrap
+    )
 
 if not fn then
     error(
@@ -1566,51 +1774,148 @@ end
                 "Pragma",
                 "no-cache"
             )
-            .set(
-                "X-Content-Type-Options",
-                "nosniff"
-            )
             .type("text/plain")
             .send(lua);
     }
 );
 
 /* =========================================================
-   RUNTIME
+   L2 BOOTSTRAP
 ========================================================= */
 
 app.post(
-    "/api/runtime/:id",
+    "/api/bootstrap/:token",
     (req, res) => {
 
-        const found =
-            findScript(
-                req.params.id
+        const session =
+            getBootstrap(
+                req.params.token
             );
 
-        if (!found) {
+        if (!session) {
 
             return res
-                .status(404)
+                .status(403)
                 .json({
+
                     ok: false,
+
                     error:
                         "LEXINX BLOCK"
                 });
         }
 
         /*
-         * Important:
-         *
-         * Any source that is executed by
-         * Roblox must ultimately reach
-         * the client/runtime.
-         *
-         * Therefore this endpoint does not
-         * provide cryptographic "zero exposure".
+         * Consume L2 token.
          */
 
-        res
+        session.used = true;
+
+        /*
+         * Create separate L3/runtime token.
+         */
+
+        const runtimeToken =
+            randomID(32);
+
+        bootstrapSessions.set(
+            runtimeToken,
+            {
+
+                scriptID:
+                    session.scriptID,
+
+                createdAt:
+                    Date.now(),
+
+                expires:
+                    Date.now() +
+                    BOOTSTRAP_TTL,
+
+                used: false
+            }
+        );
+
+        const runtimeURL =
+            BASE_URL +
+            "/api/runtime/" +
+            runtimeToken;
+
+        /*
+         * L2 contains the next
+         * endpoint but no source.
+         */
+
+        const bootstrap = `
+local HttpService =
+    game:GetService("HttpService")
+
+local runtimeURL =
+    ${JSON.stringify(
+        runtimeURL
+    )}
+
+local response = request({
+    Url = runtimeURL,
+    Method = "POST",
+    Headers = {
+        ["Content-Type"] = "application/json"
+    },
+    Body = "{}"
+})
+
+if not response then
+    error("LEXINX BLOCK")
+end
+
+if response.StatusCode ~= 200 then
+    error("LEXINX BLOCK")
+end
+
+local ok, data =
+    pcall(function()
+        return HttpService:JSONDecode(
+            response.Body
+        )
+    end)
+
+if not ok then
+    error("LEXINX BLOCK")
+end
+
+if type(data) ~= "table" then
+    error("LEXINX BLOCK")
+end
+
+if data.ok ~= true then
+    error("LEXINX BLOCK")
+end
+
+if type(data.code) ~= "string" then
+    error("LEXINX BLOCK")
+end
+
+local fn, err =
+    loadstring(
+        data.code
+    )
+
+if not fn then
+    error(
+        err or
+        "LEXINX BLOCK"
+    )
+end
+
+local success, runtimeError =
+    pcall(fn)
+
+if not success then
+    error(runtimeError)
+end
+`.trim();
+
+        return res
             .status(200)
             .set(
                 "Cache-Control",
@@ -1619,6 +1924,90 @@ app.post(
             .set(
                 "Pragma",
                 "no-cache"
+            )
+            .type("application/json")
+            .send(
+                JSON.stringify({
+
+                    ok: true,
+
+                    bootstrap
+                })
+            );
+    }
+);
+
+/* =========================================================
+   L3 RUNTIME
+========================================================= */
+
+app.post(
+    "/api/runtime/:token",
+    (req, res) => {
+
+        const session =
+            getBootstrap(
+                req.params.token
+            );
+
+        if (!session) {
+
+            return res
+                .status(403)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "LEXINX BLOCK"
+                });
+        }
+
+        /*
+         * Consume runtime token.
+         */
+
+        session.used = true;
+
+        const found =
+            findScript(
+                session.scriptID
+            );
+
+        if (!found) {
+
+            return res
+                .status(404)
+                .json({
+
+                    ok: false,
+
+                    error:
+                        "LEXINX BLOCK"
+                });
+        }
+
+        /*
+         * Final stage.
+         *
+         * This is the first endpoint
+         * that returns the executable
+         * source.
+         */
+
+        return res
+            .status(200)
+            .set(
+                "Cache-Control",
+                "no-store, no-cache, must-revalidate"
+            )
+            .set(
+                "Pragma",
+                "no-cache"
+            )
+            .set(
+                "X-Content-Type-Options",
+                "nosniff"
             )
             .json({
 
@@ -1647,7 +2036,7 @@ app.use(
 );
 
 /* =========================================================
-   SESSION CLEANUP
+   CLEANUP
 ========================================================= */
 
 setInterval(
@@ -1661,12 +2050,32 @@ setInterval(
                 token,
                 session
             ]
+            of bootstrapSessions
+        ) {
+
+            if (
+                session.used ||
+                now >
+                    session.expires
+            ) {
+
+                bootstrapSessions.delete(
+                    token
+                );
+            }
+        }
+
+        for (
+            const [
+                token,
+                session
+            ]
             of sessions
         ) {
 
             if (
                 now >
-                session.expires
+                    session.expires
             ) {
 
                 sessions.delete(
@@ -1689,11 +2098,11 @@ app.listen(
     () => {
 
         console.log(
-            "================================"
+            "======================================"
         );
 
         console.log(
-            "LEXINX PROTECT ONLINE"
+            "LEXINX PROTECT SERVER"
         );
 
         console.log(
@@ -1712,7 +2121,11 @@ app.listen(
         );
 
         console.log(
-            "================================"
+            "FLOW: L1 -> L2 -> L3 -> SOURCE"
+        );
+
+        console.log(
+            "======================================"
         );
     }
 );
