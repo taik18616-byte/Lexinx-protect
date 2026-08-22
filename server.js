@@ -558,10 +558,426 @@ app.get(
             account.id !==
             req.params.id
         ) {
-            return res
-                .status(403)
-                .type("text/plain")
-                .send("LEXINX BLOCK");
+            function blockPage() {
+    return `
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport"
+      content="width=device-width,initial-scale=1">
+
+<title>LEXINX PROTECT</title>
+
+<style>
+*{
+    box-sizing:border-box;
+}
+
+html,
+body{
+    width:100%;
+    height:100%;
+    margin:0;
+}
+
+body{
+    overflow:hidden;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+
+    background:#181818;
+
+    font-family:
+        Arial,
+        Helvetica,
+        sans-serif;
+}
+
+.scene{
+    position:relative;
+
+    width:100%;
+    height:100%;
+
+    overflow:hidden;
+
+    background:
+        radial-gradient(
+            circle at center,
+            #555 0%,
+            #303030 35%,
+            #181818 75%,
+            #0b0b0b 100%
+        );
+}
+
+/* =====================================================
+   STARS
+===================================================== */
+
+.stars{
+    position:absolute;
+    inset:0;
+
+    overflow:hidden;
+}
+
+.star{
+    position:absolute;
+
+    width:2px;
+    height:2px;
+
+    background:#aaa;
+
+    border-radius:50%;
+
+    box-shadow:
+        0 0 5px #aaa;
+
+    animation:
+        twinkle
+        var(--duration)
+        ease-in-out
+        infinite;
+}
+
+@keyframes twinkle{
+
+    0%{
+        opacity:.15;
+        transform:scale(.6);
+    }
+
+    50%{
+        opacity:1;
+        transform:scale(1.4);
+    }
+
+    100%{
+        opacity:.15;
+        transform:scale(.6);
+    }
+}
+
+/* =====================================================
+   CENTER
+===================================================== */
+
+.center{
+    position:absolute;
+
+    top:50%;
+    left:50%;
+
+    transform:
+        translate(-50%,-50%);
+
+    text-align:center;
+
+    z-index:10;
+
+    width:min(90%,700px);
+
+    padding:45px 30px;
+
+    background:
+        rgba(70,70,70,.35);
+
+    border:
+        1px solid
+        rgba(255,255,255,.12);
+
+    border-radius:18px;
+
+    box-shadow:
+        0 0 60px
+        rgba(0,0,0,.55),
+
+        inset 0 0 35px
+        rgba(255,255,255,.04);
+
+    backdrop-filter:
+        blur(7px);
+}
+
+/* =====================================================
+   LOGO
+===================================================== */
+
+.logo{
+
+    margin:0;
+
+    font-size:
+        clamp(
+            35px,
+            7vw,
+            78px
+        );
+
+    font-weight:900;
+
+    letter-spacing:
+        7px;
+
+    color:#fff;
+
+    animation:
+        logoFade
+        5s
+        ease-in-out
+        infinite;
+
+    text-shadow:
+        0 0 15px
+        rgba(255,255,255,.15);
+}
+
+@keyframes logoFade{
+
+    0%{
+        color:#fff;
+
+        text-shadow:
+            0 0 18px
+            rgba(255,255,255,.35);
+    }
+
+    50%{
+        color:#777;
+
+        text-shadow:
+            0 0 3px
+            rgba(255,255,255,.05);
+    }
+
+    100%{
+        color:#fff;
+
+        text-shadow:
+            0 0 18px
+            rgba(255,255,255,.35);
+    }
+}
+
+/* =====================================================
+   SUBTITLE
+===================================================== */
+
+.subtitle{
+
+    margin-top:20px;
+
+    color:#aaa;
+
+    font-size:14px;
+
+    letter-spacing:
+        5px;
+
+    text-transform:
+        uppercase;
+
+    animation:
+        subtitlePulse
+        3s
+        ease-in-out
+        infinite;
+}
+
+@keyframes subtitlePulse{
+
+    0%{
+        opacity:.45;
+    }
+
+    50%{
+        opacity:1;
+    }
+
+    100%{
+        opacity:.45;
+    }
+}
+
+/* =====================================================
+   BLOCK MESSAGE
+===================================================== */
+
+.block{
+
+    margin-top:25px;
+
+    display:inline-block;
+
+    padding:
+        9px 18px;
+
+    border:
+        1px solid
+        rgba(255,255,255,.16);
+
+    border-radius:999px;
+
+    background:
+        rgba(0,0,0,.22);
+
+    color:#888;
+
+    font-size:12px;
+
+    letter-spacing:3px;
+}
+
+/* =====================================================
+   SCANLINE
+===================================================== */
+
+.scan{
+
+    position:absolute;
+
+    left:0;
+    right:0;
+
+    height:1px;
+
+    background:
+        rgba(255,255,255,.05);
+
+    box-shadow:
+        0 0 10px
+        rgba(255,255,255,.05);
+
+    animation:
+        scan
+        6s
+        linear
+        infinite;
+}
+
+@keyframes scan{
+
+    from{
+        top:-5%;
+    }
+
+    to{
+        top:105%;
+    }
+}
+
+/* =====================================================
+   MOBILE
+===================================================== */
+
+@media(max-width:600px){
+
+    .center{
+        padding:35px 15px;
+    }
+
+    .logo{
+        letter-spacing:4px;
+    }
+
+    .subtitle{
+        letter-spacing:3px;
+    }
+}
+</style>
+</head>
+
+<body>
+
+<div class="scene">
+
+    <div class="stars" id="stars"></div>
+
+    <div class="scan"></div>
+
+    <div class="center">
+
+        <h1 class="logo">
+            LEXINX PROTECT
+        </h1>
+
+        <div class="subtitle">
+            Anti-Skid
+        </div>
+
+        <div class="block">
+            LEXINX BLOCK
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+
+const container =
+    document.getElementById(
+        "stars"
+    );
+
+const count = 180;
+
+for(
+    let i = 0;
+    i < count;
+    i++
+){
+
+    const star =
+        document.createElement(
+            "span"
+        );
+
+    star.className =
+        "star";
+
+    star.style.left =
+        Math.random() * 100 +
+        "%";
+
+    star.style.top =
+        Math.random() * 100 +
+        "%";
+
+    const size =
+        Math.random() * 2 + 1;
+
+    star.style.width =
+        size + "px";
+
+    star.style.height =
+        size + "px";
+
+    star.style.setProperty(
+        "--duration",
+        (2 + Math.random() * 5) +
+        "s"
+    );
+
+    star.style.animationDelay =
+        (-Math.random() * 5) +
+        "s";
+
+    container.appendChild(
+        star
+    );
+}
+
+</script>
+
+</body>
+</html>
+`;
+}
         }
 
         const username =
