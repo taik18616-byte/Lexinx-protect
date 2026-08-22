@@ -1,201 +1,228 @@
-"use strict";
-
 const express = require("express");
-const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 
 const app = express();
 
 const PORT = process.env.PORT || 3000;
-const HOST = "0.0.0.0";
+const BASE_URL =
+    process.env.BASE_URL ||
+    "https://lexinx-protect.onrender.com";
 
 const DATA_DIR = path.join(__dirname, "data");
-const DATA_FILE = path.join(DATA_DIR, "data.json");
+const DB_FILE = path.join(DATA_DIR, "accounts.json");
 const PUBLIC_DIR = path.join(__dirname, "public");
 
+fs.mkdirSync(DATA_DIR, { recursive: true });
+fs.mkdirSync(PUBLIC_DIR, { recursive: true });
+
+if (!fs.existsSync(DB_FILE)) {
+    fs.writeFileSync(DB_FILE, "{}", "utf8");
+}
+
+app.disable("x-powered-by");
+
+app.use(express.json({
+    limit: "10mb"
+}));
+
+app.use(express.urlencoded({
+    extended: true,
+    limit: "10mb"
+}));
+
+app.use(express.static(PUBLIC_DIR));
+
 /* =========================================================
-   INIT
+   DATABASE
 ========================================================= */
 
-if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, {
-        recursive: true
-    });
-}
-
-if (!fs.existsSync(PUBLIC_DIR)) {
-    fs.mkdirSync(PUBLIC_DIR, {
-        recursive: true
-    });
-}
-
-function emptyDatabase() {
-    return {
-        users: {},
-        scripts: {}
-    };
-}
-
-function loadDatabase() {
+function readDB() {
     try {
-
-        if (!fs.existsSync(DATA_FILE)) {
-            return emptyDatabase();
-        }
-
-        const data =
-            JSON.parse(
-                fs.readFileSync(
-                    DATA_FILE,
-                    "utf8"
-                )
-            );
-
-        return {
-            users: data.users || {},
-            scripts: data.scripts || {}
-        };
-
-    } catch (error) {
-
-        console.error(
-            "Database error:",
-            error.message
+        return JSON.parse(
+            fs.readFileSync(DB_FILE, "utf8")
         );
-
-        return emptyDatabase();
+    } catch {
+        return {};
     }
 }
 
-let database =
-    loadDatabase();
-
-function saveDatabase() {
-
-    const temporary =
-        DATA_FILE + ".tmp";
+function writeDB(db) {
+    const tmp =
+        DB_FILE + ".tmp";
 
     fs.writeFileSync(
-        temporary,
-        JSON.stringify(
-            database,
-            null,
-            2
-        ),
+        tmp,
+        JSON.stringify(db, null, 2),
         "utf8"
     );
 
     fs.renameSync(
-        temporary,
-        DATA_FILE
+        tmp,
+        DB_FILE
     );
 }
 
 /* =========================================================
-   EXPRESS
+   RANDOM
 ========================================================= */
 
-app.disable(
-    "x-powered-by"
-);
-
-app.use(
-    express.json({
-        limit: "5mb"
-    })
-);
-
-app.use(
-    express.urlencoded({
-        extended: true,
-        limit: "5mb"
-    })
-);
-
-/* =========================================================
-   HELPERS
-========================================================= */
-
-function randomId(bytes = 16) {
+function randomID(bytes = 24) {
     return crypto
         .randomBytes(bytes)
         .toString("hex");
 }
 
+/* =========================================================
+   PASSWORD
+========================================================= */
+
 function hashPassword(password) {
-    return crypto
-        .createHash("sha256")
-        .update(
-            String(password)
-        )
-        .digest("hex");
+
+    const salt =
+        crypto.randomBytes(16);
+
+    const hash =
+        crypto.scryptSync(
+            password,
+            salt,
+            64
+        );
+
+    return {
+        salt:
+            salt.toString("hex"),
+
+        hash:
+            hash.toString("hex")
+    };
 }
 
-function cleanUsername(value) {
+function verifyPassword(
+    password,
+    data
+) {
 
-    return String(value || "")
-        .trim()
-        .replace(
-            /[^a-zA-Z0-9_-]/g,
-            ""
-        )
-        .slice(0, 32);
-}
+    try {
 
-function cleanId(value) {
+        const salt =
+            Buffer.from(
+                data.salt,
+                "hex"
+            );
 
-    return String(value || "")
-        .trim()
-        .replace(
-            /[^a-zA-Z0-9_-]/g,
-            ""
-        )
-        .slice(0, 128);
+        const expected =
+            Buffer.from(
+                data.hash,
+                "hex"
+            );
+
+        const actual =
+            crypto.scryptSync(
+                password,
+                salt,
+                64
+            );
+
+        return (
+            actual.length ===
+                expected.length &&
+            crypto.timingSafeEqual(
+                actual,
+                expected
+            )
+        );
+
+    } catch {
+
+        return false;
+    }
 }
 
 /* =========================================================
-   SESSION
+   COOKIES
+========================================================= */
+
+function parseCookies(req) {
+
+    const result = {};
+
+    const raw =
+        req.headers.cookie;
+
+    if (!raw) {
+        return result;
+    }
+
+    for (
+        const item
+        of raw.split(";")
+    ) {
+
+        const index =
+            item.indexOf("=");
+
+        if (index === -1) {
+            continue;
+        }
+
+        const key =
+            item
+                .slice(0, index)
+                .trim();
+
+        const value =
+            item
+                .slice(index + 1)
+                .trim();
+
+        result[key] =
+            decodeURIComponent(value);
+    }
+
+    return result;
+}
+
+/* =========================================================
+   SESSIONS
 ========================================================= */
 
 const sessions =
     new Map();
 
-function createSession(userId) {
+const SESSION_TIME =
+    30 * 24 * 60 * 60 * 1000;
+
+function createSession(username) {
 
     const token =
-        randomId(32);
+        randomID(48);
 
     sessions.set(
         token,
         {
-            userId,
+            username,
             createdAt:
-                Date.now()
+                Date.now(),
+            lastActivity:
+                Date.now(),
+            expires:
+                Date.now() +
+                SESSION_TIME
         }
     );
 
     return token;
 }
 
-function getAuthenticatedUser(req) {
+function getCurrentUser(req) {
 
-    const authorization =
-        req.headers.authorization;
-
-    if (
-        !authorization ||
-        !authorization.startsWith(
-            "Bearer "
-        )
-    ) {
-        return null;
-    }
+    const cookies =
+        parseCookies(req);
 
     const token =
-        authorization
-            .slice(7)
-            .trim();
+        cookies.lexinx_session;
 
     if (!token) {
         return null;
@@ -208,29 +235,60 @@ function getAuthenticatedUser(req) {
         return null;
     }
 
-    const users =
-        Object.values(
-            database.users
-        );
-
-    const user =
-        users.find(
-            item =>
-                item.id ===
-                session.userId
-        );
-
-    if (!user) {
+    if (
+        Date.now() >
+        session.expires
+    ) {
 
         sessions.delete(token);
 
         return null;
     }
 
-    return {
-        token,
-        user
-    };
+    session.lastActivity =
+        Date.now();
+
+    session.expires =
+        Date.now() +
+        SESSION_TIME;
+
+    return session.username;
+}
+
+function setSession(
+    res,
+    token
+) {
+
+    res.setHeader(
+        "Set-Cookie",
+        [
+            "lexinx_session=" +
+                encodeURIComponent(token),
+
+            "Path=/",
+
+            "HttpOnly",
+
+            "SameSite=Lax",
+
+            "Max-Age=2592000"
+        ].join("; ")
+    );
+}
+
+function clearSession(res) {
+
+    res.setHeader(
+        "Set-Cookie",
+        [
+            "lexinx_session=",
+            "Path=/",
+            "HttpOnly",
+            "SameSite=Lax",
+            "Max-Age=0"
+        ].join("; ")
+    );
 }
 
 function requireAuth(
@@ -239,10 +297,10 @@ function requireAuth(
     next
 ) {
 
-    const auth =
-        getAuthenticatedUser(req);
+    const username =
+        getCurrentUser(req);
 
-    if (!auth) {
+    if (!username) {
 
         return res
             .status(401)
@@ -253,719 +311,224 @@ function requireAuth(
             });
     }
 
-    req.auth =
-        auth;
-
-    req.user =
-        auth.user;
+    req.username =
+        username;
 
     next();
 }
 
 /* =========================================================
-   LEXINX PROTECT BLOCK PAGE
+   ACCOUNT URL
 ========================================================= */
 
-function generateStars(
-    count = 240
+function getAccountURL(
+    account
 ) {
 
-    let result = "";
-
-    for (
-        let i = 0;
-        i < count;
-        i++
-    ) {
-
-        const left =
-            Math.random() * 100;
-
-        const top =
-            Math.random() * 100;
-
-        const size =
-            1 +
-            Math.random() * 3;
-
-        const duration =
-            2 +
-            Math.random() * 6;
-
-        const delay =
-            Math.random() * -8;
-
-        result += `
-<span
-class="star"
-style="
-left:${left.toFixed(2)}%;
-top:${top.toFixed(2)}%;
-width:${size.toFixed(2)}px;
-height:${size.toFixed(2)}px;
-animation-duration:${duration.toFixed(2)}s;
-animation-delay:${delay.toFixed(2)}s;
-"></span>
-`;
-    }
-
-    return result;
+    return (
+        BASE_URL +
+        "/acc/" +
+        encodeURIComponent(
+            account.username
+        ) +
+        "/" +
+        account.id
+    );
 }
 
-function blockPage() {
+/* =========================================================
+   BROWSER BLOCK PAGE
+========================================================= */
 
-    const stars =
-        generateStars();
+function renderBlockPage() {
 
     return `<!doctype html>
-
 <html lang="en">
 
 <head>
 
-<meta charset="utf-8">
+<meta charset="UTF-8">
 
 <meta
-name="viewport"
-content="width=device-width,initial-scale=1"
->
-
-<meta
-name="robots"
-content="noindex,nofollow,noarchive"
+    name="viewport"
+    content="width=device-width,initial-scale=1"
 >
 
 <title>LEXINX PROTECT</title>
 
 <style>
 
-* {
-    box-sizing: border-box;
+*{
+    box-sizing:border-box;
 }
 
 html,
-body {
-
-    width: 100%;
-    height: 100%;
-
-    margin: 0;
-
-    overflow: hidden;
+body{
+    width:100%;
+    height:100%;
+    margin:0;
 }
 
-body {
+body{
+
+    overflow:hidden;
+
+    background:#050505;
+
+    color:#fff;
 
     font-family:
         Arial,
         Helvetica,
         sans-serif;
-
-    background: #050505;
 }
 
-/* =====================================================
-   BACKGROUND
-===================================================== */
+#stars{
 
-.scene {
+    position:fixed;
 
-    position: relative;
+    inset:0;
 
-    width: 100%;
-    height: 100%;
-
-    overflow: hidden;
-
-    background:
-        radial-gradient(
-            circle at 50% 50%,
-            #777 0%,
-            #4b4b4b 20%,
-            #282828 48%,
-            #080808 100%
-        );
-
-    animation:
-        backgroundAnimation
-        12s
-        ease-in-out
-        infinite
-        alternate;
+    width:100%;
+    height:100%;
 }
 
-@keyframes backgroundAnimation {
+.panel{
 
-    0% {
+    position:absolute;
 
-        background:
-            radial-gradient(
-                circle at 25% 30%,
-                #666,
-                #303030 38%,
-                #090909 100%
-            );
-    }
+    z-index:2;
 
-    50% {
-
-        background:
-            radial-gradient(
-                circle at 70% 35%,
-                #777,
-                #383838 38%,
-                #090909 100%
-            );
-    }
-
-    100% {
-
-        background:
-            radial-gradient(
-                circle at 45% 75%,
-                #666,
-                #292929 38%,
-                #070707 100%
-            );
-    }
-}
-
-/* =====================================================
-   STARS
-===================================================== */
-
-.stars {
-
-    position: absolute;
-
-    inset: 0;
-}
-
-.star {
-
-    position: absolute;
-
-    display: block;
-
-    border-radius: 50%;
-
-    background: #fff;
-
-    box-shadow:
-        0 0 7px
-        rgba(255,255,255,.8);
-
-    animation:
-        starAnimation
-        ease-in-out
-        infinite;
-}
-
-@keyframes starAnimation {
-
-    0% {
-
-        transform:
-            scale(.25);
-
-        opacity: .05;
-    }
-
-    50% {
-
-        transform:
-            scale(1.8);
-
-        opacity: 1;
-    }
-
-    100% {
-
-        transform:
-            scale(.25);
-
-        opacity: .05;
-    }
-}
-
-/* =====================================================
-   MOVING LIGHT
-===================================================== */
-
-.light {
-
-    position: absolute;
-
-    width: 600px;
-    height: 600px;
-
-    left: 50%;
-    top: 50%;
+    left:50%;
+    top:50%;
 
     transform:
         translate(-50%,-50%);
 
-    border-radius: 50%;
-
-    background:
-        radial-gradient(
-            circle,
-            rgba(255,255,255,.16),
-            rgba(255,255,255,.04) 38%,
-            transparent 70%
-        );
-
-    filter:
-        blur(25px);
-
-    animation:
-        lightAnimation
-        7s
-        ease-in-out
-        infinite;
-}
-
-@keyframes lightAnimation {
-
-    0% {
-
-        transform:
-            translate(-50%,-50%)
-            scale(.8);
-
-        opacity: .4;
-    }
-
-    50% {
-
-        transform:
-            translate(-50%,-50%)
-            scale(1.25);
-
-        opacity: 1;
-    }
-
-    100% {
-
-        transform:
-            translate(-50%,-50%)
-            scale(.8);
-
-        opacity: .4;
-    }
-}
-
-/* =====================================================
-   MOVING LINES
-===================================================== */
-
-.lines {
-
-    position: absolute;
-
-    inset: -50%;
-
-    opacity: .07;
-
-    background:
-        repeating-linear-gradient(
-            120deg,
-            transparent 0,
-            transparent 90px,
-            #fff 91px,
-            transparent 92px
-        );
-
-    animation:
-        linesAnimation
-        20s
-        linear
-        infinite;
-}
-
-@keyframes linesAnimation {
-
-    from {
-
-        transform:
-            translate(
-                -8%,
-                -8%
-            );
-    }
-
-    to {
-
-        transform:
-            translate(
-                8%,
-                8%
-            );
-    }
-}
-
-/* =====================================================
-   CENTER
-===================================================== */
-
-.center {
-
-    position: absolute;
-
-    left: 50%;
-    top: 50%;
-
-    transform:
-        translate(-50%,-50%);
-
-    width:
-        min(94vw, 950px);
-
-    min-height: 480px;
-
-    display:
-        flex;
-
-    flex-direction:
-        column;
-
-    align-items:
-        center;
-
-    justify-content:
-        center;
-
-    text-align:
-        center;
+    width:min(
+        560px,
+        90%
+    );
 
     padding:
-        70px 35px;
+        58px 30px;
 
-    border-radius:
-        30px;
+    text-align:center;
 
     background:
-        linear-gradient(
-            145deg,
-            rgba(110,110,110,.52),
-            rgba(25,25,25,.64)
-        );
+        rgba(32,32,32,.76);
 
     border:
-        1px solid
-        rgba(255,255,255,.17);
+        1px solid #3a3a3a;
+
+    border-radius:
+        18px;
 
     box-shadow:
+        0 0 60px
+        rgba(255,255,255,.04),
 
-        0 35px 120px
-        rgba(0,0,0,.8),
-
-        inset 0 1px 0
-        rgba(255,255,255,.12),
-
-        inset 0 0 90px
-        rgba(255,255,255,.035);
+        inset 0 0 35px
+        rgba(255,255,255,.025);
 
     backdrop-filter:
-        blur(15px);
+        blur(8px);
+}
+
+.logo{
+
+    margin:0;
+
+    font-size:
+        clamp(
+            32px,
+            7vw,
+            60px
+        );
+
+    font-weight:900;
+
+    letter-spacing:5px;
 
     animation:
-        cardAnimation
-        6s
+        logoFade
+        5s
         ease-in-out
         infinite;
 }
 
-@keyframes cardAnimation {
+.line{
 
-    0% {
+    width:90px;
 
-        transform:
-            translate(-50%,-50%)
-            translateY(0);
-    }
+    height:1px;
 
-    50% {
+    margin:
+        24px auto;
 
-        transform:
-            translate(-50%,-50%)
-            translateY(-9px);
-    }
-
-    100% {
-
-        transform:
-            translate(-50%,-50%)
-            translateY(0);
-    }
-}
-
-/* =====================================================
-   LOGO
-===================================================== */
-
-.logo {
-
-    margin: 0;
-
-    font-size:
-        clamp(
-            50px,
-            9vw,
-            115px
-        );
-
-    line-height: 1;
-
-    font-weight: 1000;
-
-    letter-spacing:
-        clamp(
-            4px,
-            1.2vw,
-            15px
-        );
-
-    user-select: none;
+    background:#666;
 
     animation:
-        logoAnimation
-        6s
+        lineFade
+        5s
         ease-in-out
         infinite;
 }
 
-@keyframes logoAnimation {
+.subtitle{
 
-    0% {
+    color:#888;
 
-        color: #ffffff;
+    font-size:13px;
 
-        text-shadow:
-            0 0 25px
-            rgba(255,255,255,.45);
-    }
-
-    20% {
-
-        color: #dddddd;
-    }
-
-    40% {
-
-        color: #999999;
-    }
-
-    60% {
-
-        color: #555555;
-
-        text-shadow:
-            0 0 5px
-            rgba(255,255,255,.08);
-    }
-
-    80% {
-
-        color: #bbbbbb;
-    }
-
-    100% {
-
-        color: #ffffff;
-
-        text-shadow:
-            0 0 25px
-            rgba(255,255,255,.45);
-    }
-}
-
-/* =====================================================
-   ANTI-SKID
-===================================================== */
-
-.subtitle {
-
-    margin-top: 34px;
-
-    color: #aaa;
-
-    font-size:
-        clamp(
-            13px,
-            2vw,
-            20px
-        );
-
-    letter-spacing: 9px;
+    letter-spacing:5px;
 
     text-transform:
         uppercase;
-
-    animation:
-        subtitleAnimation
-        4s
-        ease-in-out
-        infinite;
 }
 
-@keyframes subtitleAnimation {
+@keyframes logoFade{
 
-    0% {
+    0%{
 
-        opacity: .25;
+        color:#fff;
 
-        transform:
-            translateY(5px);
+        text-shadow:
+            0 0 10px
+            rgba(255,255,255,.25);
     }
 
-    50% {
+    50%{
 
-        opacity: 1;
+        color:#111;
 
-        transform:
-            translateY(0);
+        text-shadow:
+            0 0 12px
+            rgba(0,0,0,.9);
     }
 
-    100% {
+    100%{
 
-        opacity: .25;
+        color:#fff;
 
-        transform:
-            translateY(5px);
+        text-shadow:
+            0 0 10px
+            rgba(255,255,255,.25);
     }
 }
 
-/* =====================================================
-   BLOCK
-===================================================== */
+@keyframes lineFade{
 
-.status {
-
-    margin-top: 35px;
-
-    padding:
-        12px 28px;
-
-    border-radius:
-        999px;
-
-    background:
-        rgba(0,0,0,.25);
-
-    border:
-        1px solid
-        rgba(255,255,255,.15);
-
-    color: #888;
-
-    font-size: 12px;
-
-    letter-spacing: 5px;
-
-    animation:
-        statusAnimation
-        3s
-        ease-in-out
-        infinite;
-}
-
-@keyframes statusAnimation {
-
-    0% {
-        opacity: .35;
+    0%{
+        opacity:.25;
     }
 
-    50% {
-        opacity: 1;
+    50%{
+        opacity:1;
     }
 
-    100% {
-        opacity: .35;
-    }
-}
-
-/* =====================================================
-   SCANLINE
-===================================================== */
-
-.scan {
-
-    position: absolute;
-
-    left: 0;
-    right: 0;
-
-    height: 2px;
-
-    background:
-        linear-gradient(
-            90deg,
-            transparent,
-            rgba(255,255,255,.25),
-            transparent
-        );
-
-    animation:
-        scanAnimation
-        7s
-        linear
-        infinite;
-}
-
-@keyframes scanAnimation {
-
-    from {
-        top: -5%;
-    }
-
-    to {
-        top: 105%;
-    }
-}
-
-/* =====================================================
-   VIGNETTE
-===================================================== */
-
-.vignette {
-
-    position: absolute;
-
-    inset: 0;
-
-    pointer-events: none;
-
-    background:
-        radial-gradient(
-            ellipse,
-            transparent 30%,
-            rgba(0,0,0,.7) 100%
-        );
-}
-
-/* =====================================================
-   MOBILE
-===================================================== */
-
-@media(max-width:600px) {
-
-    .center {
-
-        min-height: 360px;
-
-        padding:
-            50px 18px;
-    }
-
-    .logo {
-
-        letter-spacing: 4px;
-    }
-
-    .subtitle {
-
-        letter-spacing: 4px;
+    100%{
+        opacity:.25;
     }
 }
 
@@ -975,110 +538,168 @@ body {
 
 <body>
 
-<div class="scene">
+<canvas id="stars"></canvas>
 
-    <div class="stars">
-        ${stars}
+<div class="panel">
+
+    <h1 class="logo">
+        LEXINX PROTECT
+    </h1>
+
+    <div class="line"></div>
+
+    <div class="subtitle">
+        Anti-Skid
     </div>
-
-    <div class="lines"></div>
-
-    <div class="light"></div>
-
-    <div class="scan"></div>
-
-    <div class="center">
-
-        <h1 class="logo">
-            LEXINX PROTECT
-        </h1>
-
-        <div class="subtitle">
-            ANTI-SKID
-        </div>
-
-        <div class="status">
-            LEXINX BLOCK
-        </div>
-
-    </div>
-
-    <div class="vignette"></div>
 
 </div>
 
-</body>
+<script>
 
+const canvas =
+    document.getElementById(
+        "stars"
+    );
+
+const ctx =
+    canvas.getContext("2d");
+
+let stars = [];
+
+function resize(){
+
+    canvas.width =
+        window.innerWidth;
+
+    canvas.height =
+        window.innerHeight;
+
+    stars = [];
+
+    const count =
+        Math.min(
+            260,
+            Math.floor(
+                canvas.width *
+                canvas.height /
+                6000
+            )
+        );
+
+    for(
+        let i = 0;
+        i < count;
+        i++
+    ){
+
+        stars.push({
+
+            x:
+                Math.random() *
+                canvas.width,
+
+            y:
+                Math.random() *
+                canvas.height,
+
+            r:
+                Math.random() *
+                1.5 +
+                .25,
+
+            speed:
+                Math.random() *
+                .35 +
+                .08,
+
+            alpha:
+                Math.random() *
+                .7 +
+                .2
+        });
+    }
+}
+
+function draw(){
+
+    ctx.clearRect(
+        0,
+        0,
+        canvas.width,
+        canvas.height
+    );
+
+    for(
+        const star
+        of stars
+    ){
+
+        star.y +=
+            star.speed;
+
+        if(
+            star.y >
+            canvas.height
+        ){
+
+            star.y = -2;
+
+            star.x =
+                Math.random() *
+                canvas.width;
+        }
+
+        ctx.beginPath();
+
+        ctx.arc(
+            star.x,
+            star.y,
+            star.r,
+            0,
+            Math.PI * 2
+        );
+
+        ctx.fillStyle =
+            "rgba(190,190,190," +
+            star.alpha +
+            ")";
+
+        ctx.fill();
+    }
+
+    requestAnimationFrame(
+        draw
+    );
+}
+
+window.addEventListener(
+    "resize",
+    resize
+);
+
+resize();
+draw();
+
+</script>
+
+</body>
 </html>`;
 }
 
 /* =========================================================
-   WEB ROOT
+   HOME
 ========================================================= */
 
 app.get(
     "/",
     (req, res) => {
 
-        const index =
+        res.sendFile(
             path.join(
                 PUBLIC_DIR,
                 "index.html"
-            );
-
-        if (
-            fs.existsSync(index)
-        ) {
-
-            return res.sendFile(
-                index
-            );
-        }
-
-        res.status(200).send(`
-<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta
-name="viewport"
-content="width=device-width,initial-scale=1"
->
-<title>LEXINX PROTECT</title>
-<style>
-body {
-    margin:0;
-    min-height:100vh;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    background:#090909;
-    color:#fff;
-    font-family:Arial,sans-serif;
-}
-.box {
-    padding:50px;
-    text-align:center;
-    border:1px solid #333;
-    border-radius:20px;
-    background:#151515;
-}
-h1 {
-    margin:0;
-}
-p {
-    color:#888;
-}
-</style>
-</head>
-<body>
-<div class="box">
-<h1>LEXINX PROTECT</h1>
-<p>Web interface is ready.</p>
-</div>
-</body>
-</html>
-`);
+            )
+        );
     }
 );
 
@@ -1090,102 +711,134 @@ app.post(
     "/api/register",
     (req, res) => {
 
-        const username =
-            cleanUsername(
-                req.body.username
-            );
+        try {
 
-        const password =
-            String(
-                req.body.password || ""
-            );
+            const username =
+                String(
+                    req.body?.username ||
+                    ""
+                ).trim();
 
-        if (
-            username.length < 3
-        ) {
+            const password =
+                String(
+                    req.body?.password ||
+                    ""
+                );
 
-            return res
-                .status(400)
-                .json({
-                    ok: false,
-                    error:
-                        "Username must contain at least 3 characters"
-                });
-        }
+            if (
+                !/^[A-Za-z0-9_]{3,24}$/
+                    .test(username)
+            ) {
 
-        if (
-            password.length < 6
-        ) {
+                return res
+                    .status(400)
+                    .json({
+                        ok: false,
+                        error:
+                            "Username must contain 3-24 letters, numbers, or underscores."
+                    });
+            }
 
-            return res
-                .status(400)
-                .json({
-                    ok: false,
-                    error:
-                        "Password must contain at least 6 characters"
-                });
-        }
+            if (
+                password.length < 6
+            ) {
 
-        const key =
-            username.toLowerCase();
+                return res
+                    .status(400)
+                    .json({
+                        ok: false,
+                        error:
+                            "Password must contain at least 6 characters."
+                    });
+            }
 
-        if (
-            database.users[key]
-        ) {
+            const db =
+                readDB();
 
-            return res
-                .status(409)
-                .json({
-                    ok: false,
-                    error:
-                        "Username already exists"
-                });
-        }
+            const key =
+                username.toLowerCase();
 
-        const user = {
+            if (db[key]) {
 
-            id:
-                randomId(16),
+                return res
+                    .status(409)
+                    .json({
+                        ok: false,
+                        error:
+                            "Username already exists."
+                    });
+            }
 
-            username,
-
-            password:
+            const passwordData =
                 hashPassword(
                     password
-                ),
+                );
 
-            createdAt:
-                new Date()
-                    .toISOString(),
+            const account = {
 
-            scripts: []
-        };
-
-        database.users[key] =
-            user;
-
-        saveDatabase();
-
-        const token =
-            createSession(
-                user.id
-            );
-
-        res.json({
-
-            ok: true,
-
-            token,
-
-            user: {
+                username,
 
                 id:
-                    user.id,
+                    randomID(16),
+
+                password: {
+
+                    salt:
+                        passwordData.salt,
+
+                    hash:
+                        passwordData.hash
+                },
+
+                createdAt:
+                    Date.now(),
+
+                scripts: {}
+            };
+
+            db[key] =
+                account;
+
+            writeDB(db);
+
+            const session =
+                createSession(key);
+
+            setSession(
+                res,
+                session
+            );
+
+            res.json({
+
+                ok: true,
 
                 username:
-                    user.username
-            }
-        });
+                    account.username,
+
+                accountId:
+                    account.id,
+
+                url:
+                    getAccountURL(
+                        account
+                    )
+            });
+
+        } catch(error) {
+
+            console.error(
+                error
+            );
+
+            res
+                .status(500)
+                .json({
+                    ok: false,
+                    error:
+                        "Internal server error."
+                });
+        }
     }
 );
 
@@ -1197,58 +850,127 @@ app.post(
     "/api/login",
     (req, res) => {
 
-        const username =
-            cleanUsername(
-                req.body.username
+        try {
+
+            const username =
+                String(
+                    req.body?.username ||
+                    ""
+                ).trim();
+
+            const password =
+                String(
+                    req.body?.password ||
+                    ""
+                );
+
+            const db =
+                readDB();
+
+            const key =
+                username.toLowerCase();
+
+            const account =
+                db[key];
+
+            if (
+                !account ||
+                !verifyPassword(
+                    password,
+                    account.password
+                )
+            ) {
+
+                return res
+                    .status(401)
+                    .json({
+                        ok: false,
+                        error:
+                            "Invalid username or password."
+                    });
+            }
+
+            const session =
+                createSession(key);
+
+            setSession(
+                res,
+                session
             );
 
-        const password =
-            String(
-                req.body.password || ""
+            res.json({
+
+                ok: true,
+
+                username:
+                    account.username,
+
+                accountId:
+                    account.id,
+
+                url:
+                    getAccountURL(
+                        account
+                    )
+            });
+
+        } catch(error) {
+
+            console.error(
+                error
             );
 
-        const key =
-            username.toLowerCase();
-
-        const user =
-            database.users[key];
-
-        if (
-            !user ||
-            user.password !==
-            hashPassword(
-                password
-            )
-        ) {
-
-            return res
-                .status(401)
+            res
+                .status(500)
                 .json({
                     ok: false,
                     error:
-                        "Invalid username or password"
+                        "Internal server error."
                 });
         }
+    }
+);
 
-        const token =
-            createSession(
-                user.id
-            );
+/* =========================================================
+   ME
+========================================================= */
+
+app.get(
+    "/api/me",
+    requireAuth,
+    (req, res) => {
+
+        const db =
+            readDB();
+
+        const account =
+            db[req.username];
+
+        if (!account) {
+
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "Account not found."
+                });
+        }
 
         res.json({
 
             ok: true,
 
-            token,
+            username:
+                account.username,
 
-            user: {
+            accountId:
+                account.id,
 
-                id:
-                    user.id,
-
-                username:
-                    user.username
-            }
+            url:
+                getAccountURL(
+                    account
+                )
         });
     }
 );
@@ -1259,12 +981,21 @@ app.post(
 
 app.post(
     "/api/logout",
-    requireAuth,
     (req, res) => {
 
-        sessions.delete(
-            req.auth.token
-        );
+        const cookies =
+            parseCookies(req);
+
+        if (
+            cookies.lexinx_session
+        ) {
+
+            sessions.delete(
+                cookies.lexinx_session
+            );
+        }
+
+        clearSession(res);
 
         res.json({
             ok: true
@@ -1273,30 +1004,57 @@ app.post(
 );
 
 /* =========================================================
-   CURRENT ACCOUNT
+   ACCOUNT PAGE
 ========================================================= */
 
 app.get(
-    "/api/me",
-    requireAuth,
+    "/acc/:username/:id",
     (req, res) => {
 
-        res.json({
+        const db =
+            readDB();
 
-            ok: true,
+        const key =
+            String(
+                req.params.username
+            ).toLowerCase();
 
-            user: {
+        const account =
+            db[key];
 
-                id:
-                    req.user.id,
+        if (
+            !account ||
+            account.id !==
+            req.params.id
+        ) {
 
-                username:
-                    req.user.username,
+            return res
+                .status(403)
+                .type("html")
+                .send(
+                    renderBlockPage()
+                );
+        }
 
-                scripts:
-                    req.user.scripts
-            }
-        });
+        const current =
+            getCurrentUser(req);
+
+        if (
+            !current ||
+            current !== key
+        ) {
+
+            return res.redirect(
+                "/"
+            );
+        }
+
+        res.sendFile(
+            path.join(
+                PUBLIC_DIR,
+                "index.html"
+            )
+        );
     }
 );
 
@@ -1305,25 +1063,26 @@ app.get(
 ========================================================= */
 
 app.post(
-    "/api/scripts",
+    "/api/create",
     requireAuth,
     (req, res) => {
 
         const name =
             String(
-                req.body.name || ""
+                req.body?.name ||
+                "Untitled Script"
             )
             .trim()
-            .slice(0, 100);
+            .slice(0, 80);
 
         const source =
             String(
-                req.body.source || ""
+                req.body?.source ||
+                ""
             );
 
         if (
-            !name ||
-            !source
+            !source.trim()
         ) {
 
             return res
@@ -1331,56 +1090,64 @@ app.post(
                 .json({
                     ok: false,
                     error:
-                        "Name and source are required"
+                        "Script source cannot be empty."
                 });
         }
 
-        const scriptId =
-            randomId(16);
+        const db =
+            readDB();
 
-        database.scripts[
-            scriptId
-        ] = {
+        const account =
+            db[req.username];
 
-            id:
-                scriptId,
+        if (!account) {
 
-            owner:
-                req.user.id,
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "Account not found."
+                });
+        }
+
+        const id =
+            randomID(12);
+
+        account.scripts[id] = {
+
+            id,
 
             name,
 
             source,
 
             createdAt:
-                new Date()
-                    .toISOString(),
+                Date.now(),
 
             updatedAt:
-                new Date()
-                    .toISOString()
+                Date.now()
         };
 
-        req.user.scripts.push(
-            scriptId
-        );
+        writeDB(db);
 
-        saveDatabase();
+        const endpoint =
+            BASE_URL +
+            "/api/loader/" +
+            id;
 
         res.json({
 
             ok: true,
 
-            script: {
+            id,
 
-                id:
-                    scriptId,
+            name,
 
-                name,
+            endpoint,
 
-                loader:
-                    `/api/loader/${scriptId}`
-            }
+            loader:
+                `loadstring(game:HttpGet(${JSON.stringify(endpoint)}))()`
         });
     }
 );
@@ -1394,40 +1161,63 @@ app.get(
     requireAuth,
     (req, res) => {
 
+        const db =
+            readDB();
+
+        const account =
+            db[req.username];
+
+        if (!account) {
+
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "Account not found."
+                });
+        }
+
         const scripts =
-            req.user.scripts
-                .map(
-                    scriptId =>
-                        database.scripts[
-                            scriptId
-                        ]
-                )
-                .filter(Boolean)
-                .map(
-                    script => ({
-
-                        id:
-                            script.id,
-
-                        name:
-                            script.name,
-
-                        createdAt:
-                            script.createdAt,
-
-                        updatedAt:
-                            script.updatedAt,
-
-                        loader:
-                            `/api/loader/${script.id}`
-                    })
-                );
+            Object.values(
+                account.scripts ||
+                {}
+            );
 
         res.json({
 
             ok: true,
 
-            scripts
+            scripts:
+                scripts.map(
+                    script => {
+
+                        const endpoint =
+                            BASE_URL +
+                            "/api/loader/" +
+                            script.id;
+
+                        return {
+
+                            id:
+                                script.id,
+
+                            name:
+                                script.name,
+
+                            createdAt:
+                                script.createdAt,
+
+                            updatedAt:
+                                script.updatedAt,
+
+                            endpoint,
+
+                            loader:
+                                `loadstring(game:HttpGet(${JSON.stringify(endpoint)}))()`
+                        };
+                    }
+                )
         });
     }
 );
@@ -1437,18 +1227,19 @@ app.get(
 ========================================================= */
 
 app.get(
-    "/api/scripts/:id",
+    "/api/script/:id",
     requireAuth,
     (req, res) => {
 
-        const scriptId =
-            cleanId(
-                req.params.id
-            );
+        const db =
+            readDB();
+
+        const account =
+            db[req.username];
 
         const script =
-            database.scripts[
-                scriptId
+            account?.scripts?.[
+                req.params.id
             ];
 
         if (!script) {
@@ -1458,21 +1249,7 @@ app.get(
                 .json({
                     ok: false,
                     error:
-                        "Script not found"
-                });
-        }
-
-        if (
-            script.owner !==
-            req.user.id
-        ) {
-
-            return res
-                .status(403)
-                .json({
-                    ok: false,
-                    error:
-                        "Access denied"
+                        "Script not found."
                 });
         }
 
@@ -1480,23 +1257,7 @@ app.get(
 
             ok: true,
 
-            script: {
-
-                id:
-                    script.id,
-
-                name:
-                    script.name,
-
-                source:
-                    script.source,
-
-                createdAt:
-                    script.createdAt,
-
-                updatedAt:
-                    script.updatedAt
-            }
+            script
         });
     }
 );
@@ -1506,18 +1267,19 @@ app.get(
 ========================================================= */
 
 app.put(
-    "/api/scripts/:id",
+    "/api/script/:id",
     requireAuth,
     (req, res) => {
 
-        const scriptId =
-            cleanId(
-                req.params.id
-            );
+        const db =
+            readDB();
+
+        const account =
+            db[req.username];
 
         const script =
-            database.scripts[
-                scriptId
+            account?.scripts?.[
+                req.params.id
             ];
 
         if (!script) {
@@ -1527,65 +1289,60 @@ app.put(
                 .json({
                     ok: false,
                     error:
-                        "Script not found"
+                        "Script not found."
                 });
         }
 
         if (
-            script.owner !==
-            req.user.id
-        ) {
-
-            return res
-                .status(403)
-                .json({
-                    ok: false,
-                    error:
-                        "Access denied"
-                });
-        }
-
-        if (
-            req.body.name !==
+            req.body?.name !==
             undefined
         ) {
 
-            const name =
+            script.name =
                 String(
                     req.body.name
                 )
                 .trim()
-                .slice(0, 100);
-
-            if (name) {
-                script.name =
-                    name;
-            }
+                .slice(0, 80);
         }
 
         if (
-            req.body.source !==
+            req.body?.source !==
             undefined
         ) {
 
-            script.source =
+            const source =
                 String(
                     req.body.source
                 );
+
+            if (
+                !source.trim()
+            ) {
+
+                return res
+                    .status(400)
+                    .json({
+                        ok: false,
+                        error:
+                            "Source cannot be empty."
+                    });
+            }
+
+            script.source =
+                source;
         }
 
         script.updatedAt =
-            new Date()
-                .toISOString();
+            Date.now();
 
-        saveDatabase();
+        writeDB(db);
 
         res.json({
 
             ok: true,
 
-            message:
-                "Script updated"
+            script
         });
     }
 );
@@ -1595,66 +1352,75 @@ app.put(
 ========================================================= */
 
 app.delete(
-    "/api/scripts/:id",
+    "/api/script/:id",
     requireAuth,
     (req, res) => {
 
-        const scriptId =
-            cleanId(
+        const db =
+            readDB();
+
+        const account =
+            db[req.username];
+
+        if (
+            !account?.scripts?.[
                 req.params.id
-            );
-
-        const script =
-            database.scripts[
-                scriptId
-            ];
-
-        if (!script) {
+            ]
+        ) {
 
             return res
                 .status(404)
                 .json({
                     ok: false,
                     error:
-                        "Script not found"
+                        "Script not found."
                 });
         }
 
-        if (
-            script.owner !==
-            req.user.id
-        ) {
-
-            return res
-                .status(403)
-                .json({
-                    ok: false,
-                    error:
-                        "Access denied"
-                });
-        }
-
-        delete database.scripts[
-            scriptId
+        delete account.scripts[
+            req.params.id
         ];
 
-        req.user.scripts =
-            req.user.scripts.filter(
-                id =>
-                    id !== scriptId
-            );
-
-        saveDatabase();
+        writeDB(db);
 
         res.json({
-
-            ok: true,
-
-            message:
-                "Script deleted"
+            ok: true
         });
     }
 );
+
+/* =========================================================
+   FIND SCRIPT
+========================================================= */
+
+function findScript(id) {
+
+    const db =
+        readDB();
+
+    for (
+        const username
+        of Object.keys(db)
+    ) {
+
+        const account =
+            db[username];
+
+        if (
+            account.scripts &&
+            account.scripts[id]
+        ) {
+
+            return {
+                account,
+                script:
+                    account.scripts[id]
+            };
+        }
+    }
+
+    return null;
+}
 
 /* =========================================================
    LOADER
@@ -1664,44 +1430,50 @@ app.get(
     "/api/loader/:id",
     (req, res) => {
 
-        const scriptId =
-            cleanId(
-                req.params.id
-            );
-
-        /*
-         * Browser navigation receives
-         * the visual block page.
-         */
-
         const accept =
             String(
-                req.headers.accept || ""
+                req.headers.accept ||
+                ""
             ).toLowerCase();
 
-        const browserRequest =
-            accept.includes(
-                "text/html"
-            );
+        const destination =
+            String(
+                req.headers[
+                    "sec-fetch-dest"
+                ] || ""
+            ).toLowerCase();
+
+        /*
+         * Browser navigation:
+         * return the graphical 403 page.
+         */
 
         if (
-            browserRequest
+            accept.includes(
+                "text/html"
+            ) ||
+            destination ===
+                "document"
         ) {
 
             return res
                 .status(403)
+                .set(
+                    "Cache-Control",
+                    "no-store"
+                )
                 .type("html")
                 .send(
-                    blockPage()
+                    renderBlockPage()
                 );
         }
 
-        const script =
-            database.scripts[
-                scriptId
-            ];
+        const found =
+            findScript(
+                req.params.id
+            );
 
-        if (!script) {
+        if (!found) {
 
             return res
                 .status(404)
@@ -1712,78 +1484,199 @@ app.get(
         }
 
         /*
-         * Return the stored script
-         * for the loader client.
+         * Only the loader is returned.
+         * The stored source is not placed
+         * inside this response.
          */
 
-        return res
+        const runtime =
+            BASE_URL +
+            "/api/runtime/" +
+            found.script.id;
+
+        const lua = `
+local response = request({
+    Url = ${JSON.stringify(runtime)},
+    Method = "POST",
+    Headers = {
+        ["Content-Type"] = "application/json"
+    },
+    Body = "{}"
+})
+
+if not response then
+    error("LEXINX BLOCK")
+end
+
+if response.StatusCode ~= 200 then
+    error("LEXINX BLOCK")
+end
+
+local HttpService =
+    game:GetService("HttpService")
+
+local ok, data =
+    pcall(function()
+        return HttpService:JSONDecode(
+            response.Body
+        )
+    end)
+
+if not ok then
+    error("LEXINX BLOCK")
+end
+
+if type(data) ~= "table" then
+    error("LEXINX BLOCK")
+end
+
+if data.ok ~= true then
+    error("LEXINX BLOCK")
+end
+
+if type(data.code) ~= "string" then
+    error("LEXINX BLOCK")
+end
+
+local fn, err =
+    loadstring(data.code)
+
+if not fn then
+    error(
+        err or
+        "LEXINX BLOCK"
+    )
+end
+
+local success, runtimeError =
+    pcall(fn)
+
+if not success then
+    error(runtimeError)
+end
+`.trim();
+
+        res
             .status(200)
+            .set(
+                "Cache-Control",
+                "no-store, no-cache, must-revalidate"
+            )
+            .set(
+                "Pragma",
+                "no-cache"
+            )
+            .set(
+                "X-Content-Type-Options",
+                "nosniff"
+            )
             .type("text/plain")
-            .send(
-                script.source
-            );
+            .send(lua);
     }
 );
 
 /* =========================================================
-   API 404
+   RUNTIME
 ========================================================= */
 
-app.use(
-    "/api",
+app.post(
+    "/api/runtime/:id",
     (req, res) => {
 
-        res
-            .status(404)
-            .json({
-                ok: false,
-                error:
-                    "LEXINX BLOCK"
-            });
-    }
-);
-
-/* =========================================================
-   GENERAL 404
-========================================================= */
-
-app.use(
-    (req, res) => {
-
-        res
-            .status(404)
-            .send(
-                "LEXINX PROTECT - NOT FOUND"
+        const found =
+            findScript(
+                req.params.id
             );
-    }
-);
 
-/* =========================================================
-   ERROR HANDLER
-========================================================= */
+        if (!found) {
 
-app.use(
-    (error, req, res, next) => {
-
-        console.error(
-            "LEXINX SERVER ERROR:",
-            error
-        );
-
-        if (
-            res.headersSent
-        ) {
-            return next(error);
+            return res
+                .status(404)
+                .json({
+                    ok: false,
+                    error:
+                        "LEXINX BLOCK"
+                });
         }
 
+        /*
+         * Important:
+         *
+         * Any source that is executed by
+         * Roblox must ultimately reach
+         * the client/runtime.
+         *
+         * Therefore this endpoint does not
+         * provide cryptographic "zero exposure".
+         */
+
         res
-            .status(500)
+            .status(200)
+            .set(
+                "Cache-Control",
+                "no-store, no-cache, must-revalidate"
+            )
+            .set(
+                "Pragma",
+                "no-cache"
+            )
             .json({
-                ok: false,
-                error:
-                    "Internal server error"
+
+                ok: true,
+
+                code:
+                    found.script.source
             });
     }
+);
+
+/* =========================================================
+   UNKNOWN ROUTES
+========================================================= */
+
+app.use(
+    (req, res) => {
+
+        res
+            .status(404)
+            .type("text/plain")
+            .send(
+                "LEXINX BLOCK"
+            );
+    }
+);
+
+/* =========================================================
+   SESSION CLEANUP
+========================================================= */
+
+setInterval(
+    () => {
+
+        const now =
+            Date.now();
+
+        for (
+            const [
+                token,
+                session
+            ]
+            of sessions
+        ) {
+
+            if (
+                now >
+                session.expires
+            ) {
+
+                sessions.delete(
+                    token
+                );
+            }
+        }
+
+    },
+    60 * 1000
 );
 
 /* =========================================================
@@ -1792,48 +1685,34 @@ app.use(
 
 app.listen(
     PORT,
-    HOST,
+    "0.0.0.0",
     () => {
 
         console.log(
-            "======================================"
+            "================================"
         );
 
         console.log(
-            "        LEXINX PROTECT SERVER"
+            "LEXINX PROTECT ONLINE"
         );
 
         console.log(
-            "======================================"
+            "PORT:",
+            PORT
         );
 
         console.log(
-            `Server: http://${HOST}:${PORT}`
+            "BASE URL:",
+            BASE_URL
         );
 
         console.log(
-            "Web: /"
+            "DATABASE:",
+            DB_FILE
         );
 
         console.log(
-            "Register: POST /api/register"
-        );
-
-        console.log(
-            "Login: POST /api/login"
-        );
-
-        console.log(
-            "Scripts: /api/scripts"
-        );
-
-        console.log(
-            "Loader: /api/loader/:id"
-        );
-
-        console.log(
-            "Database:",
-            DATA_FILE
+            "================================"
         );
     }
 );
