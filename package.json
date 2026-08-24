@@ -1,13 +1,8 @@
 {
   "name": "lexinx-protect",
   "version": "1.0.0",
-  "description": "LEXINX two-layer script delivery server",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js",
-    "build": "echo Build completed"
-  },
+  "private": true,
   "dependencies": {
-    "express": "^5.1.0"
+    "@netlify/blobs": "^10.0.0"
   }
 }
