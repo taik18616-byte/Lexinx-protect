@@ -4,8 +4,8 @@
   "description": "LEXINX two-layer script delivery server",
   "main": "server.js",
   "scripts": {
-    "build": "echo Build completed",
-    "start": "node server.js"
+    "start": "node server.js",
+    "build": "echo Build completed"
   },
   "dependencies": {
     "express": "^5.1.0"
