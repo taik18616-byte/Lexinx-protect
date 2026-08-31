@@ -1,8 +1,14 @@
 {
   "name": "lexinx-protect",
   "version": "1.0.0",
-  "private": true,
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
   "dependencies": {
-    "@netlify/blobs": "^10.0.0"
+    "express": "^5.1.0",
+    "pg": "^8.16.3",
+    "bcrypt": "^6.0.0",
+    "jsonwebtoken": "^9.0.2"
   }
 }
