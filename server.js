@@ -1,21 +1,109 @@
 const express = require("express");
 const crypto = require("crypto");
 const path = require("path");
+const fs = require("fs");
+const cookieParser = require("cookie-parser");
+const { Pool } = require("pg");
 
 const app = express();
 
+/* =========================================================
+   CONFIG
+========================================================= */
+
 const PORT = process.env.PORT || 3000;
+
 const PUBLIC_URL =
     process.env.PUBLIC_URL ||
     "https://lexinx-protect.onrender.com";
 
-const WEB_SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
-const LOADER_SESSION_TTL = 60 * 1000;
+const WEB_SESSION_TTL =
+    7 * 24 * 60 * 60 * 1000;
 
-app.set("trust proxy", 1);
+const LOADER_SESSION_TTL =
+    60 * 1000;
 
-app.use(express.json({ limit: "1mb" }));
-app.use(express.urlencoded({ extended: false }));
+/* =========================================================
+   POSTGRESQL
+========================================================= */
+
+if (!process.env.DATABASE_URL) {
+    console.error("DATABASE_URL is missing.");
+    process.exit(1);
+}
+
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+
+    ssl:
+        process.env.NODE_ENV === "production"
+            ? { rejectUnauthorized: false }
+            : false,
+
+    max: 10,
+
+    idleTimeoutMillis: 30000,
+
+    connectionTimeoutMillis: 10000
+});
+
+/* =========================================================
+   DATABASE INIT
+========================================================= */
+
+async function initDatabase() {
+
+    const schemaPath =
+        path.join(
+            __dirname,
+            "database",
+            "schema.sql"
+        );
+
+    if (!fs.existsSync(schemaPath)) {
+
+        throw new Error(
+            "database/schema.sql not found."
+        );
+    }
+
+    const schema =
+        fs.readFileSync(
+            schemaPath,
+            "utf8"
+        );
+
+    await pool.query(schema);
+
+    console.log(
+        "PostgreSQL database initialized."
+    );
+}
+
+/* =========================================================
+   EXPRESS
+========================================================= */
+
+app.set(
+    "trust proxy",
+    1
+);
+
+app.use(
+    express.json({
+        limit: "1mb"
+    })
+);
+
+app.use(
+    express.urlencoded({
+        extended: false
+    })
+);
+
+app.use(
+    cookieParser()
+);
 
 /* =========================================================
    STATIC
@@ -23,47 +111,65 @@ app.use(express.urlencoded({ extended: false }));
 
 app.use(
     express.static(
-        path.join(__dirname, "public")
+        path.join(
+            __dirname,
+            "public"
+        )
     )
 );
 
 /* =========================================================
-   STORAGE
+   LOADER SESSIONS
+   Temporary by design.
 ========================================================= */
 
-const users = new Map();
-const scripts = new Map();
-const webSessions = new Map();
-const loaderSessions = new Map();
+const loaderSessions =
+    new Map();
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
 function randomHex(bytes = 32) {
+
     return crypto
         .randomBytes(bytes)
         .toString("hex");
 }
 
 function hashPassword(password) {
+
     return crypto
         .createHash("sha256")
-        .update(String(password))
+        .update(
+            String(password)
+        )
         .digest("hex");
 }
 
 function luaString(value) {
-    return JSON.stringify(String(value));
+
+    return JSON.stringify(
+        String(value)
+    );
 }
 
 function hexEncode(value) {
+
     return Buffer
-        .from(String(value), "utf8")
+        .from(
+            String(value),
+            "utf8"
+        )
         .toString("hex");
 }
 
-function apiError(res, status, message) {
+function apiError(
+    res,
+    status,
+    message
+) {
+
     return res
         .status(status)
         .json({
@@ -73,131 +179,190 @@ function apiError(res, status, message) {
 }
 
 /* =========================================================
-   COOKIE
-========================================================= */
-
-function getCookie(req, name) {
-
-    const raw =
-        req.headers.cookie || "";
-
-    const parts =
-        raw.split(";");
-
-    for (const part of parts) {
-
-        const item =
-            part.trim();
-
-        const index =
-            item.indexOf("=");
-
-        if (index === -1)
-            continue;
-
-        const key =
-            item.slice(0, index);
-
-        const value =
-            item.slice(index + 1);
-
-        if (key === name) {
-
-            try {
-                return decodeURIComponent(value);
-            } catch {
-                return value;
-            }
-
-        }
-    }
-
-    return null;
-}
-
-/* =========================================================
    WEB SESSION
 ========================================================= */
 
-function createWebSession(username) {
+async function createWebSession(
+    userId
+) {
 
-    const id =
+    const token =
         randomHex(32);
 
-    webSessions.set(
-        id,
-        {
-            id,
-            username,
-            created: Date.now(),
-            expires:
-                Date.now() +
-                WEB_SESSION_TTL
-        }
+    await pool.query(
+        `
+        INSERT INTO login_sessions
+        (
+            user_id,
+            session_token,
+            created_at,
+            expires_at,
+            last_seen_at
+        )
+        VALUES
+        (
+            $1,
+            $2,
+            NOW(),
+            NOW() + INTERVAL '7 days',
+            NOW()
+        )
+        `,
+        [
+            userId,
+            token
+        ]
     );
 
-    return id;
+    return token;
 }
 
-function getWebAuth(req) {
+async function getWebAuth(req) {
 
     const sid =
-        getCookie(
-            req,
-            "lexinx_session"
+        req.cookies.lexinx_session;
+
+    if (!sid) {
+        return null;
+    }
+
+    const result =
+        await pool.query(
+            `
+            SELECT
+                ls.id AS session_id,
+                ls.user_id,
+                ls.session_token,
+                ls.expires_at,
+
+                u.username,
+                u.password_hash,
+                u.created_at,
+                u.updated_at
+
+            FROM login_sessions ls
+
+            JOIN users u
+                ON u.id = ls.user_id
+
+            WHERE
+                ls.session_token = $1
+
+                AND (
+                    ls.expires_at IS NULL
+                    OR ls.expires_at > NOW()
+                )
+
+            LIMIT 1
+            `,
+            [sid]
         );
 
-    if (!sid)
-        return null;
-
-    const session =
-        webSessions.get(sid);
-
-    if (!session)
-        return null;
-
     if (
-        Date.now() >
-        session.expires
+        result.rows.length === 0
     ) {
-
-        webSessions.delete(sid);
 
         return null;
     }
 
-    const user =
-        users.get(
-            session.username
-        );
+    const row =
+        result.rows[0];
 
-    if (!user)
-        return null;
+    await pool.query(
+        `
+        UPDATE login_sessions
+
+        SET last_seen_at = NOW()
+
+        WHERE id = $1
+        `,
+        [
+            row.session_id
+        ]
+    );
 
     return {
+
         sid,
-        username: session.username,
-        user
+
+        sessionId:
+            row.session_id,
+
+        userId:
+            row.user_id,
+
+        username:
+            row.username
     };
 }
 
-function requireAuth(req, res, next) {
+async function requireAuth(
+    req,
+    res,
+    next
+) {
 
-    const auth =
-        getWebAuth(req);
+    try {
 
-    if (!auth) {
+        const auth =
+            await getWebAuth(req);
+
+        if (!auth) {
+
+            return apiError(
+                res,
+                401,
+                "Authentication required."
+            );
+        }
+
+        req.auth =
+            auth;
+
+        next();
+
+    } catch (error) {
+
+        console.error(
+            "AUTH ERROR:",
+            error
+        );
 
         return apiError(
             res,
-            401,
-            "Authentication required."
+            500,
+            "Authentication server error."
         );
     }
+}
 
-    req.auth = auth;
+/* =========================================================
+   COOKIE
+========================================================= */
 
-    next();
+function setSessionCookie(
+    res,
+    token
+) {
+
+    res.cookie(
+        "lexinx_session",
+        token,
+        {
+            httpOnly: true,
+
+            secure:
+                process.env.NODE_ENV ===
+                "production",
+
+            sameSite: "lax",
+
+            maxAge:
+                WEB_SESSION_TTL,
+
+            path: "/"
+        }
+    );
 }
 
 /* =========================================================
@@ -206,18 +371,22 @@ function requireAuth(req, res, next) {
 
 app.post(
     "/api/register",
-    (req, res) => {
+
+    async (req, res) => {
 
         try {
 
             const username =
                 String(
-                    req.body.username || ""
-                ).trim();
+                    req.body.username ||
+                    ""
+                )
+                .trim();
 
             const password =
                 String(
-                    req.body.password || ""
+                    req.body.password ||
+                    ""
                 );
 
             if (!username) {
@@ -229,7 +398,9 @@ app.post(
                 );
             }
 
-            if (username.length < 3) {
+            if (
+                username.length < 3
+            ) {
 
                 return apiError(
                     res,
@@ -238,7 +409,9 @@ app.post(
                 );
             }
 
-            if (username.length > 32) {
+            if (
+                username.length > 32
+            ) {
 
                 return apiError(
                     res,
@@ -248,9 +421,8 @@ app.post(
             }
 
             if (
-                !/^[a-zA-Z0-9_]+$/.test(
-                    username
-                )
+                !/^[a-zA-Z0-9_]+$/
+                    .test(username)
             ) {
 
                 return apiError(
@@ -260,7 +432,9 @@ app.post(
                 );
             }
 
-            if (password.length < 6) {
+            if (
+                password.length < 6
+            ) {
 
                 return apiError(
                     res,
@@ -269,10 +443,20 @@ app.post(
                 );
             }
 
-            const key =
-                username.toLowerCase();
+            const existing =
+                await pool.query(
+                    `
+                    SELECT id
+                    FROM users
+                    WHERE LOWER(username) = LOWER($1)
+                    LIMIT 1
+                    `,
+                    [username]
+                );
 
-            if (users.has(key)) {
+            if (
+                existing.rows.length
+            ) {
 
                 return apiError(
                     res,
@@ -281,40 +465,57 @@ app.post(
                 );
             }
 
-            users.set(
-                key,
-                {
-                    username,
-                    password:
-                        hashPassword(
-                            password
-                        ),
-                    created:
-                        Date.now()
-                }
-            );
+            const passwordHash =
+                hashPassword(
+                    password
+                );
+
+            const result =
+                await pool.query(
+                    `
+                    INSERT INTO users
+                    (
+                        username,
+                        password_hash
+                    )
+                    VALUES
+                    (
+                        $1,
+                        $2
+                    )
+                    RETURNING
+                        id,
+                        username
+                    `,
+                    [
+                        username,
+                        passwordHash
+                    ]
+                );
+
+            const user =
+                result.rows[0];
 
             const sid =
-                createWebSession(key);
+                await createWebSession(
+                    user.id
+                );
 
-            res.cookie(
-                "lexinx_session",
-                sid,
-                {
-                    httpOnly: true,
-                    sameSite: "lax",
-                    secure: true,
-                    maxAge:
-                        WEB_SESSION_TTL,
-                    path: "/"
-                }
+            setSessionCookie(
+                res,
+                sid
             );
 
             return res.json({
+
                 ok: true,
-                username,
+
+                username:
+                    user.username,
+
                 url:
                     PUBLIC_URL + "/"
+
             });
 
         } catch (error) {
@@ -339,27 +540,46 @@ app.post(
 
 app.post(
     "/api/login",
-    (req, res) => {
+
+    async (req, res) => {
 
         try {
 
             const username =
                 String(
-                    req.body.username || ""
-                ).trim();
+                    req.body.username ||
+                    ""
+                )
+                .trim();
 
             const password =
                 String(
-                    req.body.password || ""
+                    req.body.password ||
+                    ""
                 );
 
-            const key =
-                username.toLowerCase();
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        id,
+                        username,
+                        password_hash
 
-            const user =
-                users.get(key);
+                    FROM users
 
-            if (!user) {
+                    WHERE
+                        LOWER(username) =
+                        LOWER($1)
+
+                    LIMIT 1
+                    `,
+                    [username]
+                );
+
+            if (
+                result.rows.length === 0
+            ) {
 
                 return apiError(
                     res,
@@ -368,9 +588,17 @@ app.post(
                 );
             }
 
+            const user =
+                result.rows[0];
+
+            const passwordHash =
+                hashPassword(
+                    password
+                );
+
             if (
-                user.password !==
-                hashPassword(password)
+                passwordHash !==
+                user.password_hash
             ) {
 
                 return apiError(
@@ -381,27 +609,25 @@ app.post(
             }
 
             const sid =
-                createWebSession(key);
+                await createWebSession(
+                    user.id
+                );
 
-            res.cookie(
-                "lexinx_session",
-                sid,
-                {
-                    httpOnly: true,
-                    sameSite: "lax",
-                    secure: true,
-                    maxAge:
-                        WEB_SESSION_TTL,
-                    path: "/"
-                }
+            setSessionCookie(
+                res,
+                sid
             );
 
             return res.json({
+
                 ok: true,
+
                 username:
                     user.username,
+
                 url:
                     PUBLIC_URL + "/"
+
             });
 
         } catch (error) {
@@ -426,27 +652,48 @@ app.post(
 
 app.get(
     "/api/me",
-    (req, res) => {
 
-        const auth =
-            getWebAuth(req);
+    async (req, res) => {
 
-        if (!auth) {
+        try {
+
+            const auth =
+                await getWebAuth(req);
+
+            if (!auth) {
+
+                return apiError(
+                    res,
+                    401,
+                    "Not authenticated."
+                );
+            }
+
+            return res.json({
+
+                ok: true,
+
+                username:
+                    auth.username,
+
+                url:
+                    PUBLIC_URL + "/"
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ME ERROR:",
+                error
+            );
 
             return apiError(
                 res,
-                401,
-                "Not authenticated."
+                500,
+                "Session server error."
             );
         }
-
-        return res.json({
-            ok: true,
-            username:
-                auth.username,
-            url:
-                PUBLIC_URL + "/"
-        });
     }
 );
 
@@ -456,31 +703,50 @@ app.get(
 
 app.post(
     "/api/logout",
-    (req, res) => {
 
-        const sid =
-            getCookie(
-                req,
-                "lexinx_session"
+    async (req, res) => {
+
+        try {
+
+            const sid =
+                req.cookies.lexinx_session;
+
+            if (sid) {
+
+                await pool.query(
+                    `
+                    DELETE FROM login_sessions
+
+                    WHERE session_token = $1
+                    `,
+                    [sid]
+                );
+            }
+
+            res.clearCookie(
+                "lexinx_session",
+                {
+                    path: "/"
+                }
             );
 
-        if (sid) {
+            return res.json({
+                ok: true
+            });
 
-            webSessions.delete(
-                sid
+        } catch (error) {
+
+            console.error(
+                "LOGOUT ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Logout server error."
             );
         }
-
-        res.clearCookie(
-            "lexinx_session",
-            {
-                path: "/"
-            }
-        );
-
-        return res.json({
-            ok: true
-        });
     }
 );
 
@@ -490,8 +756,10 @@ app.post(
 
 app.post(
     "/api/create",
+
     requireAuth,
-    (req, res) => {
+
+    async (req, res) => {
 
         try {
 
@@ -518,38 +786,82 @@ app.post(
                 );
             }
 
-            let id;
+            let scriptId;
 
             do {
-                id = randomHex(12);
-            } while (
-                scripts.has(id)
-            );
 
-            scripts.set(
-                id,
-                {
-                    id,
-                    name:
-                        name ||
-                        "Untitled Script",
-                    source,
-                    owner:
-                        req.auth.username,
-                    created:
-                        Date.now(),
-                    updated:
-                        Date.now()
+                scriptId =
+                    randomHex(12);
+
+                const exists =
+                    await pool.query(
+                        `
+                        SELECT id
+                        FROM scripts
+                        WHERE script_id = $1
+                        LIMIT 1
+                        `,
+                        [scriptId]
+                    );
+
+                if (
+                    exists.rows.length === 0
+                ) {
+                    break;
                 }
-            );
+
+            } while (true);
+
+            const result =
+                await pool.query(
+                    `
+                    INSERT INTO scripts
+                    (
+                        user_id,
+                        script_id,
+                        name,
+                        source,
+                        enabled
+                    )
+                    VALUES
+                    (
+                        $1,
+                        $2,
+                        $3,
+                        $4,
+                        TRUE
+                    )
+                    RETURNING
+                        id,
+                        script_id,
+                        name,
+                        created_at,
+                        updated_at
+                    `,
+                    [
+                        req.auth.userId,
+                        scriptId,
+                        name ||
+                            "Untitled Script",
+                        source
+                    ]
+                );
+
+            const script =
+                result.rows[0];
 
             const loader =
-                `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${id}"))()`;
+                `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${script.script_id}"))()`;
 
             return res.json({
+
                 ok: true,
-                id,
+
+                id:
+                    script.script_id,
+
                 loader
+
             });
 
         } catch (error) {
@@ -574,54 +886,66 @@ app.post(
 
 app.get(
     "/api/scripts",
+
     requireAuth,
-    (req, res) => {
+
+    async (req, res) => {
 
         try {
 
-            const result = [];
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        script_id,
+                        name,
+                        enabled,
+                        created_at,
+                        updated_at
 
-            for (
-                const script
-                of scripts.values()
-            ) {
+                    FROM scripts
 
-                if (
-                    script.owner !==
-                    req.auth.username
-                ) {
-                    continue;
-                }
+                    WHERE user_id = $1
 
-                result.push({
+                    ORDER BY
+                        created_at DESC
+                    `,
+                    [
+                        req.auth.userId
+                    ]
+                );
 
-                    id:
-                        script.id,
+            const scripts =
+                result.rows.map(
+                    script => ({
 
-                    name:
-                        script.name,
+                        id:
+                            script.script_id,
 
-                    loader:
-                        `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${script.id}"))()`,
+                        name:
+                            script.name,
 
-                    created:
-                        script.created,
+                        enabled:
+                            script.enabled,
 
-                    updated:
-                        script.updated
+                        loader:
+                            `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${script.script_id}"))()`,
 
-                });
-            }
+                        created:
+                            script.created_at,
 
-            result.sort(
-                (a, b) =>
-                    b.created -
-                    a.created
-            );
+                        updated:
+                            script.updated_at
+
+                    })
+                );
 
             return res.json({
+
                 ok: true,
-                scripts: result
+
+                scripts
+
             });
 
         } catch (error) {
@@ -646,53 +970,86 @@ app.get(
 
 app.get(
     "/api/script/:id",
+
     requireAuth,
-    (req, res) => {
 
-        const script =
-            scripts.get(
-                req.params.id
-            );
+    async (req, res) => {
 
-        if (!script) {
+        try {
 
-            return apiError(
-                res,
-                404,
-                "Script not found."
-            );
-        }
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        script_id,
+                        name,
+                        source,
+                        enabled
 
-        if (
-            script.owner !==
-            req.auth.username
-        ) {
+                    FROM scripts
 
-            return apiError(
-                res,
-                403,
-                "Access denied."
-            );
-        }
+                    WHERE
+                        script_id = $1
 
-        return res.json({
+                        AND user_id = $2
 
-            ok: true,
+                    LIMIT 1
+                    `,
+                    [
+                        req.params.id,
+                        req.auth.userId
+                    ]
+                );
 
-            script: {
+            if (
+                result.rows.length === 0
+            ) {
 
-                id:
-                    script.id,
-
-                name:
-                    script.name,
-
-                source:
-                    script.source
-
+                return apiError(
+                    res,
+                    404,
+                    "Script not found."
+                );
             }
 
-        });
+            const script =
+                result.rows[0];
+
+            return res.json({
+
+                ok: true,
+
+                script: {
+
+                    id:
+                        script.script_id,
+
+                    name:
+                        script.name,
+
+                    source:
+                        script.source,
+
+                    enabled:
+                        script.enabled
+
+                }
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "GET SCRIPT ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Failed to load script."
+            );
+        }
     }
 );
 
@@ -702,74 +1059,167 @@ app.get(
 
 app.put(
     "/api/script/:id",
+
     requireAuth,
-    (req, res) => {
 
-        const script =
-            scripts.get(
-                req.params.id
-            );
+    async (req, res) => {
 
-        if (!script) {
+        try {
 
-            return apiError(
-                res,
-                404,
-                "Script not found."
-            );
-        }
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        id,
+                        script_id
 
-        if (
-            script.owner !==
-            req.auth.username
-        ) {
+                    FROM scripts
 
-            return apiError(
-                res,
-                403,
-                "Access denied."
-            );
-        }
+                    WHERE
+                        script_id = $1
 
-        if (
-            typeof req.body.name ===
-            "string"
-        ) {
+                        AND user_id = $2
 
-            script.name =
-                req.body.name
-                    .trim()
-                    .slice(0, 100)
-                    ||
-                    "Untitled Script";
-        }
-
-        if (
-            typeof req.body.source ===
-            "string"
-        ) {
+                    LIMIT 1
+                    `,
+                    [
+                        req.params.id,
+                        req.auth.userId
+                    ]
+                );
 
             if (
-                !req.body.source.trim()
+                result.rows.length === 0
+            ) {
+
+                return apiError(
+                    res,
+                    404,
+                    "Script not found."
+                );
+            }
+
+            const updates = [];
+            const values = [];
+
+            let index = 1;
+
+            if (
+                typeof req.body.name ===
+                "string"
+            ) {
+
+                const name =
+                    req.body.name
+                        .trim()
+                        .slice(0, 100)
+                        ||
+                        "Untitled Script";
+
+                updates.push(
+                    `name = $${index++}`
+                );
+
+                values.push(
+                    name
+                );
+            }
+
+            if (
+                typeof req.body.source ===
+                "string"
+            ) {
+
+                if (
+                    !req.body.source.trim()
+                ) {
+
+                    return apiError(
+                        res,
+                        400,
+                        "Script source cannot be empty."
+                    );
+                }
+
+                updates.push(
+                    `source = $${index++}`
+                );
+
+                values.push(
+                    req.body.source
+                );
+            }
+
+            if (
+                typeof req.body.enabled ===
+                "boolean"
+            ) {
+
+                updates.push(
+                    `enabled = $${index++}`
+                );
+
+                values.push(
+                    req.body.enabled
+                );
+            }
+
+            if (
+                updates.length === 0
             ) {
 
                 return apiError(
                     res,
                     400,
-                    "Script source cannot be empty."
+                    "Nothing to update."
                 );
             }
 
-            script.source =
-                req.body.source;
+            updates.push(
+                "updated_at = NOW()"
+            );
+
+            values.push(
+                req.params.id
+            );
+
+            values.push(
+                req.auth.userId
+            );
+
+            await pool.query(
+                `
+                UPDATE scripts
+
+                SET
+                    ${updates.join(", ")}
+
+                WHERE
+                    script_id = $${index++}
+
+                    AND user_id = $${index}
+
+                `,
+                values
+            );
+
+            return res.json({
+                ok: true
+            });
+
+        } catch (error) {
+
+            console.error(
+                "UPDATE SCRIPT ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Failed to update script."
+            );
         }
-
-        script.updated =
-            Date.now();
-
-        return res.json({
-            ok: true
-        });
     }
 );
 
@@ -779,42 +1229,59 @@ app.put(
 
 app.delete(
     "/api/script/:id",
+
     requireAuth,
-    (req, res) => {
 
-        const script =
-            scripts.get(
-                req.params.id
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await pool.query(
+                    `
+                    DELETE FROM scripts
+
+                    WHERE
+                        script_id = $1
+
+                        AND user_id = $2
+
+                    RETURNING id
+                    `,
+                    [
+                        req.params.id,
+                        req.auth.userId
+                    ]
+                );
+
+            if (
+                result.rows.length === 0
+            ) {
+
+                return apiError(
+                    res,
+                    404,
+                    "Script not found."
+                );
+            }
+
+            return res.json({
+                ok: true
+            });
+
+        } catch (error) {
+
+            console.error(
+                "DELETE SCRIPT ERROR:",
+                error
             );
-
-        if (!script) {
 
             return apiError(
                 res,
-                404,
-                "Script not found."
+                500,
+                "Failed to delete script."
             );
         }
-
-        if (
-            script.owner !==
-            req.auth.username
-        ) {
-
-            return apiError(
-                res,
-                403,
-                "Access denied."
-            );
-        }
-
-        scripts.delete(
-            req.params.id
-        );
-
-        return res.json({
-            ok: true
-        });
     }
 );
 
@@ -857,7 +1324,9 @@ function createLoaderSession(
     return session;
 }
 
-function issueToken(session) {
+function issueToken(
+    session
+) {
 
     const token =
         randomHex(32);
@@ -874,8 +1343,9 @@ function consumeToken(
     token
 ) {
 
-    if (!token)
+    if (!token) {
         return false;
+    }
 
     if (
         !session.tokens.has(token)
@@ -894,8 +1364,9 @@ function validLoaderSession(
     session
 ) {
 
-    if (!session)
+    if (!session) {
         return false;
+    }
 
     if (
         Date.now() >
@@ -910,6 +1381,53 @@ function validLoaderSession(
     }
 
     return true;
+}
+
+/* =========================================================
+   ACCESS LOG
+========================================================= */
+
+async function logScriptAccess(
+    req,
+    scriptId,
+    userId,
+    success
+) {
+
+    try {
+
+        await pool.query(
+            `
+            INSERT INTO script_access_logs
+            (
+                user_id,
+                script_id,
+                ip_address,
+                success
+            )
+            VALUES
+            (
+                $1,
+                $2,
+                $3,
+                $4
+            )
+            `,
+            [
+                userId || null,
+                scriptId || null,
+                req.ip || null,
+                Boolean(success)
+            ]
+        );
+
+    } catch (error) {
+
+        console.error(
+            "ACCESS LOG ERROR:",
+            error
+        );
+    }
 }
 
 /* =========================================================
@@ -1027,10 +1545,8 @@ local function decodeHex(s)
             )
 
         if n then
-
             out[#out + 1] =
                 string.char(n)
-
         end
 
     end
@@ -1074,13 +1590,17 @@ function randomLuaName() {
    WRAPPER
 ========================================================= */
 
-function buildWrapper(session) {
+function buildWrapper(
+    session
+) {
 
     const token =
         issueToken(session);
 
     const endpoint =
-        hexEncode(PUBLIC_URL);
+        hexEncode(
+            PUBLIC_URL
+        );
 
     const endpointVar =
         randomLuaName();
@@ -1161,13 +1681,17 @@ return ${request}()
    L2
 ========================================================= */
 
-function buildL2(session) {
+function buildL2(
+    session
+) {
 
     const token =
         issueToken(session);
 
     const endpoint =
-        hexEncode(PUBLIC_URL);
+        hexEncode(
+            PUBLIC_URL
+        );
 
     const endpointVar =
         randomLuaName();
@@ -1243,16 +1767,20 @@ return runVM(${vm})
 }
 
 /* =========================================================
-   L3 PACKED PROTOTYPE
+   L3
 ========================================================= */
 
-function buildL3(session) {
+function buildL3(
+    session
+) {
 
     const token =
         issueToken(session);
 
     const endpoint =
-        hexEncode(PUBLIC_URL);
+        hexEncode(
+            PUBLIC_URL
+        );
 
     const endpointVar =
         randomLuaName();
@@ -1333,16 +1861,20 @@ return executeVM(
 }
 
 /* =========================================================
-   L4 RUNTIME
+   L4
 ========================================================= */
 
-function buildL4(session) {
+function buildL4(
+    session
+) {
 
     const token =
         issueToken(session);
 
     const endpoint =
-        hexEncode(PUBLIC_URL);
+        hexEncode(
+            PUBLIC_URL
+        );
 
     const endpointVar =
         randomLuaName();
@@ -1576,57 +2108,108 @@ return ${execute}()
 
 app.get(
     "/api/loader/:id",
-    (req, res) => {
+
+    async (req, res) => {
 
         try {
 
             const id =
                 String(
-                    req.params.id || ""
-                ).trim();
+                    req.params.id ||
+                    ""
+                )
+                .trim();
 
             if (!id) {
                 return blockPage(res);
             }
 
-            const script =
-                scripts.get(id);
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        script_id,
+                        enabled
 
-            if (!script) {
+                    FROM scripts
+
+                    WHERE script_id = $1
+
+                    LIMIT 1
+                    `,
+                    [id]
+                );
+
+            if (
+                result.rows.length === 0
+            ) {
+
+                await logScriptAccess(
+                    req,
+                    id,
+                    null,
+                    false
+                );
 
                 return blockPage(res);
             }
 
-            /*
-             * Direct browser navigation normally
-             * contains text/html in Accept.
-             */
+            const script =
+                result.rows[0];
+
+            if (
+                !script.enabled
+            ) {
+
+                await logScriptAccess(
+                    req,
+                    id,
+                    null,
+                    false
+                );
+
+                return blockPage(res);
+            }
 
             const accept =
                 String(
-                    req.headers.accept || ""
-                ).toLowerCase();
+                    req.headers.accept ||
+                    ""
+                )
+                .toLowerCase();
 
             if (
-                accept.includes("text/html")
+                accept.includes(
+                    "text/html"
+                )
             ) {
+
+                await logScriptAccess(
+                    req,
+                    id,
+                    null,
+                    false
+                );
 
                 return blockPage(res);
             }
 
-            /*
-             * Create a fresh loader session.
-             */
-
             const session =
                 createLoaderSession(
-                    script.id
+                    script.script_id
                 );
 
             const wrapper =
                 buildWrapper(
                     session
                 );
+
+            await logScriptAccess(
+                req,
+                id,
+                null,
+                true
+            );
 
             return res
                 .status(200)
@@ -1656,7 +2239,8 @@ app.get(
 
 app.get(
     "/api/l3",
-    (req, res) => {
+
+    async (req, res) => {
 
         try {
 
@@ -1735,7 +2319,8 @@ app.get(
 
 app.get(
     "/api/l4",
-    (req, res) => {
+
+    async (req, res) => {
 
         try {
 
@@ -1814,7 +2399,8 @@ app.get(
 
 app.get(
     "/api/l5",
-    (req, res) => {
+
+    async (req, res) => {
 
         try {
 
@@ -1893,7 +2479,8 @@ app.get(
 
 app.get(
     "/api/l5/final",
-    (req, res) => {
+
+    async (req, res) => {
 
         try {
 
@@ -1914,14 +2501,6 @@ app.get(
                     "LEXINX BLOCK"
                 );
             }
-
-            /*
-             * /api/l5 changes:
-             *
-             * stage 2 -> stage 3
-             *
-             * Therefore final requires stage 3.
-             */
 
             if (
                 session.stage !== 3
@@ -1948,12 +2527,28 @@ app.get(
                 );
             }
 
-            const script =
-                scripts.get(
-                    session.scriptId
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        script_id,
+                        source,
+                        enabled
+
+                    FROM scripts
+
+                    WHERE script_id = $1
+
+                    LIMIT 1
+                    `,
+                    [
+                        session.scriptId
+                    ]
                 );
 
-            if (!script) {
+            if (
+                result.rows.length === 0
+            ) {
 
                 loaderSessions.delete(
                     session.id
@@ -1963,6 +2558,24 @@ app.get(
                     res,
                     404,
                     "Script not found."
+                );
+            }
+
+            const script =
+                result.rows[0];
+
+            if (
+                !script.enabled
+            ) {
+
+                loaderSessions.delete(
+                    session.id
+                );
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
                 );
             }
 
@@ -2003,6 +2616,7 @@ app.get(
 
 app.use(
     "/api",
+
     (req, res) => {
 
         return apiError(
@@ -2019,6 +2633,7 @@ app.use(
 
 app.get(
     "/",
+
     (req, res) => {
 
         return res.sendFile(
@@ -2051,10 +2666,12 @@ app.use(
 ========================================================= */
 
 setInterval(
-    () => {
+    async () => {
 
         const now =
             Date.now();
+
+        /* Loader sessions */
 
         for (
             const [
@@ -2075,23 +2692,27 @@ setInterval(
             }
         }
 
-        for (
-            const [
-                id,
-                session
-            ]
-            of webSessions
-        ) {
+        /* PostgreSQL login sessions */
 
-            if (
-                now >
-                session.expires
-            ) {
+        try {
 
-                webSessions.delete(
-                    id
-                );
-            }
+            await pool.query(
+                `
+                DELETE FROM login_sessions
+
+                WHERE
+                    expires_at IS NOT NULL
+
+                    AND expires_at < NOW()
+                `
+            );
+
+        } catch (error) {
+
+            console.error(
+                "SESSION CLEANUP ERROR:",
+                error
+            );
         }
 
     },
@@ -2099,22 +2720,77 @@ setInterval(
 );
 
 /* =========================================================
-   SERVER
+   START
 ========================================================= */
 
-app.listen(
-    PORT,
-    () => {
+async function startServer() {
 
-        console.log(
-            "LEXINX server running on port " +
-            PORT
+    try {
+
+        await initDatabase();
+
+        await pool.query(
+            "SELECT NOW()"
         );
 
-        console.log(
-            "PUBLIC URL: " +
-            PUBLIC_URL
+        app.listen(
+            PORT,
+            () => {
+
+                console.log(
+                    "LEXINX server running on port " +
+                    PORT
+                );
+
+                console.log(
+                    "PUBLIC URL: " +
+                    PUBLIC_URL
+                );
+
+                console.log(
+                    "PostgreSQL: CONNECTED"
+                );
+
+            }
         );
 
+    } catch (error) {
+
+        console.error(
+            "SERVER START ERROR:",
+            error
+        );
+
+        await pool.end();
+
+        process.exit(1);
+    }
+}
+
+startServer();
+
+/* =========================================================
+   PROCESS ERROR HANDLERS
+========================================================= */
+
+process.on(
+    "unhandledRejection",
+    error => {
+
+        console.error(
+            "UNHANDLED REJECTION:",
+            error
+        );
+    }
+);
+
+process.on(
+    "uncaughtException",
+    error => {
+
+        console.error(
+            "UNCAUGHT EXCEPTION:",
+            error
+        );
     }
 );
