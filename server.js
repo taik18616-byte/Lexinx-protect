@@ -10,18 +10,25 @@ const PORT = process.env.PORT || 3000;
 
 const TOKEN_TTL = 60 * 1000;
 
-const scripts = new Map();
-
 /* =========================================================
-   WEBSITE
+   PUBLIC WEBSITE
 ========================================================= */
 
-// Nếu index.html nằm cùng thư mục với server.js
-app.use(express.static(__dirname));
+const publicPath = path.join(__dirname, "public");
+
+// Cho phép truy cập các file trong public/
+// Ví dụ:
+// /
+// /style.css
+// /script.js
+// /images/...
+app.use(express.static(publicPath));
 
 /* =========================================================
    SCRIPTS
 ========================================================= */
+
+const scripts = new Map();
 
 scripts.set("58ceecd03f8a061d8af1d341", {
     source: `
@@ -126,7 +133,7 @@ function apiBlock(res, message = "LEXINX BLOCK") {
 }
 
 /* =========================================================
-   LUA ESCAPE
+   LUA STRING
 ========================================================= */
 
 function luaString(value) {
@@ -139,14 +146,18 @@ function luaString(value) {
 
 function randomLuaName() {
 
-    const chars = "abcdefghijklmnopqrstuvwxyz";
+    const chars =
+        "abcdefghijklmnopqrstuvwxyz";
 
     let result = "_";
 
     for (let i = 0; i < 8; i++) {
 
         result += chars[
-            crypto.randomInt(0, chars.length)
+            crypto.randomInt(
+                0,
+                chars.length
+            )
         ];
     }
 
@@ -164,7 +175,8 @@ function buildL2(session) {
     const data = randomLuaName();
     const endpoint = randomLuaName();
 
-    const nextToken = issueToken(session);
+    const nextToken =
+        issueToken(session);
 
     return `
 -- LEXINX L2
@@ -218,26 +230,31 @@ local function ${run}(p)
 
 end
 
-local ${vm} = ${run}(${data})
+local ${vm} =
+    ${run}(${data})
 
 local ${endpoint} =
     "https://Lexinx-protect.onrender.com/api/l3"
 
-local ok, response = pcall(function()
+local ok, response =
+    pcall(function()
 
-    return game:HttpGet(
-        ${endpoint}
-        .. "?session=" .. ${luaString(session.id)}
-        .. "&token=" .. ${luaString(nextToken)}
-    )
+        return game:HttpGet(
+            ${endpoint}
+            .. "?session="
+            .. ${luaString(session.id)}
+            .. "&token="
+            .. ${luaString(nextToken)}
+        )
 
-end)
+    end)
 
 if not ok then
     return
 end
 
-local fn = loadstring(response)
+local fn =
+    loadstring(response)
 
 if fn then
     return fn()
@@ -251,10 +268,14 @@ end
 
 function buildL3(session) {
 
-    const nextToken = issueToken(session);
+    const nextToken =
+        issueToken(session);
 
-    const data = randomLuaName();
-    const run = randomLuaName();
+    const data =
+        randomLuaName();
+
+    const run =
+        randomLuaName();
 
     return `
 -- LEXINX L3
@@ -296,7 +317,9 @@ local function ${run}(program)
         if instruction.opcode == "LOADK" then
 
             stack[#stack + 1] =
-                program.strings[instruction.arg]
+                program.strings[
+                    instruction.arg
+                ]
 
         end
 
@@ -306,24 +329,29 @@ local function ${run}(program)
 
 end
 
-local result = ${run}(${data})
+local result =
+    ${run}(${data})
 
 local url =
     "https://Lexinx-protect.onrender.com/api/l4"
-    .. "?session=" .. ${luaString(session.id)}
-    .. "&token=" .. ${luaString(nextToken)}
+    .. "?session="
+    .. ${luaString(session.id)}
+    .. "&token="
+    .. ${luaString(nextToken)}
 
-local ok, response = pcall(function()
+local ok, response =
+    pcall(function()
 
-    return game:HttpGet(url)
+        return game:HttpGet(url)
 
-end)
+    end)
 
 if not ok then
     return
 end
 
-local fn = loadstring(response)
+local fn =
+    loadstring(response)
 
 if fn then
     return fn()
@@ -337,10 +365,14 @@ end
 
 function buildL4(session) {
 
-    const nextToken = issueToken(session);
+    const nextToken =
+        issueToken(session);
 
-    const program = randomLuaName();
-    const run = randomLuaName();
+    const program =
+        randomLuaName();
+
+    const run =
+        randomLuaName();
 
     return `
 -- LEXINX L4 RUNTIME
@@ -382,7 +414,9 @@ local function ${run}(data)
         if instruction.opcode == "LOADK" then
 
             stack[#stack + 1] =
-                data.strings[instruction.arg]
+                data.strings[
+                    instruction.arg
+                ]
 
         end
 
@@ -392,24 +426,29 @@ local function ${run}(data)
 
 end
 
-local args = ${run}(${program})
+local args =
+    ${run}(${program})
 
 local url =
     "https://Lexinx-protect.onrender.com/api/l5"
-    .. "?session=" .. ${luaString(session.id)}
-    .. "&token=" .. ${luaString(nextToken)}
+    .. "?session="
+    .. ${luaString(session.id)}
+    .. "&token="
+    .. ${luaString(nextToken)}
 
-local success, result = pcall(function()
+local success, result =
+    pcall(function()
 
-    return game:HttpGet(url)
+        return game:HttpGet(url)
 
-end)
+    end)
 
 if not success then
     return
 end
 
-local execute = loadstring(result)
+local execute =
+    loadstring(result)
 
 if execute then
     return execute()
@@ -423,12 +462,16 @@ end
 
 function buildL5(session, source) {
 
-    const payload = Buffer
-        .from(source, "utf8")
-        .toString("base64");
+    const payload =
+        Buffer
+            .from(source, "utf8")
+            .toString("base64");
 
-    const fn = randomLuaName();
-    const data = randomLuaName();
+    const fn =
+        randomLuaName();
+
+    const data =
+        randomLuaName();
 
     return `
 -- LEXINX L5 RUNTIME
@@ -436,75 +479,87 @@ function buildL5(session, source) {
 local ${data} =
     "${payload}"
 
-local ${fn} = function(input)
+local ${fn} =
+    function(input)
 
-    local alphabet =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+        local alphabet =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
-    local decoded = {}
+        local decoded = {}
 
-    input = input:gsub(
-        "[^" .. alphabet .. "=]",
-        ""
-    )
+        input = input:gsub(
+            "[^" .. alphabet .. "=]",
+            ""
+        )
 
-    local bits = ""
+        local bits = ""
 
-    for i = 1, #input do
+        for i = 1, #input do
 
-        local c = input:sub(i, i)
+            local c =
+                input:sub(i, i)
 
-        if c ~= "=" then
+            if c ~= "=" then
 
-            local p =
-                alphabet:find(c, 1, true)
+                local p =
+                    alphabet:find(
+                        c,
+                        1,
+                        true
+                    )
 
-            if p then
+                if p then
 
-                p = p - 1
+                    p = p - 1
 
-                local b = ""
+                    local b = ""
 
-                for j = 6, 1, -1 do
+                    for j = 6, 1, -1 do
 
-                    b = b ..
-                        ((p % 2^j >= 2^(j-1))
-                        and "1"
-                        or "0")
+                        b = b ..
+                            (
+                                (p % 2^j >= 2^(j-1))
+                                and "1"
+                                or "0"
+                            )
+
+                    end
+
+                    bits =
+                        bits .. b
 
                 end
 
-                bits = bits .. b
-
             end
 
         end
 
-    end
+        for i = 1, #bits - 7, 8 do
 
-    for i = 1, #bits - 7, 8 do
+            local byte = 0
 
-        local byte = 0
+            for j = 0, 7 do
 
-        for j = 0, 7 do
+                if bits:sub(
+                    i + j,
+                    i + j
+                ) == "1" then
 
-            if bits:sub(i+j, i+j) == "1" then
+                    byte =
+                        byte + 2^(7-j)
 
-                byte =
-                    byte + 2^(7-j)
+                end
 
             end
 
+            decoded[#decoded + 1] =
+                string.char(byte)
+
         end
 
-        decoded[#decoded + 1] =
-            string.char(byte)
+        return table.concat(decoded)
 
     end
-
-    return table.concat(decoded)
-
-end
 
 local source =
     ${fn}(${data})
@@ -519,19 +574,22 @@ end
 }
 
 /* =========================================================
-   HOME PAGE
+   WEBSITE ROOT
 ========================================================= */
 
 app.get("/", (req, res) => {
 
     return res.sendFile(
-        path.join(__dirname, "index.html")
+        path.join(
+            publicPath,
+            "index.html"
+        )
     );
 
 });
 
 /* =========================================================
-   HEALTH
+   HEALTH CHECK
 ========================================================= */
 
 app.get("/health", (req, res) => {
@@ -541,6 +599,8 @@ app.get("/health", (req, res) => {
         ok: true,
 
         status: "online",
+
+        service: "LEXINX",
 
         uptime: process.uptime(),
 
@@ -556,9 +616,11 @@ app.get("/health", (req, res) => {
 
 app.get("/api/loader/:id", (req, res) => {
 
-    const id = req.params.id;
+    const id =
+        req.params.id;
 
-    const script = scripts.get(id);
+    const script =
+        scripts.get(id);
 
     if (!script) {
 
@@ -585,13 +647,15 @@ app.get("/api/loader/:id", (req, res) => {
 });
 
 /* =========================================================
-   L3
+   L3 ENDPOINT
 ========================================================= */
 
 app.get("/api/l3", (req, res) => {
 
     const session =
-        sessions.get(req.query.session);
+        sessions.get(
+            req.query.session
+        );
 
     if (!validSession(session)) {
 
@@ -637,13 +701,15 @@ app.get("/api/l3", (req, res) => {
 });
 
 /* =========================================================
-   L4
+   L4 ENDPOINT
 ========================================================= */
 
 app.get("/api/l4", (req, res) => {
 
     const session =
-        sessions.get(req.query.session);
+        sessions.get(
+            req.query.session
+        );
 
     if (!validSession(session)) {
 
@@ -689,13 +755,15 @@ app.get("/api/l4", (req, res) => {
 });
 
 /* =========================================================
-   L5
+   L5 ENDPOINT
 ========================================================= */
 
 app.get("/api/l5", (req, res) => {
 
     const session =
-        sessions.get(req.query.session);
+        sessions.get(
+            req.query.session
+        );
 
     if (!validSession(session)) {
 
@@ -767,7 +835,7 @@ app.get("/api/l5", (req, res) => {
 });
 
 /* =========================================================
-   UNKNOWN API
+   UNKNOWN API ROUTES
 ========================================================= */
 
 app.use("/api", (req, res) => {
@@ -780,55 +848,39 @@ app.use("/api", (req, res) => {
 });
 
 /* =========================================================
-   UNKNOWN WEB PAGE
+   UNKNOWN WEBSITE ROUTES
 ========================================================= */
 
 app.use((req, res) => {
 
-    return res.status(404).send(`
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<title>404</title>
-</head>
-
-<body style="
-    margin:0;
-    background:#050505;
-    color:white;
-    font-family:Arial;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    height:100vh;
-">
-
-<div style="text-align:center">
-    <h1>404</h1>
-    <p>Page not found</p>
-</div>
-
-</body>
-</html>
-    `);
+    return res
+        .status(404)
+        .sendFile(
+            path.join(
+                publicPath,
+                "index.html"
+            )
+        );
 
 });
 
 /* =========================================================
-   CLEAN SESSIONS
+   CLEAN EXPIRED SESSIONS
 ========================================================= */
 
 setInterval(() => {
 
-    const now = Date.now();
+    const now =
+        Date.now();
 
     for (
         const [id, session]
         of sessions
     ) {
 
-        if (now > session.expires) {
+        if (
+            now > session.expires
+        ) {
 
             sessions.delete(id);
 
@@ -842,10 +894,14 @@ setInterval(() => {
    SERVER
 ========================================================= */
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
 
     console.log(
         `LEXINX server running on port ${PORT}`
+    );
+
+    console.log(
+        `Public directory: ${publicPath}`
     );
 
 });
