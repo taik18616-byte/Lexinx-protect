@@ -7,23 +7,9 @@ app.use(express.json({ limit: "1mb" }));
 
 const PORT = process.env.PORT || 3000;
 
-/* =========================================================
-   CONFIG
-========================================================= */
-
 const TOKEN_TTL = 60 * 1000;
 
 const scripts = new Map();
-
-/*
-    Example:
-
-    scripts.set("58ceecd03f8a061d8af1d341", {
-        source: `
-            print("LEXINX PAYLOAD")
-        `
-    });
-*/
 
 scripts.set("58ceecd03f8a061d8af1d341", {
     source: `
@@ -36,17 +22,6 @@ print("LEXINX PAYLOAD RUNNING")
 ========================================================= */
 
 const sessions = new Map();
-
-/*
-session = {
-    id,
-    scriptId,
-    stage,
-    tokens: Set,
-    created,
-    expires
-}
-*/
 
 /* =========================================================
    RANDOM
@@ -121,134 +96,13 @@ function validSession(session) {
 }
 
 /* =========================================================
-   BLOCK PAGE
+   API BLOCK
 ========================================================= */
 
-function blockPage(res) {
-    res.status(403);
-
-    res.type("html");
-
-    return res.send(`
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-
-<title>LEXINX PROTECT</title>
-
-<style>
-
-html,body{
-    margin:0;
-    width:100%;
-    height:100%;
-    overflow:hidden;
-    background:#050505;
-    font-family:Arial,sans-serif;
-}
-
-body{
-    display:flex;
-    align-items:center;
-    justify-content:center;
-}
-
-.stars{
-    position:absolute;
-    inset:0;
-    background-image:
-        radial-gradient(#777 1px,transparent 1px),
-        radial-gradient(#444 1px,transparent 1px);
-    background-size:
-        37px 37px,
-        71px 71px;
-    background-position:
-        0 0,
-        25px 31px;
-    opacity:.28;
-}
-
-.box{
-    position:relative;
-    z-index:2;
-    width:min(520px,88%);
-    padding:55px 30px;
-    text-align:center;
-    border:1px solid #333;
-    border-radius:18px;
-    background:#111;
-    box-shadow:
-        0 0 50px rgba(255,255,255,.04);
-}
-
-.logo{
-    font-size:42px;
-    font-weight:900;
-    letter-spacing:8px;
-    animation:pulse 4s infinite alternate;
-}
-
-.sub{
-    margin-top:18px;
-    color:#777;
-    font-size:13px;
-    letter-spacing:3px;
-}
-
-@keyframes pulse{
-
-    0%{
-        color:#fff;
-    }
-
-    50%{
-        color:#777;
-    }
-
-    100%{
-        color:#fff;
-    }
-
-}
-
-</style>
-</head>
-
-<body>
-
-<div class="stars"></div>
-
-<div class="box">
-
-<div class="logo">
-LEXINX
-</div>
-
-<div class="sub">
-PROTECT
-</div>
-
-<div class="sub">
-ANTI-SKID
-</div>
-
-</div>
-
-</body>
-</html>
-`);
-}
-
-/* =========================================================
-   GENERIC API BLOCK
-========================================================= */
-
-function apiBlock(res) {
+function apiBlock(res, message = "LEXINX BLOCK") {
     return res.status(403).json({
         ok: false,
-        error: "LEXINX BLOCK"
+        error: message
     });
 }
 
@@ -261,7 +115,7 @@ function luaString(value) {
 }
 
 /* =========================================================
-   VM HELPERS
+   RANDOM LUA NAME
 ========================================================= */
 
 function randomLuaName() {
@@ -279,10 +133,10 @@ function randomLuaName() {
 }
 
 /* =========================================================
-   L2 VM
+   L2
 ========================================================= */
 
-function buildL2(session, token) {
+function buildL2(session) {
 
     const vm = randomLuaName();
     const run = randomLuaName();
@@ -292,14 +146,13 @@ function buildL2(session, token) {
     const nextToken = issueToken(session);
 
     return `
-
--- This script can't be opened, you skid guys
+-- LEXINX L2
 
 local ${data} = {
 
     strings = {
 
-        [0] = ${luaString("/api/l3")},
+        [0] = "/api/l3",
         [1] = ${luaString(nextToken)},
         [2] = ${luaString(session.id)}
 
@@ -366,12 +219,11 @@ local fn = loadstring(response)
 if fn then
     return fn()
 end
-
 `;
 }
 
 /* =========================================================
-   L3 VM
+   L3
 ========================================================= */
 
 function buildL3(session) {
@@ -382,7 +234,6 @@ function buildL3(session) {
     const run = randomLuaName();
 
     return `
-
 -- LEXINX L3
 
 local ${data} = {
@@ -454,12 +305,11 @@ local fn = loadstring(response)
 if fn then
     return fn()
 end
-
 `;
 }
 
 /* =========================================================
-   L4 RUNTIME
+   L4
 ========================================================= */
 
 function buildL4(session) {
@@ -470,7 +320,6 @@ function buildL4(session) {
     const run = randomLuaName();
 
     return `
-
 -- LEXINX L4 RUNTIME
 
 local ${program} = {
@@ -542,7 +391,6 @@ local execute = loadstring(result)
 if execute then
     return execute()
 end
-
 `;
 }
 
@@ -552,10 +400,6 @@ end
 
 function buildL5(session, source) {
 
-    /*
-        L5 is the only place where source is inserted.
-    */
-
     const payload = Buffer
         .from(source, "utf8")
         .toString("base64");
@@ -564,7 +408,6 @@ function buildL5(session, source) {
     const data = randomLuaName();
 
     return `
-
 -- LEXINX L5 RUNTIME
 
 local ${data} =
@@ -644,16 +487,157 @@ local execute =
     loadstring(source)
 
 if execute then
-
     return execute()
-
 end
-
 `;
 }
 
 /* =========================================================
-   L1
+   ROOT
+========================================================= */
+
+app.get("/", (req, res) => {
+
+    res.status(200).type("html").send(`
+<!doctype html>
+<html lang="en">
+
+<head>
+
+<meta charset="utf-8">
+
+<meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+>
+
+<title>LEXINX Protect</title>
+
+<style>
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+}
+
+body {
+
+    background: #050505;
+
+    color: #fff;
+
+    font-family:
+        Arial,
+        sans-serif;
+
+    display: flex;
+
+    align-items: center;
+
+    justify-content: center;
+}
+
+.box {
+
+    width: min(520px, 90%);
+
+    padding: 45px 30px;
+
+    text-align: center;
+
+    border: 1px solid #333;
+
+    border-radius: 16px;
+
+    background: #111;
+
+    box-shadow:
+        0 0 50px
+        rgba(255,255,255,.04);
+}
+
+.logo {
+
+    font-size: 38px;
+
+    font-weight: 900;
+
+    letter-spacing: 7px;
+}
+
+.status {
+
+    margin-top: 15px;
+
+    color: #777;
+
+    font-size: 14px;
+
+    letter-spacing: 2px;
+}
+
+.online {
+
+    margin-top: 25px;
+
+    color: #aaa;
+
+    font-size: 13px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="box">
+
+    <div class="logo">
+        LEXINX
+    </div>
+
+    <div class="status">
+        PROTECT
+    </div>
+
+    <div class="online">
+        API ONLINE
+    </div>
+
+</div>
+
+</body>
+
+</html>
+    `);
+
+});
+
+/* =========================================================
+   HEALTH CHECK
+========================================================= */
+
+app.get("/health", (req, res) => {
+
+    return res.status(200).json({
+        ok: true,
+        status: "online",
+        service: "LEXINX",
+        uptime: process.uptime(),
+        time: new Date().toISOString()
+    });
+
+});
+
+/* =========================================================
+   L1 LOADER
 ========================================================= */
 
 app.get("/api/loader/:id", (req, res) => {
@@ -663,27 +647,29 @@ app.get("/api/loader/:id", (req, res) => {
     const script = scripts.get(id);
 
     if (!script) {
-        return apiBlock(res);
+        return apiBlock(
+            res,
+            "SCRIPT NOT FOUND"
+        );
     }
 
-    const session = createSession(id);
-
-    const token = issueToken(session);
+    const session =
+        createSession(id);
 
     session.stage = 2;
 
-    const code = buildL2(
-        session,
-        token
-    );
+    const code =
+        buildL2(session);
 
-    res.type("text/plain");
+    return res
+        .status(200)
+        .type("text/plain")
+        .send(code);
 
-    return res.send(code);
 });
 
 /* =========================================================
-   L3 ENDPOINT
+   L3
 ========================================================= */
 
 app.get("/api/l3", (req, res) => {
@@ -692,11 +678,21 @@ app.get("/api/l3", (req, res) => {
         sessions.get(req.query.session);
 
     if (!validSession(session)) {
-        return apiBlock(res);
+
+        return apiBlock(
+            res,
+            "INVALID SESSION"
+        );
+
     }
 
     if (session.stage !== 2) {
-        return apiBlock(res);
+
+        return apiBlock(
+            res,
+            "INVALID STAGE"
+        );
+
     }
 
     if (
@@ -705,18 +701,27 @@ app.get("/api/l3", (req, res) => {
             req.query.token
         )
     ) {
-        return apiBlock(res);
+
+        return apiBlock(
+            res,
+            "INVALID TOKEN"
+        );
+
     }
 
     session.stage = 3;
 
     return res
+        .status(200)
         .type("text/plain")
-        .send(buildL3(session));
+        .send(
+            buildL3(session)
+        );
+
 });
 
 /* =========================================================
-   L4 ENDPOINT
+   L4
 ========================================================= */
 
 app.get("/api/l4", (req, res) => {
@@ -725,11 +730,21 @@ app.get("/api/l4", (req, res) => {
         sessions.get(req.query.session);
 
     if (!validSession(session)) {
-        return apiBlock(res);
+
+        return apiBlock(
+            res,
+            "INVALID SESSION"
+        );
+
     }
 
     if (session.stage !== 3) {
-        return apiBlock(res);
+
+        return apiBlock(
+            res,
+            "INVALID STAGE"
+        );
+
     }
 
     if (
@@ -738,18 +753,27 @@ app.get("/api/l4", (req, res) => {
             req.query.token
         )
     ) {
-        return apiBlock(res);
+
+        return apiBlock(
+            res,
+            "INVALID TOKEN"
+        );
+
     }
 
     session.stage = 4;
 
     return res
+        .status(200)
         .type("text/plain")
-        .send(buildL4(session));
+        .send(
+            buildL4(session)
+        );
+
 });
 
 /* =========================================================
-   L5 ENDPOINT
+   L5
 ========================================================= */
 
 app.get("/api/l5", (req, res) => {
@@ -758,11 +782,21 @@ app.get("/api/l5", (req, res) => {
         sessions.get(req.query.session);
 
     if (!validSession(session)) {
-        return apiBlock(res);
+
+        return apiBlock(
+            res,
+            "INVALID SESSION"
+        );
+
     }
 
     if (session.stage !== 4) {
-        return apiBlock(res);
+
+        return apiBlock(
+            res,
+            "INVALID STAGE"
+        );
+
     }
 
     if (
@@ -771,22 +805,31 @@ app.get("/api/l5", (req, res) => {
             req.query.token
         )
     ) {
-        return apiBlock(res);
+
+        return apiBlock(
+            res,
+            "INVALID TOKEN"
+        );
+
     }
 
     const script =
-        scripts.get(session.scriptId);
+        scripts.get(
+            session.scriptId
+        );
 
     if (!script) {
-        sessions.delete(session.id);
-        return apiBlock(res);
-    }
 
-    /*
-        Final stage.
-        Only here does the server expose
-        the actual payload.
-    */
+        sessions.delete(
+            session.id
+        );
+
+        return apiBlock(
+            res,
+            "SCRIPT NOT FOUND"
+        );
+
+    }
 
     session.stage = 5;
 
@@ -796,42 +839,74 @@ app.get("/api/l5", (req, res) => {
             script.source
         );
 
-    /*
-        Destroy session after final delivery.
-    */
-
-    sessions.delete(session.id);
+    sessions.delete(
+        session.id
+    );
 
     return res
+        .status(200)
         .type("text/plain")
         .send(output);
+
 });
 
 /* =========================================================
-   DIRECT ENDPOINT PROTECTION
+   UNKNOWN API ROUTES
 ========================================================= */
 
 app.use("/api", (req, res) => {
-    return apiBlock(res);
-});
 
-/* =========================================================
-   ROOT
-========================================================= */
-
-app.get("/", (req, res) => {
-
-    return blockPage(res);
+    return apiBlock(
+        res,
+        "API ROUTE NOT FOUND"
+    );
 
 });
 
 /* =========================================================
-   UNKNOWN ROUTES
+   UNKNOWN WEB ROUTES
 ========================================================= */
 
 app.use((req, res) => {
 
-    return blockPage(res);
+    res.status(404).type("html").send(`
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>404 - LEXINX</title>
+<style>
+body {
+    margin: 0;
+    background: #050505;
+    color: white;
+    font-family: Arial, sans-serif;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    text-align: center;
+}
+h1 {
+    font-size: 50px;
+    margin: 0;
+}
+p {
+    color: #777;
+}
+</style>
+</head>
+
+<body>
+
+<div>
+    <h1>404</h1>
+    <p>LEXINX — Page not found</p>
+</div>
+
+</body>
+</html>
+    `);
 
 });
 
@@ -843,7 +918,10 @@ setInterval(() => {
 
     const now = Date.now();
 
-    for (const [id, session] of sessions) {
+    for (
+        const [id, session]
+        of sessions
+    ) {
 
         if (now > session.expires) {
 
