@@ -5,9 +5,16 @@ const path = require("path");
 const app = express();
 
 const PORT = process.env.PORT || 3000;
+
 const PUBLIC_URL =
     process.env.PUBLIC_URL ||
     "https://lexinx-protect.onrender.com";
+
+const WEB_SESSION_TTL =
+    7 * 24 * 60 * 60 * 1000;
+
+const LOADER_SESSION_TTL =
+    60 * 1000;
 
 app.set("trust proxy", 1);
 
@@ -15,7 +22,7 @@ app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false }));
 
 /* =========================================================
-   PUBLIC
+   STATIC WEB
 ========================================================= */
 
 app.use(
@@ -25,22 +32,12 @@ app.use(
 );
 
 /* =========================================================
-   CONFIG
-========================================================= */
-
-const WEB_SESSION_TTL =
-    7 * 24 * 60 * 60 * 1000;
-
-const LOADER_SESSION_TTL =
-    60 * 1000;
-
-/* =========================================================
    STORAGE
 ========================================================= */
 
 const users = new Map();
-const webSessions = new Map();
 const scripts = new Map();
+const webSessions = new Map();
 const loaderSessions = new Map();
 
 /* =========================================================
@@ -48,66 +45,54 @@ const loaderSessions = new Map();
 ========================================================= */
 
 function randomHex(bytes = 32) {
+
     return crypto
         .randomBytes(bytes)
         .toString("hex");
+
 }
 
 function hashPassword(password) {
+
     return crypto
         .createHash("sha256")
         .update(password)
         .digest("hex");
+
 }
 
 function luaString(value) {
+
     return JSON.stringify(
         String(value)
     );
+
 }
 
 function toHex(value) {
+
     return Buffer
         .from(
             String(value),
             "utf8"
         )
         .toString("hex");
-}
 
-function randomLuaName() {
-
-    const chars =
-        "abcdefghijklmnopqrstuvwxyz";
-
-    let result = "_";
-
-    for (let i = 0; i < 10; i++) {
-
-        result +=
-            chars[
-                crypto.randomInt(
-                    0,
-                    chars.length
-                )
-            ];
-    }
-
-    return result;
 }
 
 function apiError(
     res,
-    code,
+    status,
     message
 ) {
 
     return res
-        .status(code)
+        .status(status)
         .json({
             ok: false,
             error: message
         });
+
 }
 
 /* =========================================================
@@ -119,31 +104,31 @@ function getCookie(
     name
 ) {
 
-    const header =
+    const cookies =
         req.headers.cookie || "";
 
     for (
-        const part
-        of header.split(";")
+        const item
+        of cookies.split(";")
     ) {
 
-        const item =
-            part.trim();
+        const part =
+            item.trim();
 
         const index =
-            item.indexOf("=");
+            part.indexOf("=");
 
         if (index === -1)
             continue;
 
         const key =
-            item.slice(
+            part.slice(
                 0,
                 index
             );
 
         const value =
-            item.slice(
+            part.slice(
                 index + 1
             );
 
@@ -152,14 +137,17 @@ function getCookie(
             return decodeURIComponent(
                 value
             );
+
         }
+
     }
 
     return null;
+
 }
 
 /* =========================================================
-   WEB SESSION
+   WEB AUTH
 ========================================================= */
 
 function createWebSession(
@@ -182,6 +170,7 @@ function createWebSession(
     );
 
     return id;
+
 }
 
 function getWebAuth(req) {
@@ -209,6 +198,7 @@ function getWebAuth(req) {
         webSessions.delete(sid);
 
         return null;
+
     }
 
     const user =
@@ -225,6 +215,7 @@ function getWebAuth(req) {
             session.username,
         user
     };
+
 }
 
 function requireAuth(
@@ -243,11 +234,13 @@ function requireAuth(
             401,
             "Authentication required."
         );
+
     }
 
     req.auth = auth;
 
     next();
+
 }
 
 /* =========================================================
@@ -277,6 +270,7 @@ app.post(
                 400,
                 "Username is required."
             );
+
         }
 
         if (
@@ -288,6 +282,7 @@ app.post(
                 400,
                 "Username must contain at least 3 characters."
             );
+
         }
 
         if (
@@ -299,11 +294,13 @@ app.post(
                 400,
                 "Username is too long."
             );
+
         }
 
         if (
-            !/^[a-zA-Z0-9_]+$/
-                .test(username)
+            !/^[a-zA-Z0-9_]+$/.test(
+                username
+            )
         ) {
 
             return apiError(
@@ -311,6 +308,7 @@ app.post(
                 400,
                 "Username may only contain letters, numbers and underscore."
             );
+
         }
 
         if (
@@ -322,6 +320,7 @@ app.post(
                 400,
                 "Password must contain at least 6 characters."
             );
+
         }
 
         const key =
@@ -336,6 +335,7 @@ app.post(
                 409,
                 "Username already exists."
             );
+
         }
 
         users.set(
@@ -373,6 +373,7 @@ app.post(
             url:
                 PUBLIC_URL + "/"
         });
+
     }
 );
 
@@ -409,6 +410,7 @@ app.post(
                 401,
                 "Invalid username or password."
             );
+
         }
 
         if (
@@ -421,6 +423,7 @@ app.post(
                 401,
                 "Invalid username or password."
             );
+
         }
 
         const sid =
@@ -446,6 +449,7 @@ app.post(
             url:
                 PUBLIC_URL + "/"
         });
+
     }
 );
 
@@ -467,6 +471,7 @@ app.get(
                 401,
                 "Not authenticated."
             );
+
         }
 
         return res.json({
@@ -476,6 +481,7 @@ app.get(
             url:
                 PUBLIC_URL + "/"
         });
+
     }
 );
 
@@ -494,7 +500,11 @@ app.post(
             );
 
         if (sid) {
-            webSessions.delete(sid);
+
+            webSessions.delete(
+                sid
+            );
+
         }
 
         res.clearCookie(
@@ -507,6 +517,7 @@ app.post(
         return res.json({
             ok: true
         });
+
     }
 );
 
@@ -540,28 +551,16 @@ app.post(
                 400,
                 "Script source cannot be empty."
             );
-        }
 
-        if (
-            Buffer.byteLength(
-                source,
-                "utf8"
-            ) >
-            1024 * 1024
-        ) {
-
-            return apiError(
-                res,
-                400,
-                "Script is too large."
-            );
         }
 
         let id;
 
         do {
+
             id =
                 randomHex(12);
+
         } while (
             scripts.has(id)
         );
@@ -591,6 +590,7 @@ app.post(
             id,
             loader
         });
+
     }
 );
 
@@ -618,6 +618,7 @@ app.get(
             }
 
             result.push({
+
                 id:
                     script.id,
 
@@ -632,7 +633,9 @@ app.get(
 
                 updated:
                     script.updated
+
             });
+
         }
 
         result.sort(
@@ -645,6 +648,7 @@ app.get(
             ok: true,
             scripts: result
         });
+
     }
 );
 
@@ -669,6 +673,7 @@ app.get(
                 404,
                 "Script not found."
             );
+
         }
 
         if (
@@ -681,19 +686,28 @@ app.get(
                 403,
                 "Access denied."
             );
+
         }
 
         return res.json({
+
             ok: true,
+
             script: {
+
                 id:
                     script.id,
+
                 name:
                     script.name,
+
                 source:
                     script.source
+
             }
+
         });
+
     }
 );
 
@@ -718,6 +732,7 @@ app.put(
                 404,
                 "Script not found."
             );
+
         }
 
         if (
@@ -730,6 +745,7 @@ app.put(
                 403,
                 "Access denied."
             );
+
         }
 
         if (
@@ -743,6 +759,7 @@ app.put(
                     .slice(0, 100)
                     ||
                     "Untitled Script";
+
         }
 
         if (
@@ -759,10 +776,12 @@ app.put(
                     400,
                     "Script source cannot be empty."
                 );
+
             }
 
             script.source =
                 req.body.source;
+
         }
 
         script.updated =
@@ -771,6 +790,7 @@ app.put(
         return res.json({
             ok: true
         });
+
     }
 );
 
@@ -795,6 +815,7 @@ app.delete(
                 404,
                 "Script not found."
             );
+
         }
 
         if (
@@ -807,6 +828,7 @@ app.delete(
                 403,
                 "Access denied."
             );
+
         }
 
         scripts.delete(
@@ -816,6 +838,7 @@ app.delete(
         return res.json({
             ok: true
         });
+
     }
 );
 
@@ -847,6 +870,7 @@ function createLoaderSession(
         expires:
             Date.now() +
             LOADER_SESSION_TTL
+
     };
 
     loaderSessions.set(
@@ -855,6 +879,7 @@ function createLoaderSession(
     );
 
     return session;
+
 }
 
 function issueToken(
@@ -869,6 +894,7 @@ function issueToken(
     );
 
     return token;
+
 }
 
 function consumeToken(
@@ -890,6 +916,7 @@ function consumeToken(
     );
 
     return true;
+
 }
 
 function validLoaderSession(
@@ -909,9 +936,11 @@ function validLoaderSession(
         );
 
         return false;
+
     }
 
     return true;
+
 }
 
 /* =========================================================
@@ -997,10 +1026,11 @@ ANTI-SKID
 
 </body>
 </html>`);
+
 }
 
 /* =========================================================
-   HEX DECODER LUA
+   LUA HEX DECODER
 ========================================================= */
 
 function luaHexDecoder() {
@@ -1029,10 +1059,423 @@ local function decodeHex(s)
 
 end
 `;
+
 }
 
 /* =========================================================
-   L5
+   WRAPPER
+========================================================= */
+
+function buildWrapper(
+    session
+) {
+
+    const token =
+        issueToken(
+            session
+        );
+
+    const endpoint =
+        toHex(
+            PUBLIC_URL
+        );
+
+    const endpointVar =
+        randomLuaName();
+
+    const vm =
+        randomLuaName();
+
+    const run =
+        randomLuaName();
+
+    return `
+
+-- LEXINX LOADER WRAPPER
+
+local ${endpointVar} =
+    "${endpoint}"
+
+${luaHexDecoder()}
+
+local ${vm} = {
+
+    endpoint =
+        decodeHex(
+            ${endpointVar}
+        ),
+
+    session =
+        ${luaString(
+            session.id
+        )},
+
+    token =
+        ${luaString(
+            token
+        )}
+
+}
+
+local function ${run}(state)
+
+    local url =
+        state.endpoint
+        .. "/api/l3"
+        .. "?session="
+        .. state.session
+        .. "&token="
+        .. state.token
+
+    local ok, response =
+        pcall(function()
+
+            return game:HttpGet(
+                url
+            )
+
+        end)
+
+    if not ok then
+        return
+    end
+
+    if type(response)
+        ~= "string"
+    then
+        return
+    end
+
+    local fn =
+        loadstring(
+            response
+        )
+
+    if fn then
+        return fn()
+    end
+
+end
+
+return ${run}(
+    ${vm}
+)
+
+`;
+
+}
+
+/* =========================================================
+   L2
+========================================================= */
+
+function buildL2(
+    session
+) {
+
+    const token =
+        issueToken(
+            session
+        );
+
+    const endpoint =
+        toHex(
+            PUBLIC_URL
+        );
+
+    const endpointVar =
+        randomLuaName();
+
+    const data =
+        randomLuaName();
+
+    const run =
+        randomLuaName();
+
+    return `
+
+-- LEXINX L2
+
+local ${endpointVar} =
+    "${endpoint}"
+
+${luaHexDecoder()}
+
+local ${data} = {
+
+    endpoint =
+        decodeHex(
+            ${endpointVar}
+        ),
+
+    session =
+        ${luaString(
+            session.id
+        )},
+
+    token =
+        ${luaString(
+            token
+        )}
+
+}
+
+local function ${run}(p)
+
+    local url =
+        p.endpoint
+        .. "/api/l4"
+        .. "?session="
+        .. p.session
+        .. "&token="
+        .. p.token
+
+    local ok, response =
+        pcall(function()
+
+            return game:HttpGet(
+                url
+            )
+
+        end)
+
+    if not ok then
+        return
+    end
+
+    local fn =
+        loadstring(
+            response
+        )
+
+    if fn then
+        return fn()
+    end
+
+end
+
+return ${run}(
+    ${data}
+)
+
+`;
+
+}
+
+/* =========================================================
+   L3 / PACKED PROTOTYPE
+========================================================= */
+
+function buildL3(
+    session
+) {
+
+    const token =
+        issueToken(
+            session
+        );
+
+    const endpoint =
+        toHex(
+            PUBLIC_URL
+        );
+
+    const endpointVar =
+        randomLuaName();
+
+    const prototype =
+        randomLuaName();
+
+    const execute =
+        randomLuaName();
+
+    return `
+
+-- LEXINX L3
+-- PACKED PROTOTYPE
+
+local ${endpointVar} =
+    "${endpoint}"
+
+${luaHexDecoder()}
+
+local ${prototype} = {
+
+    endpoint =
+        decodeHex(
+            ${endpointVar}
+        ),
+
+    session =
+        ${luaString(
+            session.id
+        )},
+
+    token =
+        ${luaString(
+            token
+        )},
+
+    opcode = {
+
+        LOAD = 1,
+        REQUEST = 2,
+        EXEC = 3
+
+    }
+
+}
+
+local function ${execute}(p)
+
+    local url =
+        p.endpoint
+        .. "/api/l5"
+        .. "?session="
+        .. p.session
+        .. "&token="
+        .. p.token
+
+    local ok, response =
+        pcall(function()
+
+            return game:HttpGet(
+                url
+            )
+
+        end)
+
+    if not ok then
+        return
+    end
+
+    local fn =
+        loadstring(
+            response
+        )
+
+    if fn then
+        return fn()
+    end
+
+end
+
+return ${execute}(
+    ${prototype}
+)
+
+`;
+
+}
+
+/* =========================================================
+   L4 RUNTIME
+========================================================= */
+
+function buildL4(
+    session
+) {
+
+    const token =
+        issueToken(
+            session
+        );
+
+    const endpoint =
+        toHex(
+            PUBLIC_URL
+        );
+
+    const endpointVar =
+        randomLuaName();
+
+    const runtime =
+        randomLuaName();
+
+    const bootstrap =
+        randomLuaName();
+
+    return `
+
+-- LEXINX L4
+-- RUNTIME BOOTSTRAP
+
+local ${endpointVar} =
+    "${endpoint}"
+
+${luaHexDecoder()}
+
+local ${runtime} = {
+
+    endpoint =
+        decodeHex(
+            ${endpointVar}
+        ),
+
+    session =
+        ${luaString(
+            session.id
+        )},
+
+    token =
+        ${luaString(
+            token
+        )},
+
+    stage = 4
+
+}
+
+local function ${bootstrap}(state)
+
+    local url =
+        state.endpoint
+        .. "/api/l5/final"
+        .. "?session="
+        .. state.session
+        .. "&token="
+        .. state.token
+
+    local ok, response =
+        pcall(function()
+
+            return game:HttpGet(
+                url
+            )
+
+        end)
+
+    if not ok then
+        return
+    end
+
+    if type(response)
+        ~= "string"
+    then
+        return
+    end
+
+    local fn =
+        loadstring(
+            response
+        )
+
+    if fn then
+        return fn()
+    end
+
+end
+
+return ${bootstrap}(
+    ${runtime}
+)
+
+`;
+
+}
+
+/* =========================================================
+   L5 FINAL SOURCE
 ========================================================= */
 
 function buildL5(
@@ -1063,7 +1506,9 @@ function buildL5(
 -- FINAL RUNTIME
 
 local ${data} =
-    ${luaString(encoded)}
+    ${luaString(
+        encoded
+    )}
 
 local function ${decode}(input)
 
@@ -1072,9 +1517,9 @@ local function ${decode}(input)
 
     input =
         input:gsub(
-            "[^" ..
-            alphabet ..
-            "=]",
+            "[^"
+            .. alphabet
+            .. "=]",
             ""
         )
 
@@ -1083,7 +1528,10 @@ local function ${decode}(input)
     for i = 1, #input do
 
         local c =
-            input:sub(i, i)
+            input:sub(
+                i,
+                i
+            )
 
         if c ~= "=" then
 
@@ -1104,11 +1552,15 @@ local function ${decode}(input)
                         p % 2^j >=
                         2^(j - 1)
                     then
+
                         bits[#bits + 1] =
                             "1"
+
                     else
+
                         bits[#bits + 1] =
                             "0"
+
                     end
 
                 end
@@ -1123,14 +1575,16 @@ local function ${decode}(input)
 
     for i = 1,
         #bits - 7,
-        8 do
+        8
+    do
 
         local byte = 0
 
         for j = 0, 7 do
 
-            if bits[i + j] ==
-                "1"
+            if
+                bits[i + j]
+                == "1"
             then
 
                 byte =
@@ -1160,7 +1614,9 @@ local function ${execute}()
         )
 
     local fn =
-        loadstring(source)
+        loadstring(
+            source
+        )
 
     if fn then
         return fn()
@@ -1171,388 +1627,11 @@ end
 return ${execute}()
 
 `;
+
 }
 
 /* =========================================================
-   L4
-========================================================= */
-
-function buildL4(
-    session
-) {
-
-    const token =
-        issueToken(
-            session
-        );
-
-    const endpoint =
-        toHex(
-            PUBLIC_URL
-        );
-
-    const h =
-        randomLuaName();
-
-    const decode =
-        randomLuaName();
-
-    const runtime =
-        randomLuaName();
-
-    const bootstrap =
-        randomLuaName();
-
-    return `
-
--- LEXINX L4
--- RUNTIME BOOTSTRAP
-
-local ${h} =
-    "${endpoint}"
-
-${luaHexDecoder()}
-
-local ${runtime} = {
-
-    endpoint =
-        decodeHex(${h}),
-
-    session =
-        ${luaString(session.id)},
-
-    token =
-        ${luaString(token)},
-
-    stage = 4
-
-}
-
-local function ${bootstrap}(state)
-
-    local url =
-        state.endpoint
-        .. "/api/l5/final"
-        .. "?session="
-        .. state.session
-        .. "&token="
-        .. state.token
-
-    local ok, response =
-        pcall(function()
-
-            return game:HttpGet(
-                url
-            )
-
-        end)
-
-    if not ok then
-        return
-    end
-
-    local fn =
-        loadstring(response)
-
-    if fn then
-        return fn()
-    end
-
-end
-
-return ${bootstrap}(
-    ${runtime}
-)
-
-`;
-}
-
-/* =========================================================
-   L3
-========================================================= */
-
-function buildL3(
-    session
-) {
-
-    const token =
-        issueToken(
-            session
-        );
-
-    const endpoint =
-        toHex(
-            PUBLIC_URL
-        );
-
-    const h =
-        randomLuaName();
-
-    const prototype =
-        randomLuaName();
-
-    const execute =
-        randomLuaName();
-
-    return `
-
--- LEXINX L3
--- PACKED PROTOTYPE
-
-local ${h} =
-    "${endpoint}"
-
-${luaHexDecoder()}
-
-local ${prototype} = {
-
-    opcode = {
-
-        LOAD = 1,
-        REQUEST = 2,
-        EXEC = 3
-
-    },
-
-    endpoint =
-        decodeHex(${h}),
-
-    session =
-        ${luaString(session.id)},
-
-    token =
-        ${luaString(token)}
-
-}
-
-local function ${execute}(p)
-
-    local url =
-        p.endpoint
-        .. "/api/l5"
-        .. "?session="
-        .. p.session
-        .. "&token="
-        .. p.token
-
-    local ok, response =
-        pcall(function()
-
-            return game:HttpGet(
-                url
-            )
-
-        end)
-
-    if not ok then
-        return
-    end
-
-    local fn =
-        loadstring(response)
-
-    if fn then
-        return fn()
-    end
-
-end
-
-return ${execute}(
-    ${prototype}
-)
-
-`;
-}
-
-/* =========================================================
-   L2
-========================================================= */
-
-function buildL2(
-    session
-) {
-
-    const token =
-        issueToken(
-            session
-        );
-
-    const endpoint =
-        toHex(
-            PUBLIC_URL
-        );
-
-    const h =
-        randomLuaName();
-
-    const data =
-        randomLuaName();
-
-    const run =
-        randomLuaName();
-
-    return `
-
--- LEXINX L2
-
-local ${h} =
-    "${endpoint}"
-
-${luaHexDecoder()}
-
-local ${data} = {
-
-    endpoint =
-        decodeHex(${h}),
-
-    session =
-        ${luaString(session.id)},
-
-    token =
-        ${luaString(token)}
-
-}
-
-local function ${run}(p)
-
-    local url =
-        p.endpoint
-        .. "/api/l4"
-        .. "?session="
-        .. p.session
-        .. "&token="
-        .. p.token
-
-    local ok, response =
-        pcall(function()
-
-            return game:HttpGet(
-                url
-            )
-
-        end)
-
-    if not ok then
-        return
-    end
-
-    local fn =
-        loadstring(response)
-
-    if fn then
-        return fn()
-    end
-
-end
-
-return ${run}(
-    ${data}
-)
-
-`;
-}
-
-/* =========================================================
-   WRAPPER VM
-========================================================= */
-
-function buildWrapper(
-    session
-) {
-
-    const token =
-        issueToken(
-            session
-        );
-
-    const endpoint =
-        toHex(
-            PUBLIC_URL
-        );
-
-    const h =
-        randomLuaName();
-
-    const vm =
-        randomLuaName();
-
-    const run =
-        randomLuaName();
-
-    return `
-
--- LEXINX LOADER WRAPPER
--- VM BOOTSTRAP
-
-local ${h} =
-    "${endpoint}"
-
-${luaHexDecoder()}
-
-local ${vm} = {
-
-    endpoint =
-        decodeHex(${h}),
-
-    session =
-        ${luaString(session.id)},
-
-    token =
-        ${luaString(token)},
-
-    stage = 0
-
-}
-
-local function ${run}(state)
-
-    if not state then
-        return
-    end
-
-    local url =
-        state.endpoint
-        .. "/api/l3"
-        .. "?session="
-        .. state.session
-        .. "&token="
-        .. state.token
-
-    local ok, response =
-        pcall(function()
-
-            return game:HttpGet(
-                url
-            )
-
-        end)
-
-    if not ok then
-        return
-    end
-
-    if type(response) ~= "string" then
-        return
-    end
-
-    local fn =
-        loadstring(response)
-
-    if fn then
-        return fn()
-    end
-
-end
-
-return ${run}(
-    ${vm}
-)
-
-`;
-}
-
-/* =========================================================
-   LOADER
+   L1 / LOADER
 ========================================================= */
 
 app.get(
@@ -1565,28 +1644,20 @@ app.get(
             );
 
         if (!script) {
-            return blockPage(res);
+
+            return blockPage(
+                res
+            );
+
         }
 
         /*
-         * Browser -> PROTECT PAGE
-         * Roblox/executor -> loader wrapper
+         * Browser access gets the
+         * LEXINX PROTECT page.
+         *
+         * The actual wrapper itself
+         * is generated here.
          */
-
-        const ua =
-            String(
-                req.headers[
-                    "user-agent"
-                ] || ""
-            ).toLowerCase();
-
-        const isBrowser =
-            ua.includes("mozilla") &&
-            !ua.includes("roblox");
-
-        if (isBrowser) {
-            return blockPage(res);
-        }
 
         const session =
             createLoaderSession(
@@ -1600,6 +1671,7 @@ app.get(
                     session
                 )
             );
+
     }
 );
 
@@ -1627,6 +1699,7 @@ app.get(
                 403,
                 "LEXINX BLOCK"
             );
+
         }
 
         if (
@@ -1638,6 +1711,7 @@ app.get(
                 403,
                 "LEXINX BLOCK"
             );
+
         }
 
         if (
@@ -1652,6 +1726,7 @@ app.get(
                 403,
                 "LEXINX BLOCK"
             );
+
         }
 
         session.stage = 1;
@@ -1663,6 +1738,7 @@ app.get(
                     session
                 )
             );
+
     }
 );
 
@@ -1690,6 +1766,7 @@ app.get(
                 403,
                 "LEXINX BLOCK"
             );
+
         }
 
         if (
@@ -1701,6 +1778,7 @@ app.get(
                 403,
                 "LEXINX BLOCK"
             );
+
         }
 
         if (
@@ -1715,6 +1793,7 @@ app.get(
                 403,
                 "LEXINX BLOCK"
             );
+
         }
 
         session.stage = 2;
@@ -1726,6 +1805,7 @@ app.get(
                     session
                 )
             );
+
     }
 );
 
@@ -1753,6 +1833,7 @@ app.get(
                 403,
                 "LEXINX BLOCK"
             );
+
         }
 
         if (
@@ -1764,6 +1845,7 @@ app.get(
                 403,
                 "LEXINX BLOCK"
             );
+
         }
 
         if (
@@ -1778,6 +1860,7 @@ app.get(
                 403,
                 "LEXINX BLOCK"
             );
+
         }
 
         session.stage = 3;
@@ -1789,11 +1872,12 @@ app.get(
                     session
                 )
             );
+
     }
 );
 
 /* =========================================================
-   FINAL
+   FINAL L5
 ========================================================= */
 
 app.get(
@@ -1816,10 +1900,21 @@ app.get(
                 403,
                 "LEXINX BLOCK"
             );
+
         }
 
+        /*
+         * IMPORTANT:
+         *
+         * /api/l5 changes stage
+         * from 2 -> 3.
+         *
+         * Therefore final must
+         * accept stage 3.
+         */
+
         if (
-            session.stage !== 4
+            session.stage !== 3
         ) {
 
             return apiError(
@@ -1827,6 +1922,7 @@ app.get(
                 403,
                 "LEXINX BLOCK"
             );
+
         }
 
         if (
@@ -1841,6 +1937,7 @@ app.get(
                 403,
                 "LEXINX BLOCK"
             );
+
         }
 
         const script =
@@ -1859,7 +1956,10 @@ app.get(
                 404,
                 "Script not found."
             );
+
         }
+
+        session.stage = 4;
 
         const output =
             buildL5(
@@ -1874,6 +1974,7 @@ app.get(
         return res
             .type("text/plain")
             .send(output);
+
     }
 );
 
@@ -1890,11 +1991,12 @@ app.use(
             404,
             "API ROUTE NOT FOUND"
         );
+
     }
 );
 
 /* =========================================================
-   ROOT
+   INDEX
 ========================================================= */
 
 app.get(
@@ -1908,6 +2010,7 @@ app.get(
                 "index.html"
             )
         );
+
     }
 );
 
@@ -1923,6 +2026,7 @@ app.use(
             .send(
                 "Page not found."
             );
+
     }
 );
 
@@ -1952,7 +2056,9 @@ setInterval(
                 loaderSessions.delete(
                     id
                 );
+
             }
+
         }
 
         for (
@@ -1971,7 +2077,9 @@ setInterval(
                 webSessions.delete(
                     id
                 );
+
             }
+
         }
 
     },
