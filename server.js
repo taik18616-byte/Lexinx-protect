@@ -1,8 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
 const path = require("path");
-const fs = require("fs");
-const cookieParser = require("cookie-parser");
 const { Pool } = require("pg");
 
 const app = express();
@@ -35,10 +33,9 @@ if (!process.env.DATABASE_URL) {
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
 
-    ssl:
-        process.env.NODE_ENV === "production"
-            ? { rejectUnauthorized: false }
-            : false,
+    ssl: {
+        rejectUnauthorized: false
+    },
 
     max: 10,
 
@@ -47,47 +44,15 @@ const pool = new Pool({
     connectionTimeoutMillis: 10000
 });
 
-/* =========================================================
-   DATABASE INIT
-========================================================= */
-
-async function initDatabase() {
-
-    const schemaPath =
-        path.join(
-            __dirname,
-            "database",
-            "schema.sql"
-        );
-
-    if (!fs.existsSync(schemaPath)) {
-
-        throw new Error(
-            "database/schema.sql not found."
-        );
-    }
-
-    const schema =
-        fs.readFileSync(
-            schemaPath,
-            "utf8"
-        );
-
-    await pool.query(schema);
-
-    console.log(
-        "PostgreSQL database initialized."
-    );
-}
+pool.on("error", (err) => {
+    console.error("POSTGRES POOL ERROR:", err);
+});
 
 /* =========================================================
    EXPRESS
 ========================================================= */
 
-app.set(
-    "trust proxy",
-    1
-);
+app.set("trust proxy", 1);
 
 app.use(
     express.json({
@@ -102,74 +67,39 @@ app.use(
 );
 
 app.use(
-    cookieParser()
-);
-
-/* =========================================================
-   STATIC
-========================================================= */
-
-app.use(
     express.static(
-        path.join(
-            __dirname,
-            "public"
-        )
+        path.join(__dirname, "public")
     )
 );
-
-/* =========================================================
-   LOADER SESSIONS
-   Temporary by design.
-========================================================= */
-
-const loaderSessions =
-    new Map();
 
 /* =========================================================
    HELPERS
 ========================================================= */
 
 function randomHex(bytes = 32) {
-
     return crypto
         .randomBytes(bytes)
         .toString("hex");
 }
 
 function hashPassword(password) {
-
     return crypto
         .createHash("sha256")
-        .update(
-            String(password)
-        )
+        .update(String(password))
         .digest("hex");
 }
 
 function luaString(value) {
-
-    return JSON.stringify(
-        String(value)
-    );
+    return JSON.stringify(String(value));
 }
 
 function hexEncode(value) {
-
     return Buffer
-        .from(
-            String(value),
-            "utf8"
-        )
+        .from(String(value), "utf8")
         .toString("hex");
 }
 
-function apiError(
-    res,
-    status,
-    message
-) {
-
+function apiError(res, status, message) {
     return res
         .status(status)
         .json({
@@ -179,147 +109,216 @@ function apiError(
 }
 
 /* =========================================================
-   WEB SESSION
+   COOKIE
 ========================================================= */
 
-async function createWebSession(
-    userId
-) {
+function getCookie(req, name) {
 
-    const token =
-        randomHex(32);
+    const raw =
+        req.headers.cookie || "";
 
-    await pool.query(
-        `
-        INSERT INTO login_sessions
-        (
-            user_id,
-            session_token,
-            created_at,
-            expires_at,
-            last_seen_at
-        )
-        VALUES
-        (
-            $1,
-            $2,
-            NOW(),
-            NOW() + INTERVAL '7 days',
-            NOW()
-        )
-        `,
-        [
-            userId,
-            token
-        ]
-    );
+    const parts =
+        raw.split(";");
 
-    return token;
+    for (const part of parts) {
+
+        const item =
+            part.trim();
+
+        const index =
+            item.indexOf("=");
+
+        if (index === -1)
+            continue;
+
+        const key =
+            item.slice(0, index);
+
+        const value =
+            item.slice(index + 1);
+
+        if (key === name) {
+
+            try {
+                return decodeURIComponent(value);
+            } catch {
+                return value;
+            }
+        }
+    }
+
+    return null;
 }
+
+/* =========================================================
+   DATABASE INIT
+========================================================= */
+
+async function initDatabase() {
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+            id BIGSERIAL PRIMARY KEY,
+            username VARCHAR(32) NOT NULL UNIQUE,
+            password_hash TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        );
+
+        CREATE TABLE IF NOT EXISTS scripts (
+            id BIGSERIAL PRIMARY KEY,
+
+            user_id BIGINT NOT NULL
+                REFERENCES users(id)
+                ON DELETE CASCADE,
+
+            script_id VARCHAR(64) NOT NULL UNIQUE,
+
+            name VARCHAR(100)
+                NOT NULL
+                DEFAULT 'My Script',
+
+            source TEXT
+                NOT NULL
+                DEFAULT '',
+
+            enabled BOOLEAN
+                NOT NULL
+                DEFAULT TRUE,
+
+            created_at TIMESTAMPTZ
+                NOT NULL
+                DEFAULT NOW(),
+
+            updated_at TIMESTAMPTZ
+                NOT NULL
+                DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_scripts_user_id
+        ON scripts(user_id);
+
+        CREATE INDEX IF NOT EXISTS idx_scripts_script_id
+        ON scripts(script_id);
+
+        CREATE TABLE IF NOT EXISTS login_sessions (
+            id BIGSERIAL PRIMARY KEY,
+
+            user_id BIGINT NOT NULL
+                REFERENCES users(id)
+                ON DELETE CASCADE,
+
+            session_token TEXT
+                NOT NULL
+                UNIQUE,
+
+            created_at TIMESTAMPTZ
+                NOT NULL
+                DEFAULT NOW(),
+
+            expires_at TIMESTAMPTZ,
+
+            last_seen_at TIMESTAMPTZ
+                NOT NULL
+                DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_login_sessions_token
+        ON login_sessions(session_token);
+
+        CREATE INDEX IF NOT EXISTS idx_login_sessions_user_id
+        ON login_sessions(user_id);
+
+        CREATE TABLE IF NOT EXISTS script_access_logs (
+            id BIGSERIAL PRIMARY KEY,
+
+            user_id BIGINT
+                REFERENCES users(id)
+                ON DELETE SET NULL,
+
+            script_id VARCHAR(64),
+
+            ip_address INET,
+
+            success BOOLEAN
+                NOT NULL
+                DEFAULT FALSE,
+
+            created_at TIMESTAMPTZ
+                NOT NULL
+                DEFAULT NOW()
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_access_logs_script
+        ON script_access_logs(script_id);
+
+        CREATE INDEX IF NOT EXISTS idx_access_logs_user
+        ON script_access_logs(user_id);
+    `);
+
+    console.log("PostgreSQL database initialized.");
+}
+
+/* =========================================================
+   WEB AUTH
+========================================================= */
 
 async function getWebAuth(req) {
 
     const sid =
-        req.cookies.lexinx_session;
+        getCookie(
+            req,
+            "lexinx_session"
+        );
 
-    if (!sid) {
+    if (!sid)
         return null;
-    }
 
-    const result =
+    try {
+
+        const result =
+            await pool.query(
+                `
+                SELECT
+                    s.session_token,
+                    s.user_id,
+                    s.expires_at,
+                    u.id,
+                    u.username
+                FROM login_sessions s
+                JOIN users u
+                    ON u.id = s.user_id
+                WHERE
+                    s.session_token = $1
+                    AND (
+                        s.expires_at IS NULL
+                        OR s.expires_at > NOW()
+                    )
+                LIMIT 1
+                `,
+                [sid]
+            );
+
+        if (result.rowCount === 0)
+            return null;
+
+        const row =
+            result.rows[0];
+
         await pool.query(
             `
-            SELECT
-                ls.id AS session_id,
-                ls.user_id,
-                ls.session_token,
-                ls.expires_at,
-
-                u.username,
-                u.password_hash,
-                u.created_at,
-                u.updated_at
-
-            FROM login_sessions ls
-
-            JOIN users u
-                ON u.id = ls.user_id
-
-            WHERE
-                ls.session_token = $1
-
-                AND (
-                    ls.expires_at IS NULL
-                    OR ls.expires_at > NOW()
-                )
-
-            LIMIT 1
+            UPDATE login_sessions
+            SET last_seen_at = NOW()
+            WHERE session_token = $1
             `,
             [sid]
         );
 
-    if (
-        result.rows.length === 0
-    ) {
-
-        return null;
-    }
-
-    const row =
-        result.rows[0];
-
-    await pool.query(
-        `
-        UPDATE login_sessions
-
-        SET last_seen_at = NOW()
-
-        WHERE id = $1
-        `,
-        [
-            row.session_id
-        ]
-    );
-
-    return {
-
-        sid,
-
-        sessionId:
-            row.session_id,
-
-        userId:
-            row.user_id,
-
-        username:
-            row.username
-    };
-}
-
-async function requireAuth(
-    req,
-    res,
-    next
-) {
-
-    try {
-
-        const auth =
-            await getWebAuth(req);
-
-        if (!auth) {
-
-            return apiError(
-                res,
-                401,
-                "Authentication required."
-            );
-        }
-
-        req.auth =
-            auth;
-
-        next();
+        return {
+            sid,
+            userId: row.user_id,
+            username: row.username
+        };
 
     } catch (error) {
 
@@ -328,41 +327,27 @@ async function requireAuth(
             error
         );
 
-        return apiError(
-            res,
-            500,
-            "Authentication server error."
-        );
+        return null;
     }
 }
 
-/* =========================================================
-   COOKIE
-========================================================= */
+async function requireAuth(req, res, next) {
 
-function setSessionCookie(
-    res,
-    token
-) {
+    const auth =
+        await getWebAuth(req);
 
-    res.cookie(
-        "lexinx_session",
-        token,
-        {
-            httpOnly: true,
+    if (!auth) {
 
-            secure:
-                process.env.NODE_ENV ===
-                "production",
+        return apiError(
+            res,
+            401,
+            "Authentication required."
+        );
+    }
 
-            sameSite: "lax",
+    req.auth = auth;
 
-            maxAge:
-                WEB_SESSION_TTL,
-
-            path: "/"
-        }
-    );
+    next();
 }
 
 /* =========================================================
@@ -371,22 +356,18 @@ function setSessionCookie(
 
 app.post(
     "/api/register",
-
     async (req, res) => {
 
         try {
 
             const username =
                 String(
-                    req.body.username ||
-                    ""
-                )
-                .trim();
+                    req.body.username || ""
+                ).trim();
 
             const password =
                 String(
-                    req.body.password ||
-                    ""
+                    req.body.password || ""
                 );
 
             if (!username) {
@@ -398,9 +379,7 @@ app.post(
                 );
             }
 
-            if (
-                username.length < 3
-            ) {
+            if (username.length < 3) {
 
                 return apiError(
                     res,
@@ -409,9 +388,7 @@ app.post(
                 );
             }
 
-            if (
-                username.length > 32
-            ) {
+            if (username.length > 32) {
 
                 return apiError(
                     res,
@@ -421,8 +398,9 @@ app.post(
             }
 
             if (
-                !/^[a-zA-Z0-9_]+$/
-                    .test(username)
+                !/^[a-zA-Z0-9_]+$/.test(
+                    username
+                )
             ) {
 
                 return apiError(
@@ -432,9 +410,7 @@ app.post(
                 );
             }
 
-            if (
-                password.length < 6
-            ) {
+            if (password.length < 6) {
 
                 return apiError(
                     res,
@@ -443,32 +419,8 @@ app.post(
                 );
             }
 
-            const existing =
-                await pool.query(
-                    `
-                    SELECT id
-                    FROM users
-                    WHERE LOWER(username) = LOWER($1)
-                    LIMIT 1
-                    `,
-                    [username]
-                );
-
-            if (
-                existing.rows.length
-            ) {
-
-                return apiError(
-                    res,
-                    409,
-                    "Username already exists."
-                );
-            }
-
             const passwordHash =
-                hashPassword(
-                    password
-                );
+                hashPassword(password);
 
             const result =
                 await pool.query(
@@ -479,13 +431,8 @@ app.post(
                         password_hash
                     )
                     VALUES
-                    (
-                        $1,
-                        $2
-                    )
-                    RETURNING
-                        id,
-                        username
+                    ($1, $2)
+                    RETURNING id, username
                     `,
                     [
                         username,
@@ -496,26 +443,49 @@ app.post(
             const user =
                 result.rows[0];
 
-            const sid =
-                await createWebSession(
-                    user.id
-                );
+            const sessionToken =
+                randomHex(32);
 
-            setSessionCookie(
-                res,
-                sid
+            await pool.query(
+                `
+                INSERT INTO login_sessions
+                (
+                    user_id,
+                    session_token,
+                    expires_at
+                )
+                VALUES
+                (
+                    $1,
+                    $2,
+                    NOW() + INTERVAL '7 days'
+                )
+                `,
+                [
+                    user.id,
+                    sessionToken
+                ]
+            );
+
+            res.cookie(
+                "lexinx_session",
+                sessionToken,
+                {
+                    httpOnly: true,
+                    sameSite: "lax",
+                    secure: true,
+                    maxAge:
+                        WEB_SESSION_TTL,
+                    path: "/"
+                }
             );
 
             return res.json({
-
                 ok: true,
-
                 username:
                     user.username,
-
                 url:
                     PUBLIC_URL + "/"
-
             });
 
         } catch (error) {
@@ -524,6 +494,17 @@ app.post(
                 "REGISTER ERROR:",
                 error
             );
+
+            if (
+                error.code === "23505"
+            ) {
+
+                return apiError(
+                    res,
+                    409,
+                    "Username already exists."
+                );
+            }
 
             return apiError(
                 res,
@@ -540,22 +521,18 @@ app.post(
 
 app.post(
     "/api/login",
-
     async (req, res) => {
 
         try {
 
             const username =
                 String(
-                    req.body.username ||
-                    ""
-                )
-                .trim();
+                    req.body.username || ""
+                ).trim();
 
             const password =
                 String(
-                    req.body.password ||
-                    ""
+                    req.body.password || ""
                 );
 
             const result =
@@ -565,20 +542,16 @@ app.post(
                         id,
                         username,
                         password_hash
-
                     FROM users
-
-                    WHERE
-                        LOWER(username) =
-                        LOWER($1)
-
+                    WHERE LOWER(username)
+                        = LOWER($1)
                     LIMIT 1
                     `,
                     [username]
                 );
 
             if (
-                result.rows.length === 0
+                result.rowCount === 0
             ) {
 
                 return apiError(
@@ -591,14 +564,9 @@ app.post(
             const user =
                 result.rows[0];
 
-            const passwordHash =
-                hashPassword(
-                    password
-                );
-
             if (
-                passwordHash !==
-                user.password_hash
+                user.password_hash !==
+                hashPassword(password)
             ) {
 
                 return apiError(
@@ -608,26 +576,49 @@ app.post(
                 );
             }
 
-            const sid =
-                await createWebSession(
-                    user.id
-                );
+            const sessionToken =
+                randomHex(32);
 
-            setSessionCookie(
-                res,
-                sid
+            await pool.query(
+                `
+                INSERT INTO login_sessions
+                (
+                    user_id,
+                    session_token,
+                    expires_at
+                )
+                VALUES
+                (
+                    $1,
+                    $2,
+                    NOW() + INTERVAL '7 days'
+                )
+                `,
+                [
+                    user.id,
+                    sessionToken
+                ]
+            );
+
+            res.cookie(
+                "lexinx_session",
+                sessionToken,
+                {
+                    httpOnly: true,
+                    sameSite: "lax",
+                    secure: true,
+                    maxAge:
+                        WEB_SESSION_TTL,
+                    path: "/"
+                }
             );
 
             return res.json({
-
                 ok: true,
-
                 username:
                     user.username,
-
                 url:
                     PUBLIC_URL + "/"
-
             });
 
         } catch (error) {
@@ -652,48 +643,27 @@ app.post(
 
 app.get(
     "/api/me",
-
     async (req, res) => {
 
-        try {
+        const auth =
+            await getWebAuth(req);
 
-            const auth =
-                await getWebAuth(req);
-
-            if (!auth) {
-
-                return apiError(
-                    res,
-                    401,
-                    "Not authenticated."
-                );
-            }
-
-            return res.json({
-
-                ok: true,
-
-                username:
-                    auth.username,
-
-                url:
-                    PUBLIC_URL + "/"
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "ME ERROR:",
-                error
-            );
+        if (!auth) {
 
             return apiError(
                 res,
-                500,
-                "Session server error."
+                401,
+                "Not authenticated."
             );
         }
+
+        return res.json({
+            ok: true,
+            username:
+                auth.username,
+            url:
+                PUBLIC_URL + "/"
+        });
     }
 );
 
@@ -703,20 +673,21 @@ app.get(
 
 app.post(
     "/api/logout",
-
     async (req, res) => {
 
         try {
 
             const sid =
-                req.cookies.lexinx_session;
+                getCookie(
+                    req,
+                    "lexinx_session"
+                );
 
             if (sid) {
 
                 await pool.query(
                     `
                     DELETE FROM login_sessions
-
                     WHERE session_token = $1
                     `,
                     [sid]
@@ -744,7 +715,7 @@ app.post(
             return apiError(
                 res,
                 500,
-                "Logout server error."
+                "Logout error."
             );
         }
     }
@@ -756,9 +727,7 @@ app.post(
 
 app.post(
     "/api/create",
-
     requireAuth,
-
     async (req, res) => {
 
         try {
@@ -793,7 +762,7 @@ app.post(
                 scriptId =
                     randomHex(12);
 
-                const exists =
+                const check =
                     await pool.query(
                         `
                         SELECT id
@@ -805,63 +774,46 @@ app.post(
                     );
 
                 if (
-                    exists.rows.length === 0
+                    check.rowCount === 0
                 ) {
                     break;
                 }
 
             } while (true);
 
-            const result =
-                await pool.query(
-                    `
-                    INSERT INTO scripts
-                    (
-                        user_id,
-                        script_id,
-                        name,
-                        source,
-                        enabled
-                    )
-                    VALUES
-                    (
-                        $1,
-                        $2,
-                        $3,
-                        $4,
-                        TRUE
-                    )
-                    RETURNING
-                        id,
-                        script_id,
-                        name,
-                        created_at,
-                        updated_at
-                    `,
-                    [
-                        req.auth.userId,
-                        scriptId,
-                        name ||
-                            "Untitled Script",
-                        source
-                    ]
-                );
-
-            const script =
-                result.rows[0];
+            await pool.query(
+                `
+                INSERT INTO scripts
+                (
+                    user_id,
+                    script_id,
+                    name,
+                    source
+                )
+                VALUES
+                (
+                    $1,
+                    $2,
+                    $3,
+                    $4
+                )
+                `,
+                [
+                    req.auth.userId,
+                    scriptId,
+                    name ||
+                        "Untitled Script",
+                    source
+                ]
+            );
 
             const loader =
-                `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${script.script_id}"))()`;
+                `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${scriptId}"))()`;
 
             return res.json({
-
                 ok: true,
-
-                id:
-                    script.script_id,
-
+                id: scriptId,
                 loader
-
             });
 
         } catch (error) {
@@ -886,9 +838,7 @@ app.post(
 
 app.get(
     "/api/scripts",
-
     requireAuth,
-
     async (req, res) => {
 
         try {
@@ -899,16 +849,11 @@ app.get(
                     SELECT
                         script_id,
                         name,
-                        enabled,
                         created_at,
                         updated_at
-
                     FROM scripts
-
                     WHERE user_id = $1
-
-                    ORDER BY
-                        created_at DESC
+                    ORDER BY created_at DESC
                     `,
                     [
                         req.auth.userId
@@ -917,16 +862,12 @@ app.get(
 
             const scripts =
                 result.rows.map(
-                    script => ({
-
+                    (script) => ({
                         id:
                             script.script_id,
 
                         name:
                             script.name,
-
-                        enabled:
-                            script.enabled,
 
                         loader:
                             `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${script.script_id}"))()`,
@@ -936,16 +877,12 @@ app.get(
 
                         updated:
                             script.updated_at
-
                     })
                 );
 
             return res.json({
-
                 ok: true,
-
                 scripts
-
             });
 
         } catch (error) {
@@ -970,9 +907,7 @@ app.get(
 
 app.get(
     "/api/script/:id",
-
     requireAuth,
-
     async (req, res) => {
 
         try {
@@ -983,16 +918,11 @@ app.get(
                     SELECT
                         script_id,
                         name,
-                        source,
-                        enabled
-
+                        source
                     FROM scripts
-
                     WHERE
                         script_id = $1
-
                         AND user_id = $2
-
                     LIMIT 1
                     `,
                     [
@@ -1002,7 +932,7 @@ app.get(
                 );
 
             if (
-                result.rows.length === 0
+                result.rowCount === 0
             ) {
 
                 return apiError(
@@ -1016,11 +946,9 @@ app.get(
                 result.rows[0];
 
             return res.json({
-
                 ok: true,
 
                 script: {
-
                     id:
                         script.script_id,
 
@@ -1028,13 +956,8 @@ app.get(
                         script.name,
 
                     source:
-                        script.source,
-
-                    enabled:
-                        script.enabled
-
+                        script.source
                 }
-
             });
 
         } catch (error) {
@@ -1047,7 +970,7 @@ app.get(
             return apiError(
                 res,
                 500,
-                "Failed to load script."
+                "Failed to get script."
             );
         }
     }
@@ -1059,37 +982,32 @@ app.get(
 
 app.put(
     "/api/script/:id",
-
     requireAuth,
-
     async (req, res) => {
 
         try {
 
-            const result =
+            const id =
+                req.params.id;
+
+            const existing =
                 await pool.query(
                     `
-                    SELECT
-                        id,
-                        script_id
-
+                    SELECT id
                     FROM scripts
-
                     WHERE
                         script_id = $1
-
                         AND user_id = $2
-
                     LIMIT 1
                     `,
                     [
-                        req.params.id,
+                        id,
                         req.auth.userId
                     ]
                 );
 
             if (
-                result.rows.length === 0
+                existing.rowCount === 0
             ) {
 
                 return apiError(
@@ -1120,9 +1038,7 @@ app.put(
                     `name = $${index++}`
                 );
 
-                values.push(
-                    name
-                );
+                values.push(name);
             }
 
             if (
@@ -1151,38 +1067,19 @@ app.put(
             }
 
             if (
-                typeof req.body.enabled ===
-                "boolean"
-            ) {
-
-                updates.push(
-                    `enabled = $${index++}`
-                );
-
-                values.push(
-                    req.body.enabled
-                );
-            }
-
-            if (
                 updates.length === 0
             ) {
 
-                return apiError(
-                    res,
-                    400,
-                    "Nothing to update."
-                );
+                return res.json({
+                    ok: true
+                });
             }
 
             updates.push(
                 "updated_at = NOW()"
             );
 
-            values.push(
-                req.params.id
-            );
-
+            values.push(id);
             values.push(
                 req.auth.userId
             );
@@ -1190,15 +1087,11 @@ app.put(
             await pool.query(
                 `
                 UPDATE scripts
-
                 SET
                     ${updates.join(", ")}
-
                 WHERE
-                    script_id = $${index++}
-
-                    AND user_id = $${index}
-
+                    script_id = $${index}
+                    AND user_id = $${index + 1}
                 `,
                 values
             );
@@ -1210,7 +1103,7 @@ app.put(
         } catch (error) {
 
             console.error(
-                "UPDATE SCRIPT ERROR:",
+                "UPDATE ERROR:",
                 error
             );
 
@@ -1229,9 +1122,7 @@ app.put(
 
 app.delete(
     "/api/script/:id",
-
     requireAuth,
-
     async (req, res) => {
 
         try {
@@ -1240,12 +1131,9 @@ app.delete(
                 await pool.query(
                     `
                     DELETE FROM scripts
-
                     WHERE
                         script_id = $1
-
                         AND user_id = $2
-
                     RETURNING id
                     `,
                     [
@@ -1255,7 +1143,7 @@ app.delete(
                 );
 
             if (
-                result.rows.length === 0
+                result.rowCount === 0
             ) {
 
                 return apiError(
@@ -1272,7 +1160,7 @@ app.delete(
         } catch (error) {
 
             console.error(
-                "DELETE SCRIPT ERROR:",
+                "DELETE ERROR:",
                 error
             );
 
@@ -1287,7 +1175,12 @@ app.delete(
 
 /* =========================================================
    LOADER SESSION
+   Runtime sessions stay in RAM.
+   Script/user data stays in PostgreSQL.
 ========================================================= */
+
+const loaderSessions =
+    new Map();
 
 function createLoaderSession(
     scriptId
@@ -1313,7 +1206,6 @@ function createLoaderSession(
         expires:
             Date.now() +
             LOADER_SESSION_TTL
-
     };
 
     loaderSessions.set(
@@ -1324,9 +1216,7 @@ function createLoaderSession(
     return session;
 }
 
-function issueToken(
-    session
-) {
+function issueToken(session) {
 
     const token =
         randomHex(32);
@@ -1343,9 +1233,8 @@ function consumeToken(
     token
 ) {
 
-    if (!token) {
+    if (!token)
         return false;
-    }
 
     if (
         !session.tokens.has(token)
@@ -1364,9 +1253,8 @@ function validLoaderSession(
     session
 ) {
 
-    if (!session) {
+    if (!session)
         return false;
-    }
 
     if (
         Date.now() >
@@ -1381,53 +1269,6 @@ function validLoaderSession(
     }
 
     return true;
-}
-
-/* =========================================================
-   ACCESS LOG
-========================================================= */
-
-async function logScriptAccess(
-    req,
-    scriptId,
-    userId,
-    success
-) {
-
-    try {
-
-        await pool.query(
-            `
-            INSERT INTO script_access_logs
-            (
-                user_id,
-                script_id,
-                ip_address,
-                success
-            )
-            VALUES
-            (
-                $1,
-                $2,
-                $3,
-                $4
-            )
-            `,
-            [
-                userId || null,
-                scriptId || null,
-                req.ip || null,
-                Boolean(success)
-            ]
-        );
-
-    } catch (error) {
-
-        console.error(
-            "ACCESS LOG ERROR:",
-            error
-        );
-    }
 }
 
 /* =========================================================
@@ -1545,8 +1386,10 @@ local function decodeHex(s)
             )
 
         if n then
+
             out[#out + 1] =
                 string.char(n)
+
         end
 
     end
@@ -1587,111 +1430,16 @@ function randomLuaName() {
 }
 
 /* =========================================================
-   WRAPPER
-========================================================= */
-
-function buildWrapper(
-    session
-) {
-
-    const token =
-        issueToken(session);
-
-    const endpoint =
-        hexEncode(
-            PUBLIC_URL
-        );
-
-    const endpointVar =
-        randomLuaName();
-
-    const sessionVar =
-        randomLuaName();
-
-    const tokenVar =
-        randomLuaName();
-
-    const request =
-        randomLuaName();
-
-    return `
-
--- LEXINX WRAPPER VM
-
-local ${endpointVar} =
-    "${endpoint}"
-
-${luaHexDecoder()}
-
-local ${sessionVar} =
-    ${luaString(session.id)}
-
-local ${tokenVar} =
-    ${luaString(token)}
-
-local function ${request}()
-
-    local endpoint =
-        decodeHex(
-            ${endpointVar}
-        )
-
-    local url =
-        endpoint
-        .. "/api/l3"
-        .. "?session="
-        .. ${sessionVar}
-        .. "&token="
-        .. ${tokenVar}
-
-    local ok, response =
-        pcall(function()
-
-            return game:HttpGet(
-                url
-            )
-
-        end)
-
-    if not ok then
-        return
-    end
-
-    if type(response)
-        ~= "string"
-    then
-        return
-    end
-
-    local fn =
-        loadstring(response)
-
-    if fn then
-        return fn()
-    end
-
-end
-
-return ${request}()
-
-`;
-}
-
-/* =========================================================
    L2
 ========================================================= */
 
-function buildL2(
-    session
-) {
+function buildL2(session) {
 
     const token =
         issueToken(session);
 
     const endpoint =
-        hexEncode(
-            PUBLIC_URL
-        );
+        hexEncode(PUBLIC_URL);
 
     const endpointVar =
         randomLuaName();
@@ -1752,6 +1500,10 @@ local function runVM(state)
         return
     end
 
+    if type(response) ~= "string" then
+        return
+    end
+
     local fn =
         loadstring(response)
 
@@ -1770,17 +1522,13 @@ return runVM(${vm})
    L3
 ========================================================= */
 
-function buildL3(
-    session
-) {
+function buildL3(session) {
 
     const token =
         issueToken(session);
 
     const endpoint =
-        hexEncode(
-            PUBLIC_URL
-        );
+        hexEncode(PUBLIC_URL);
 
     const endpointVar =
         randomLuaName();
@@ -1791,7 +1539,6 @@ function buildL3(
     return `
 
 -- LEXINX L3
--- PACKED PROTOTYPE
 
 local ${endpointVar} =
     "${endpoint}"
@@ -1809,15 +1556,7 @@ local ${prototype} = {
         ${luaString(session.id)},
 
     token =
-        ${luaString(token)},
-
-    opcode = {
-
-        LOAD = 1,
-        REQUEST = 2,
-        EXEC = 3
-
-    }
+        ${luaString(token)}
 
 }
 
@@ -1844,6 +1583,10 @@ local function executeVM(p)
         return
     end
 
+    if type(response) ~= "string" then
+        return
+    end
+
     local fn =
         loadstring(response)
 
@@ -1864,17 +1607,13 @@ return executeVM(
    L4
 ========================================================= */
 
-function buildL4(
-    session
-) {
+function buildL4(session) {
 
     const token =
         issueToken(session);
 
     const endpoint =
-        hexEncode(
-            PUBLIC_URL
-        );
+        hexEncode(PUBLIC_URL);
 
     const endpointVar =
         randomLuaName();
@@ -1885,7 +1624,6 @@ function buildL4(
     return `
 
 -- LEXINX L4
--- RUNTIME BOOTSTRAP
 
 local ${endpointVar} =
     "${endpoint}"
@@ -1903,9 +1641,7 @@ local ${runtime} = {
         ${luaString(session.id)},
 
     token =
-        ${luaString(token)},
-
-    stage = 4
+        ${luaString(token)}
 
 }
 
@@ -1932,9 +1668,7 @@ local function bootstrap(state)
         return
     end
 
-    if type(response)
-        ~= "string"
-    then
+    if type(response) ~= "string" then
         return
     end
 
@@ -2108,17 +1842,14 @@ return ${execute}()
 
 app.get(
     "/api/loader/:id",
-
     async (req, res) => {
 
         try {
 
             const id =
                 String(
-                    req.params.id ||
-                    ""
-                )
-                .trim();
+                    req.params.id || ""
+                ).trim();
 
             if (!id) {
                 return blockPage(res);
@@ -2130,26 +1861,16 @@ app.get(
                     SELECT
                         script_id,
                         enabled
-
                     FROM scripts
-
                     WHERE script_id = $1
-
                     LIMIT 1
                     `,
                     [id]
                 );
 
             if (
-                result.rows.length === 0
+                result.rowCount === 0
             ) {
-
-                await logScriptAccess(
-                    req,
-                    id,
-                    null,
-                    false
-                );
 
                 return blockPage(res);
             }
@@ -2157,39 +1878,18 @@ app.get(
             const script =
                 result.rows[0];
 
-            if (
-                !script.enabled
-            ) {
-
-                await logScriptAccess(
-                    req,
-                    id,
-                    null,
-                    false
-                );
-
+            if (!script.enabled) {
                 return blockPage(res);
             }
 
             const accept =
                 String(
-                    req.headers.accept ||
-                    ""
-                )
-                .toLowerCase();
+                    req.headers.accept || ""
+                ).toLowerCase();
 
             if (
-                accept.includes(
-                    "text/html"
-                )
+                accept.includes("text/html")
             ) {
-
-                await logScriptAccess(
-                    req,
-                    id,
-                    null,
-                    false
-                );
 
                 return blockPage(res);
             }
@@ -2199,17 +1899,71 @@ app.get(
                     script.script_id
                 );
 
-            const wrapper =
-                buildWrapper(
-                    session
-                );
+            const token =
+                issueToken(session);
 
-            await logScriptAccess(
-                req,
-                id,
-                null,
-                true
-            );
+            const endpoint =
+                hexEncode(PUBLIC_URL);
+
+            const endpointVar =
+                randomLuaName();
+
+            const sessionVar =
+                randomLuaName();
+
+            const tokenVar =
+                randomLuaName();
+
+            const wrapper = `
+
+-- LEXINX WRAPPER
+
+local ${endpointVar} =
+    "${endpoint}"
+
+${luaHexDecoder()}
+
+local ${sessionVar} =
+    ${luaString(session.id)}
+
+local ${tokenVar} =
+    ${luaString(token)}
+
+local url =
+    decodeHex(
+        ${endpointVar}
+    )
+    .. "/api/l3"
+    .. "?session="
+    .. ${sessionVar}
+    .. "&token="
+    .. ${tokenVar}
+
+local ok, response =
+    pcall(function()
+
+        return game:HttpGet(
+            url
+        )
+
+    end)
+
+if not ok then
+    return
+end
+
+if type(response) ~= "string" then
+    return
+end
+
+local fn =
+    loadstring(response)
+
+if fn then
+    return fn()
+end
+
+`;
 
             return res
                 .status(200)
@@ -2239,7 +1993,6 @@ app.get(
 
 app.get(
     "/api/l3",
-
     async (req, res) => {
 
         try {
@@ -2250,9 +2003,7 @@ app.get(
                 );
 
             if (
-                !validLoaderSession(
-                    session
-                )
+                !validLoaderSession(session)
             ) {
 
                 return apiError(
@@ -2292,9 +2043,7 @@ app.get(
             return res
                 .type("text/plain")
                 .send(
-                    buildL2(
-                        session
-                    )
+                    buildL2(session)
                 );
 
         } catch (error) {
@@ -2319,7 +2068,6 @@ app.get(
 
 app.get(
     "/api/l4",
-
     async (req, res) => {
 
         try {
@@ -2330,9 +2078,7 @@ app.get(
                 );
 
             if (
-                !validLoaderSession(
-                    session
-                )
+                !validLoaderSession(session)
             ) {
 
                 return apiError(
@@ -2372,9 +2118,7 @@ app.get(
             return res
                 .type("text/plain")
                 .send(
-                    buildL3(
-                        session
-                    )
+                    buildL3(session)
                 );
 
         } catch (error) {
@@ -2399,7 +2143,6 @@ app.get(
 
 app.get(
     "/api/l5",
-
     async (req, res) => {
 
         try {
@@ -2410,9 +2153,7 @@ app.get(
                 );
 
             if (
-                !validLoaderSession(
-                    session
-                )
+                !validLoaderSession(session)
             ) {
 
                 return apiError(
@@ -2452,9 +2193,7 @@ app.get(
             return res
                 .type("text/plain")
                 .send(
-                    buildL4(
-                        session
-                    )
+                    buildL4(session)
                 );
 
         } catch (error) {
@@ -2479,7 +2218,6 @@ app.get(
 
 app.get(
     "/api/l5/final",
-
     async (req, res) => {
 
         try {
@@ -2490,9 +2228,7 @@ app.get(
                 );
 
             if (
-                !validLoaderSession(
-                    session
-                )
+                !validLoaderSession(session)
             ) {
 
                 return apiError(
@@ -2534,11 +2270,8 @@ app.get(
                         script_id,
                         source,
                         enabled
-
                     FROM scripts
-
                     WHERE script_id = $1
-
                     LIMIT 1
                     `,
                     [
@@ -2547,7 +2280,7 @@ app.get(
                 );
 
             if (
-                result.rows.length === 0
+                result.rowCount === 0
             ) {
 
                 loaderSessions.delete(
@@ -2564,9 +2297,7 @@ app.get(
             const script =
                 result.rows[0];
 
-            if (
-                !script.enabled
-            ) {
+            if (!script.enabled) {
 
                 loaderSessions.delete(
                     session.id
@@ -2575,7 +2306,7 @@ app.get(
                 return apiError(
                     res,
                     403,
-                    "LEXINX BLOCK"
+                    "Script disabled."
                 );
             }
 
@@ -2584,6 +2315,53 @@ app.get(
                     session,
                     script.source
                 );
+
+            /*
+             * ACCESS LOG
+             */
+
+            const forwarded =
+                req.headers["x-forwarded-for"];
+
+            const ip =
+                forwarded
+                    ? String(forwarded)
+                        .split(",")[0]
+                        .trim()
+                    : req.ip;
+
+            try {
+
+                await pool.query(
+                    `
+                    INSERT INTO script_access_logs
+                    (
+                        user_id,
+                        script_id,
+                        ip_address,
+                        success
+                    )
+                    SELECT
+                        user_id,
+                        script_id,
+                        $1::inet,
+                        TRUE
+                    FROM scripts
+                    WHERE script_id = $2
+                    `,
+                    [
+                        ip,
+                        script.script_id
+                    ]
+                );
+
+            } catch (logError) {
+
+                console.error(
+                    "ACCESS LOG ERROR:",
+                    logError
+                );
+            }
 
             loaderSessions.delete(
                 session.id
@@ -2616,7 +2394,6 @@ app.get(
 
 app.use(
     "/api",
-
     (req, res) => {
 
         return apiError(
@@ -2633,7 +2410,6 @@ app.use(
 
 app.get(
     "/",
-
     (req, res) => {
 
         return res.sendFile(
@@ -2671,8 +2447,6 @@ setInterval(
         const now =
             Date.now();
 
-        /* Loader sessions */
-
         for (
             const [
                 id,
@@ -2686,23 +2460,17 @@ setInterval(
                 session.expires
             ) {
 
-                loaderSessions.delete(
-                    id
-                );
+                loaderSessions.delete(id);
             }
         }
-
-        /* PostgreSQL login sessions */
 
         try {
 
             await pool.query(
                 `
                 DELETE FROM login_sessions
-
                 WHERE
                     expires_at IS NOT NULL
-
                     AND expires_at < NOW()
                 `
             );
@@ -2733,6 +2501,10 @@ async function startServer() {
             "SELECT NOW()"
         );
 
+        console.log(
+            "PostgreSQL connection OK."
+        );
+
         app.listen(
             PORT,
             () => {
@@ -2746,11 +2518,6 @@ async function startServer() {
                     "PUBLIC URL: " +
                     PUBLIC_URL
                 );
-
-                console.log(
-                    "PostgreSQL: CONNECTED"
-                );
-
             }
         );
 
@@ -2761,36 +2528,8 @@ async function startServer() {
             error
         );
 
-        await pool.end();
-
         process.exit(1);
     }
 }
 
 startServer();
-
-/* =========================================================
-   PROCESS ERROR HANDLERS
-========================================================= */
-
-process.on(
-    "unhandledRejection",
-    error => {
-
-        console.error(
-            "UNHANDLED REJECTION:",
-            error
-        );
-    }
-);
-
-process.on(
-    "uncaughtException",
-    error => {
-
-        console.error(
-            "UNCAUGHT EXCEPTION:",
-            error
-        );
-    }
-);
