@@ -1,28 +1,129 @@
 const express = require("express");
 const crypto = require("crypto");
 const path = require("path");
+const bcrypt = require("bcryptjs");
+const { Pool } = require("pg");
 
 const app = express();
-
-app.use(express.json({ limit: "1mb" }));
 
 const PORT = process.env.PORT || 3000;
 
 const TOKEN_TTL = 60 * 1000;
 
 /* =========================================================
-   PUBLIC WEBSITE
+   EXPRESS
 ========================================================= */
 
-const publicPath = path.join(__dirname, "public");
+app.use(express.json({ limit: "1mb" }));
 
-// Cho phép truy cập các file trong public/
-// Ví dụ:
-// /
-// /style.css
-// /script.js
-// /images/...
-app.use(express.static(publicPath));
+const publicPath =
+    path.join(__dirname, "public");
+
+app.use(
+    express.static(publicPath)
+);
+
+/* =========================================================
+   POSTGRESQL
+========================================================= */
+
+if (!process.env.DATABASE_URL) {
+
+    console.error(
+        "DATABASE_URL is missing"
+    );
+
+}
+
+const pool = new Pool({
+    connectionString:
+        process.env.DATABASE_URL,
+
+    ssl:
+        process.env.NODE_ENV === "production"
+            ? { rejectUnauthorized: false }
+            : false
+});
+
+/* =========================================================
+   DATABASE INIT
+========================================================= */
+
+async function initDatabase() {
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS users (
+
+            id BIGSERIAL PRIMARY KEY,
+
+            username VARCHAR(32)
+                UNIQUE NOT NULL,
+
+            password_hash TEXT
+                NOT NULL,
+
+            created_at TIMESTAMPTZ
+                NOT NULL DEFAULT NOW(),
+
+            last_login TIMESTAMPTZ
+
+        );
+    `);
+
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS sessions (
+
+            id TEXT PRIMARY KEY,
+
+            user_id BIGINT
+                NOT NULL
+                REFERENCES users(id)
+                ON DELETE CASCADE,
+
+            created_at TIMESTAMPTZ
+                NOT NULL DEFAULT NOW(),
+
+            expires_at TIMESTAMPTZ
+                NOT NULL
+
+        );
+    `);
+
+    console.log(
+        "PostgreSQL database ready"
+    );
+}
+
+/* =========================================================
+   DATABASE START
+========================================================= */
+
+initDatabase().catch(error => {
+
+    console.error(
+        "Database initialization failed:",
+        error
+    );
+
+});
+
+/* =========================================================
+   RANDOM
+========================================================= */
+
+function randomHex(size = 32) {
+
+    return crypto
+        .randomBytes(size)
+        .toString("hex");
+
+}
+
+function createToken() {
+
+    return randomHex(32);
+
+}
 
 /* =========================================================
    SCRIPTS
@@ -30,89 +131,108 @@ app.use(express.static(publicPath));
 
 const scripts = new Map();
 
-scripts.set("58ceecd03f8a061d8af1d341", {
-    source: `
+scripts.set(
+    "58ceecd03f8a061d8af1d341",
+    {
+        source: `
 print("LEXINX PAYLOAD RUNNING")
 `
-});
+    }
+);
 
 /* =========================================================
-   SESSION STORAGE
+   LOADER SESSION STORAGE
 ========================================================= */
 
 const sessions = new Map();
 
 /* =========================================================
-   RANDOM
+   LOADER SESSION
 ========================================================= */
 
-function randomHex(size = 32) {
-    return crypto.randomBytes(size).toString("hex");
-}
+function createLoaderSession(scriptId) {
 
-function createToken() {
-    return randomHex(32);
-}
-
-function createNonce() {
-    return randomHex(16);
-}
-
-/* =========================================================
-   SESSION
-========================================================= */
-
-function createSession(scriptId) {
-
-    const id = randomHex(32);
+    const id =
+        randomHex(32);
 
     const session = {
+
         id,
+
         scriptId,
+
         stage: 1,
+
         tokens: new Set(),
+
         created: Date.now(),
-        expires: Date.now() + TOKEN_TTL
+
+        expires:
+            Date.now() +
+            TOKEN_TTL
+
     };
 
-    sessions.set(id, session);
+    sessions.set(
+        id,
+        session
+    );
 
     return session;
 }
 
 function issueToken(session) {
 
-    const token = createToken();
+    const token =
+        createToken();
 
-    session.tokens.add(token);
+    session.tokens.add(
+        token
+    );
 
     return token;
 }
 
-function consumeToken(session, token) {
+function consumeToken(
+    session,
+    token
+) {
 
     if (!token) {
         return false;
     }
 
-    if (!session.tokens.has(token)) {
+    if (
+        !session.tokens.has(
+            token
+        )
+    ) {
         return false;
     }
 
-    session.tokens.delete(token);
+    session.tokens.delete(
+        token
+    );
 
     return true;
 }
 
-function validSession(session) {
+function validLoaderSession(
+    session
+) {
 
     if (!session) {
         return false;
     }
 
-    if (Date.now() > session.expires) {
+    if (
+        Date.now() >
+        session.expires
+    ) {
 
-        sessions.delete(session.id);
+        sessions.delete(
+            session.id
+        );
 
         return false;
     }
@@ -121,28 +241,35 @@ function validSession(session) {
 }
 
 /* =========================================================
-   API BLOCK
+   API ERROR
 ========================================================= */
 
-function apiBlock(res, message = "LEXINX BLOCK") {
+function apiBlock(
+    res,
+    message = "LEXINX BLOCK"
+) {
 
     return res.status(403).json({
+
         ok: false,
+
         error: message
+
     });
+
 }
 
 /* =========================================================
-   LUA STRING
+   LUA
 ========================================================= */
 
 function luaString(value) {
-    return JSON.stringify(String(value));
-}
 
-/* =========================================================
-   RANDOM LUA NAME
-========================================================= */
+    return JSON.stringify(
+        String(value)
+    );
+
+}
 
 function randomLuaName() {
 
@@ -151,14 +278,20 @@ function randomLuaName() {
 
     let result = "_";
 
-    for (let i = 0; i < 8; i++) {
+    for (
+        let i = 0;
+        i < 8;
+        i++
+    ) {
 
-        result += chars[
-            crypto.randomInt(
-                0,
-                chars.length
-            )
-        ];
+        result +=
+            chars[
+                crypto.randomInt(
+                    0,
+                    chars.length
+                )
+            ];
+
     }
 
     return result;
@@ -170,10 +303,17 @@ function randomLuaName() {
 
 function buildL2(session) {
 
-    const vm = randomLuaName();
-    const run = randomLuaName();
-    const data = randomLuaName();
-    const endpoint = randomLuaName();
+    const vm =
+        randomLuaName();
+
+    const run =
+        randomLuaName();
+
+    const data =
+        randomLuaName();
+
+    const endpoint =
+        randomLuaName();
 
     const nextToken =
         issueToken(session);
@@ -219,7 +359,9 @@ local function ${run}(p)
 
             table.insert(
                 stack,
-                p.strings[instruction.arg]
+                p.strings[
+                    instruction.arg
+                ]
             )
 
         end
@@ -375,7 +517,7 @@ function buildL4(session) {
         randomLuaName();
 
     return `
--- LEXINX L4 RUNTIME
+-- LEXINX L4
 
 local ${program} = {
 
@@ -460,11 +602,17 @@ end
    L5
 ========================================================= */
 
-function buildL5(session, source) {
+function buildL5(
+    session,
+    source
+) {
 
     const payload =
         Buffer
-            .from(source, "utf8")
+            .from(
+                source,
+                "utf8"
+            )
             .toString("base64");
 
     const fn =
@@ -474,7 +622,7 @@ function buildL5(session, source) {
         randomLuaName();
 
     return `
--- LEXINX L5 RUNTIME
+-- LEXINX L5
 
 local ${data} =
     "${payload}"
@@ -497,7 +645,10 @@ local ${fn} =
         for i = 1, #input do
 
             local c =
-                input:sub(i, i)
+                input:sub(
+                    i,
+                    i
+                )
 
             if c ~= "=" then
 
@@ -546,7 +697,8 @@ local ${fn} =
                 ) == "1" then
 
                     byte =
-                        byte + 2^(7-j)
+                        byte +
+                        2^(7-j)
 
                 end
 
@@ -557,7 +709,9 @@ local ${fn} =
 
         end
 
-        return table.concat(decoded)
+        return table.concat(
+            decoded
+        )
 
     end
 
@@ -574,7 +728,7 @@ end
 }
 
 /* =========================================================
-   WEBSITE ROOT
+   HOME
 ========================================================= */
 
 app.get("/", (req, res) => {
@@ -589,283 +743,887 @@ app.get("/", (req, res) => {
 });
 
 /* =========================================================
-   HEALTH CHECK
+   HEALTH
 ========================================================= */
 
-app.get("/health", (req, res) => {
+app.get(
+    "/health",
+    async (req, res) => {
 
-    return res.status(200).json({
+        try {
 
-        ok: true,
+            await pool.query(
+                "SELECT 1"
+            );
 
-        status: "online",
+            return res.json({
 
-        service: "LEXINX",
+                ok: true,
 
-        uptime: process.uptime(),
+                status: "online",
 
-        time: new Date().toISOString()
+                database: "online",
 
-    });
+                uptime:
+                    process.uptime()
 
-});
+            });
+
+        } catch (error) {
+
+            return res.status(503).json({
+
+                ok: false,
+
+                status: "online",
+
+                database: "offline"
+
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   REGISTER
+========================================================= */
+
+app.post(
+    "/api/register",
+    async (req, res) => {
+
+        try {
+
+            let {
+                username,
+                password
+            } = req.body;
+
+            if (
+                typeof username !==
+                "string" ||
+                typeof password !==
+                "string"
+            ) {
+
+                return res.status(400).json({
+
+                    ok: false,
+
+                    error:
+                        "Username and password are required"
+
+                });
+
+            }
+
+            username =
+                username
+                    .trim()
+                    .toLowerCase();
+
+            if (
+                !/^[a-z0-9_]{3,32}$/
+                    .test(username)
+            ) {
+
+                return res.status(400).json({
+
+                    ok: false,
+
+                    error:
+                        "Username must be 3-32 characters and use only letters, numbers or _"
+
+                });
+
+            }
+
+            if (
+                password.length < 6 ||
+                password.length > 128
+            ) {
+
+                return res.status(400).json({
+
+                    ok: false,
+
+                    error:
+                        "Password must be 6-128 characters"
+
+                });
+
+            }
+
+            const existing =
+                await pool.query(
+                    `
+                    SELECT id
+                    FROM users
+                    WHERE username = $1
+                    LIMIT 1
+                    `,
+                    [username]
+                );
+
+            if (
+                existing.rows.length
+            ) {
+
+                return res.status(409).json({
+
+                    ok: false,
+
+                    error:
+                        "Username already exists"
+
+                });
+
+            }
+
+            const passwordHash =
+                await bcrypt.hash(
+                    password,
+                    12
+                );
+
+            const result =
+                await pool.query(
+                    `
+                    INSERT INTO users
+                    (
+                        username,
+                        password_hash
+                    )
+                    VALUES
+                    ($1, $2)
+                    RETURNING
+                        id,
+                        username,
+                        created_at
+                    `,
+                    [
+                        username,
+                        passwordHash
+                    ]
+                );
+
+            const user =
+                result.rows[0];
+
+            return res.status(201).json({
+
+                ok: true,
+
+                message:
+                    "Registration successful",
+
+                user: {
+
+                    id: user.id,
+
+                    username:
+                        user.username,
+
+                    createdAt:
+                        user.created_at
+
+                }
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "REGISTER ERROR:",
+                error
+            );
+
+            return res.status(500).json({
+
+                ok: false,
+
+                error:
+                    "Internal server error"
+
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   LOGIN
+========================================================= */
+
+app.post(
+    "/api/login",
+    async (req, res) => {
+
+        try {
+
+            let {
+                username,
+                password
+            } = req.body;
+
+            if (
+                typeof username !==
+                "string" ||
+                typeof password !==
+                "string"
+            ) {
+
+                return res.status(400).json({
+
+                    ok: false,
+
+                    error:
+                        "Username and password are required"
+
+                });
+
+            }
+
+            username =
+                username
+                    .trim()
+                    .toLowerCase();
+
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        id,
+                        username,
+                        password_hash
+                    FROM users
+                    WHERE username = $1
+                    LIMIT 1
+                    `,
+                    [username]
+                );
+
+            if (
+                result.rows.length === 0
+            ) {
+
+                return res.status(401).json({
+
+                    ok: false,
+
+                    error:
+                        "Invalid username or password"
+
+                });
+
+            }
+
+            const user =
+                result.rows[0];
+
+            const valid =
+                await bcrypt.compare(
+                    password,
+                    user.password_hash
+                );
+
+            if (!valid) {
+
+                return res.status(401).json({
+
+                    ok: false,
+
+                    error:
+                        "Invalid username or password"
+
+                });
+
+            }
+
+            const sessionId =
+                randomHex(32);
+
+            const expiresAt =
+                new Date(
+                    Date.now() +
+                    7 * 24 * 60 * 60 * 1000
+                );
+
+            await pool.query(
+                `
+                INSERT INTO sessions
+                (
+                    id,
+                    user_id,
+                    expires_at
+                )
+                VALUES
+                ($1, $2, $3)
+                `,
+                [
+                    sessionId,
+                    user.id,
+                    expiresAt
+                ]
+            );
+
+            await pool.query(
+                `
+                UPDATE users
+                SET last_login = NOW()
+                WHERE id = $1
+                `,
+                [user.id]
+            );
+
+            res.cookie = res.cookie || function(){};
+
+            res.setHeader(
+                "Set-Cookie",
+                `session=${sessionId}; HttpOnly; Path=/; Max-Age=${7 * 24 * 60 * 60}; SameSite=Lax${process.env.NODE_ENV === "production" ? "; Secure" : ""}`
+            );
+
+            return res.json({
+
+                ok: true,
+
+                message:
+                    "Login successful",
+
+                user: {
+
+                    id: user.id,
+
+                    username:
+                        user.username
+
+                }
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "LOGIN ERROR:",
+                error
+            );
+
+            return res.status(500).json({
+
+                ok: false,
+
+                error:
+                    "Internal server error"
+
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   COOKIE PARSER
+========================================================= */
+
+function getSessionId(req) {
+
+    const header =
+        req.headers.cookie;
+
+    if (!header) {
+        return null;
+    }
+
+    const cookies =
+        header.split(";");
+
+    for (
+        const cookie of cookies
+    ) {
+
+        const parts =
+            cookie.trim().split("=");
+
+        if (
+            parts[0] ===
+            "session"
+        ) {
+
+            return parts
+                .slice(1)
+                .join("=");
+
+        }
+
+    }
+
+    return null;
+}
+
+/* =========================================================
+   CURRENT USER
+========================================================= */
+
+app.get(
+    "/api/me",
+    async (req, res) => {
+
+        try {
+
+            const sessionId =
+                getSessionId(req);
+
+            if (!sessionId) {
+
+                return res.status(401).json({
+
+                    ok: false,
+
+                    authenticated: false
+
+                });
+
+            }
+
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        u.id,
+                        u.username,
+                        u.created_at,
+                        u.last_login,
+                        s.expires_at
+                    FROM sessions s
+                    JOIN users u
+                        ON u.id = s.user_id
+                    WHERE
+                        s.id = $1
+                        AND s.expires_at > NOW()
+                    LIMIT 1
+                    `,
+                    [sessionId]
+                );
+
+            if (
+                result.rows.length === 0
+            ) {
+
+                return res.status(401).json({
+
+                    ok: false,
+
+                    authenticated: false
+
+                });
+
+            }
+
+            const user =
+                result.rows[0];
+
+            return res.json({
+
+                ok: true,
+
+                authenticated: true,
+
+                user: {
+
+                    id: user.id,
+
+                    username:
+                        user.username,
+
+                    createdAt:
+                        user.created_at,
+
+                    lastLogin:
+                        user.last_login,
+
+                    sessionExpires:
+                        user.expires_at
+
+                }
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ME ERROR:",
+                error
+            );
+
+            return res.status(500).json({
+
+                ok: false,
+
+                error:
+                    "Internal server error"
+
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   LOGOUT
+========================================================= */
+
+app.post(
+    "/api/logout",
+    async (req, res) => {
+
+        try {
+
+            const sessionId =
+                getSessionId(req);
+
+            if (sessionId) {
+
+                await pool.query(
+                    `
+                    DELETE FROM sessions
+                    WHERE id = $1
+                    `,
+                    [sessionId]
+                );
+
+            }
+
+            res.setHeader(
+                "Set-Cookie",
+                "session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax"
+            );
+
+            return res.json({
+
+                ok: true,
+
+                message:
+                    "Logged out"
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "LOGOUT ERROR:",
+                error
+            );
+
+            return res.status(500).json({
+
+                ok: false,
+
+                error:
+                    "Internal server error"
+
+            });
+
+        }
+
+    }
+);
 
 /* =========================================================
    L1 LOADER
 ========================================================= */
 
-app.get("/api/loader/:id", (req, res) => {
+app.get(
+    "/api/loader/:id",
+    (req, res) => {
 
-    const id =
-        req.params.id;
+        const id =
+            req.params.id;
 
-    const script =
-        scripts.get(id);
+        const script =
+            scripts.get(id);
 
-    if (!script) {
+        if (!script) {
 
-        return apiBlock(
-            res,
-            "SCRIPT NOT FOUND"
-        );
+            return apiBlock(
+                res,
+                "SCRIPT NOT FOUND"
+            );
+
+        }
+
+        const session =
+            createLoaderSession(id);
+
+        session.stage = 2;
+
+        const code =
+            buildL2(session);
+
+        return res
+            .status(200)
+            .type("text/plain")
+            .send(code);
 
     }
-
-    const session =
-        createSession(id);
-
-    session.stage = 2;
-
-    const code =
-        buildL2(session);
-
-    return res
-        .status(200)
-        .type("text/plain")
-        .send(code);
-
-});
+);
 
 /* =========================================================
-   L3 ENDPOINT
+   L3
 ========================================================= */
 
-app.get("/api/l3", (req, res) => {
+app.get(
+    "/api/l3",
+    (req, res) => {
 
-    const session =
-        sessions.get(
-            req.query.session
-        );
+        const session =
+            sessions.get(
+                req.query.session
+            );
 
-    if (!validSession(session)) {
+        if (
+            !validLoaderSession(
+                session
+            )
+        ) {
 
-        return apiBlock(
-            res,
-            "INVALID SESSION"
-        );
+            return apiBlock(
+                res,
+                "INVALID SESSION"
+            );
+
+        }
+
+        if (
+            session.stage !== 2
+        ) {
+
+            return apiBlock(
+                res,
+                "INVALID STAGE"
+            );
+
+        }
+
+        if (
+            !consumeToken(
+                session,
+                req.query.token
+            )
+        ) {
+
+            return apiBlock(
+                res,
+                "INVALID TOKEN"
+            );
+
+        }
+
+        session.stage = 3;
+
+        return res
+            .status(200)
+            .type("text/plain")
+            .send(
+                buildL3(session)
+            );
 
     }
-
-    if (session.stage !== 2) {
-
-        return apiBlock(
-            res,
-            "INVALID STAGE"
-        );
-
-    }
-
-    if (
-        !consumeToken(
-            session,
-            req.query.token
-        )
-    ) {
-
-        return apiBlock(
-            res,
-            "INVALID TOKEN"
-        );
-
-    }
-
-    session.stage = 3;
-
-    return res
-        .status(200)
-        .type("text/plain")
-        .send(
-            buildL3(session)
-        );
-
-});
+);
 
 /* =========================================================
-   L4 ENDPOINT
+   L4
 ========================================================= */
 
-app.get("/api/l4", (req, res) => {
+app.get(
+    "/api/l4",
+    (req, res) => {
 
-    const session =
-        sessions.get(
-            req.query.session
-        );
+        const session =
+            sessions.get(
+                req.query.session
+            );
 
-    if (!validSession(session)) {
+        if (
+            !validLoaderSession(
+                session
+            )
+        ) {
 
-        return apiBlock(
-            res,
-            "INVALID SESSION"
-        );
+            return apiBlock(
+                res,
+                "INVALID SESSION"
+            );
+
+        }
+
+        if (
+            session.stage !== 3
+        ) {
+
+            return apiBlock(
+                res,
+                "INVALID STAGE"
+            );
+
+        }
+
+        if (
+            !consumeToken(
+                session,
+                req.query.token
+            )
+        ) {
+
+            return apiBlock(
+                res,
+                "INVALID TOKEN"
+            );
+
+        }
+
+        session.stage = 4;
+
+        return res
+            .status(200)
+            .type("text/plain")
+            .send(
+                buildL4(session)
+            );
 
     }
-
-    if (session.stage !== 3) {
-
-        return apiBlock(
-            res,
-            "INVALID STAGE"
-        );
-
-    }
-
-    if (
-        !consumeToken(
-            session,
-            req.query.token
-        )
-    ) {
-
-        return apiBlock(
-            res,
-            "INVALID TOKEN"
-        );
-
-    }
-
-    session.stage = 4;
-
-    return res
-        .status(200)
-        .type("text/plain")
-        .send(
-            buildL4(session)
-        );
-
-});
+);
 
 /* =========================================================
-   L5 ENDPOINT
+   L5
 ========================================================= */
 
-app.get("/api/l5", (req, res) => {
+app.get(
+    "/api/l5",
+    (req, res) => {
 
-    const session =
-        sessions.get(
-            req.query.session
-        );
+        const session =
+            sessions.get(
+                req.query.session
+            );
 
-    if (!validSession(session)) {
+        if (
+            !validLoaderSession(
+                session
+            )
+        ) {
 
-        return apiBlock(
-            res,
-            "INVALID SESSION"
-        );
+            return apiBlock(
+                res,
+                "INVALID SESSION"
+            );
 
-    }
+        }
 
-    if (session.stage !== 4) {
+        if (
+            session.stage !== 4
+        ) {
 
-        return apiBlock(
-            res,
-            "INVALID STAGE"
-        );
+            return apiBlock(
+                res,
+                "INVALID STAGE"
+            );
 
-    }
+        }
 
-    if (
-        !consumeToken(
-            session,
-            req.query.token
-        )
-    ) {
+        if (
+            !consumeToken(
+                session,
+                req.query.token
+            )
+        ) {
 
-        return apiBlock(
-            res,
-            "INVALID TOKEN"
-        );
+            return apiBlock(
+                res,
+                "INVALID TOKEN"
+            );
 
-    }
+        }
 
-    const script =
-        scripts.get(
-            session.scriptId
-        );
+        const script =
+            scripts.get(
+                session.scriptId
+            );
 
-    if (!script) {
+        if (!script) {
+
+            sessions.delete(
+                session.id
+            );
+
+            return apiBlock(
+                res,
+                "SCRIPT NOT FOUND"
+            );
+
+        }
+
+        session.stage = 5;
+
+        const output =
+            buildL5(
+                session,
+                script.source
+            );
 
         sessions.delete(
             session.id
         );
 
+        return res
+            .status(200)
+            .type("text/plain")
+            .send(output);
+
+    }
+);
+
+/* =========================================================
+   UNKNOWN API
+========================================================= */
+
+app.use(
+    "/api",
+    (req, res) => {
+
         return apiBlock(
             res,
-            "SCRIPT NOT FOUND"
+            "API ROUTE NOT FOUND"
         );
 
     }
-
-    session.stage = 5;
-
-    const output =
-        buildL5(
-            session,
-            script.source
-        );
-
-    sessions.delete(
-        session.id
-    );
-
-    return res
-        .status(200)
-        .type("text/plain")
-        .send(output);
-
-});
-
-/* =========================================================
-   UNKNOWN API ROUTES
-========================================================= */
-
-app.use("/api", (req, res) => {
-
-    return apiBlock(
-        res,
-        "API ROUTE NOT FOUND"
-    );
-
-});
+);
 
 /* =========================================================
    UNKNOWN WEBSITE ROUTES
 ========================================================= */
 
-app.use((req, res) => {
+app.use(
+    (req, res) => {
 
-    return res
-        .status(404)
-        .sendFile(
-            path.join(
-                publicPath,
-                "index.html"
-            )
-        );
+        return res
+            .status(404)
+            .sendFile(
+                path.join(
+                    publicPath,
+                    "index.html"
+                )
+            );
 
-});
+    }
+);
 
 /* =========================================================
-   CLEAN EXPIRED SESSIONS
+   CLEAN LOADER SESSIONS
 ========================================================= */
 
 setInterval(() => {
@@ -879,7 +1637,8 @@ setInterval(() => {
     ) {
 
         if (
-            now > session.expires
+            now >
+            session.expires
         ) {
 
             sessions.delete(id);
@@ -891,17 +1650,50 @@ setInterval(() => {
 }, 30 * 1000);
 
 /* =========================================================
+   CLEAN DATABASE SESSIONS
+========================================================= */
+
+setInterval(
+    async () => {
+
+        try {
+
+            await pool.query(
+                `
+                DELETE FROM sessions
+                WHERE expires_at <= NOW()
+                `
+            );
+
+        } catch (error) {
+
+            console.error(
+                "SESSION CLEANUP ERROR:",
+                error
+            );
+
+        }
+
+    },
+    60 * 60 * 1000
+);
+
+/* =========================================================
    SERVER
 ========================================================= */
 
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(
+    PORT,
+    "0.0.0.0",
+    () => {
 
-    console.log(
-        `LEXINX server running on port ${PORT}`
-    );
+        console.log(
+            `Server running on port ${PORT}`
+        );
 
-    console.log(
-        `Public directory: ${publicPath}`
-    );
+        console.log(
+            `Public: ${publicPath}`
+        );
 
-});
+    }
+);
