@@ -8,16 +8,39 @@ const app = express();
 
 const PORT = process.env.PORT || 3000;
 
-const TOKEN_TTL = 60 * 1000;
+/* =========================================================
+   CONFIG
+========================================================= */
+
+const SESSION_TTL =
+    7 * 24 * 60 * 60 * 1000;
+
+const LOADER_TTL =
+    60 * 1000;
+
+const BASE_URL =
+    process.env.PUBLIC_URL ||
+    "";
 
 /* =========================================================
    EXPRESS
 ========================================================= */
 
-app.use(express.json({ limit: "1mb" }));
+app.use(
+    express.json({
+        limit: "2mb"
+    })
+);
+
+/* =========================================================
+   PUBLIC
+========================================================= */
 
 const publicPath =
-    path.join(__dirname, "public");
+    path.join(
+        __dirname,
+        "public"
+    );
 
 app.use(
     express.static(publicPath)
@@ -30,23 +53,27 @@ app.use(
 if (!process.env.DATABASE_URL) {
 
     console.error(
-        "DATABASE_URL is missing"
+        "ERROR: DATABASE_URL is not configured."
     );
 
 }
 
 const pool = new Pool({
+
     connectionString:
         process.env.DATABASE_URL,
 
     ssl:
         process.env.NODE_ENV === "production"
-            ? { rejectUnauthorized: false }
+            ? {
+                rejectUnauthorized: false
+            }
             : false
+
 });
 
 /* =========================================================
-   DATABASE INIT
+   DATABASE
 ========================================================= */
 
 async function initDatabase() {
@@ -71,7 +98,7 @@ async function initDatabase() {
     `);
 
     await pool.query(`
-        CREATE TABLE IF NOT EXISTS sessions (
+        CREATE TABLE IF NOT EXISTS auth_sessions (
 
             id TEXT PRIMARY KEY,
 
@@ -89,19 +116,52 @@ async function initDatabase() {
         );
     `);
 
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS scripts (
+
+            id VARCHAR(64) PRIMARY KEY,
+
+            user_id BIGINT
+                NOT NULL
+                REFERENCES users(id)
+                ON DELETE CASCADE,
+
+            name VARCHAR(100)
+                NOT NULL,
+
+            source TEXT
+                NOT NULL,
+
+            created_at TIMESTAMPTZ
+                NOT NULL DEFAULT NOW(),
+
+            updated_at TIMESTAMPTZ
+                NOT NULL DEFAULT NOW()
+
+        );
+    `);
+
+    await pool.query(`
+        CREATE INDEX IF NOT EXISTS
+        scripts_user_id_idx
+        ON scripts(user_id);
+    `);
+
+    await pool.query(`
+        CREATE INDEX IF NOT EXISTS
+        auth_sessions_user_id_idx
+        ON auth_sessions(user_id);
+    `);
+
     console.log(
-        "PostgreSQL database ready"
+        "PostgreSQL initialized."
     );
 }
-
-/* =========================================================
-   DATABASE START
-========================================================= */
 
 initDatabase().catch(error => {
 
     console.error(
-        "Database initialization failed:",
+        "DATABASE INIT ERROR:",
         error
     );
 
@@ -111,46 +171,1380 @@ initDatabase().catch(error => {
    RANDOM
 ========================================================= */
 
-function randomHex(size = 32) {
+function randomHex(
+    bytes = 32
+) {
 
     return crypto
-        .randomBytes(size)
+        .randomBytes(bytes)
         .toString("hex");
 
 }
 
-function createToken() {
+/* =========================================================
+   COOKIE
+========================================================= */
 
-    return randomHex(32);
+function getCookie(
+    req,
+    name
+) {
+
+    const header =
+        req.headers.cookie;
+
+    if (!header) {
+        return null;
+    }
+
+    const cookies =
+        header.split(";");
+
+    for (
+        const item of cookies
+    ) {
+
+        const index =
+            item.indexOf("=");
+
+        if (index === -1) {
+            continue;
+        }
+
+        const key =
+            item
+                .slice(0, index)
+                .trim();
+
+        const value =
+            item
+                .slice(index + 1)
+                .trim();
+
+        if (key === name) {
+            return decodeURIComponent(
+                value
+            );
+        }
+
+    }
+
+    return null;
+}
+
+/* =========================================================
+   SET SESSION COOKIE
+========================================================= */
+
+function setSessionCookie(
+    res,
+    sessionId
+) {
+
+    const maxAge =
+        Math.floor(
+            SESSION_TTL / 1000
+        );
+
+    let cookie =
+        `session=${encodeURIComponent(sessionId)}; ` +
+        `Path=/; ` +
+        `HttpOnly; ` +
+        `SameSite=Lax; ` +
+        `Max-Age=${maxAge}`;
+
+    if (
+        process.env.NODE_ENV ===
+        "production"
+    ) {
+
+        cookie +=
+            "; Secure";
+
+    }
+
+    res.setHeader(
+        "Set-Cookie",
+        cookie
+    );
+}
+
+/* =========================================================
+   CLEAR SESSION COOKIE
+========================================================= */
+
+function clearSessionCookie(
+    res
+) {
+
+    res.setHeader(
+        "Set-Cookie",
+        "session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
+    );
 
 }
 
 /* =========================================================
-   SCRIPTS
+   AUTH USER
 ========================================================= */
 
-const scripts = new Map();
+async function getAuthUser(
+    req
+) {
 
-scripts.set(
-    "58ceecd03f8a061d8af1d341",
-    {
-        source: `
-print("LEXINX PAYLOAD RUNNING")
-`
+    const sessionId =
+        getCookie(
+            req,
+            "session"
+        );
+
+    if (!sessionId) {
+        return null;
+    }
+
+    const result =
+        await pool.query(
+            `
+            SELECT
+                u.id,
+                u.username,
+                u.created_at,
+                u.last_login,
+                s.id AS session_id,
+                s.expires_at
+            FROM auth_sessions s
+            JOIN users u
+                ON u.id = s.user_id
+            WHERE
+                s.id = $1
+                AND s.expires_at > NOW()
+            LIMIT 1
+            `,
+            [sessionId]
+        );
+
+    if (
+        result.rows.length === 0
+    ) {
+
+        return null;
+
+    }
+
+    return result.rows[0];
+}
+
+/* =========================================================
+   REQUIRE AUTH
+========================================================= */
+
+async function requireAuth(
+    req,
+    res,
+    next
+) {
+
+    try {
+
+        const user =
+            await getAuthUser(req);
+
+        if (!user) {
+
+            return res
+                .status(401)
+                .json({
+                    ok: false,
+                    error:
+                        "Not authenticated"
+                });
+
+        }
+
+        req.user =
+            user;
+
+        next();
+
+    } catch (error) {
+
+        console.error(
+            "AUTH ERROR:",
+            error
+        );
+
+        return res
+            .status(500)
+            .json({
+                ok: false,
+                error:
+                    "Internal server error"
+            });
+
+    }
+
+}
+
+/* =========================================================
+   API ERROR
+========================================================= */
+
+function apiError(
+    res,
+    status,
+    message
+) {
+
+    return res
+        .status(status)
+        .json({
+
+            ok: false,
+
+            error: message
+
+        });
+
+}
+
+/* =========================================================
+   HOME
+========================================================= */
+
+app.get(
+    "/",
+    (req, res) => {
+
+        return res.sendFile(
+            path.join(
+                publicPath,
+                "index.html"
+            )
+        );
+
     }
 );
 
 /* =========================================================
-   LOADER SESSION STORAGE
+   HEALTH
 ========================================================= */
 
-const sessions = new Map();
+app.get(
+    "/health",
+    async (req, res) => {
+
+        try {
+
+            await pool.query(
+                "SELECT 1"
+            );
+
+            return res.json({
+
+                ok: true,
+
+                status:
+                    "API ONLINE",
+
+                database:
+                    "ONLINE",
+
+                uptime:
+                    process.uptime()
+
+            });
+
+        } catch (error) {
+
+            return res
+                .status(503)
+                .json({
+
+                    ok: false,
+
+                    status:
+                        "API ONLINE",
+
+                    database:
+                        "OFFLINE"
+
+                });
+
+        }
+
+    }
+);
 
 /* =========================================================
-   LOADER SESSION
+   REGISTER
 ========================================================= */
 
-function createLoaderSession(scriptId) {
+app.post(
+    "/api/register",
+    async (req, res) => {
+
+        try {
+
+            let username =
+                req.body.username;
+
+            const password =
+                req.body.password;
+
+            if (
+                typeof username !==
+                "string" ||
+                typeof password !==
+                "string"
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Username and password are required."
+                );
+
+            }
+
+            username =
+                username
+                    .trim()
+                    .toLowerCase();
+
+            if (
+                !/^[a-z0-9_]{3,32}$/
+                    .test(username)
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Username must be 3-32 characters and use only letters, numbers or underscore."
+                );
+
+            }
+
+            if (
+                password.length < 6
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Password must contain at least 6 characters."
+                );
+
+            }
+
+            if (
+                password.length > 128
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Password is too long."
+                );
+
+            }
+
+            const existing =
+                await pool.query(
+                    `
+                    SELECT id
+                    FROM users
+                    WHERE username = $1
+                    LIMIT 1
+                    `,
+                    [username]
+                );
+
+            if (
+                existing.rows.length
+            ) {
+
+                return apiError(
+                    res,
+                    409,
+                    "Username already exists."
+                );
+
+            }
+
+            const passwordHash =
+                await bcrypt.hash(
+                    password,
+                    12
+                );
+
+            const result =
+                await pool.query(
+                    `
+                    INSERT INTO users
+                    (
+                        username,
+                        password_hash
+                    )
+                    VALUES
+                    ($1, $2)
+                    RETURNING
+                        id,
+                        username,
+                        created_at
+                    `,
+                    [
+                        username,
+                        passwordHash
+                    ]
+                );
+
+            const user =
+                result.rows[0];
+
+            /* Automatically login after registration */
+
+            const sessionId =
+                randomHex(32);
+
+            const expires =
+                new Date(
+                    Date.now() +
+                    SESSION_TTL
+                );
+
+            await pool.query(
+                `
+                INSERT INTO auth_sessions
+                (
+                    id,
+                    user_id,
+                    expires_at
+                )
+                VALUES
+                ($1, $2, $3)
+                `,
+                [
+                    sessionId,
+                    user.id,
+                    expires
+                ]
+            );
+
+            setSessionCookie(
+                res,
+                sessionId
+            );
+
+            return res
+                .status(201)
+                .json({
+
+                    ok: true,
+
+                    message:
+                        "Account created successfully.",
+
+                    username:
+                        user.username,
+
+                    url:
+                        BASE_URL ||
+                        `${req.protocol}://${req.get("host")}`,
+
+                    user: {
+
+                        id:
+                            user.id,
+
+                        username:
+                            user.username
+
+                    }
+
+                });
+
+        } catch (error) {
+
+            console.error(
+                "REGISTER ERROR:",
+                error
+            );
+
+            if (
+                error.code ===
+                "23505"
+            ) {
+
+                return apiError(
+                    res,
+                    409,
+                    "Username already exists."
+                );
+
+            }
+
+            return apiError(
+                res,
+                500,
+                "Internal server error."
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   LOGIN
+========================================================= */
+
+app.post(
+    "/api/login",
+    async (req, res) => {
+
+        try {
+
+            let username =
+                req.body.username;
+
+            const password =
+                req.body.password;
+
+            if (
+                typeof username !==
+                "string" ||
+                typeof password !==
+                "string"
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Username and password are required."
+                );
+
+            }
+
+            username =
+                username
+                    .trim()
+                    .toLowerCase();
+
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        id,
+                        username,
+                        password_hash
+                    FROM users
+                    WHERE username = $1
+                    LIMIT 1
+                    `,
+                    [username]
+                );
+
+            if (
+                result.rows.length === 0
+            ) {
+
+                return apiError(
+                    res,
+                    401,
+                    "Invalid username or password."
+                );
+
+            }
+
+            const user =
+                result.rows[0];
+
+            const valid =
+                await bcrypt.compare(
+                    password,
+                    user.password_hash
+                );
+
+            if (!valid) {
+
+                return apiError(
+                    res,
+                    401,
+                    "Invalid username or password."
+                );
+
+            }
+
+            const sessionId =
+                randomHex(32);
+
+            const expires =
+                new Date(
+                    Date.now() +
+                    SESSION_TTL
+                );
+
+            await pool.query(
+                `
+                INSERT INTO auth_sessions
+                (
+                    id,
+                    user_id,
+                    expires_at
+                )
+                VALUES
+                ($1, $2, $3)
+                `,
+                [
+                    sessionId,
+                    user.id,
+                    expires
+                ]
+            );
+
+            await pool.query(
+                `
+                UPDATE users
+                SET last_login = NOW()
+                WHERE id = $1
+                `,
+                [user.id]
+            );
+
+            setSessionCookie(
+                res,
+                sessionId
+            );
+
+            return res.json({
+
+                ok: true,
+
+                message:
+                    "Login successful.",
+
+                username:
+                    user.username,
+
+                url:
+                    BASE_URL ||
+                    `${req.protocol}://${req.get("host")}`,
+
+                user: {
+
+                    id:
+                        user.id,
+
+                    username:
+                        user.username
+
+                }
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "LOGIN ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Internal server error."
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   ME
+========================================================= */
+
+app.get(
+    "/api/me",
+    async (req, res) => {
+
+        try {
+
+            const user =
+                await getAuthUser(req);
+
+            if (!user) {
+
+                return apiError(
+                    res,
+                    401,
+                    "Not authenticated."
+                );
+
+            }
+
+            return res.json({
+
+                ok: true,
+
+                username:
+                    user.username,
+
+                url:
+                    BASE_URL ||
+                    `${req.protocol}://${req.get("host")}`,
+
+                user: {
+
+                    id:
+                        user.id,
+
+                    username:
+                        user.username,
+
+                    createdAt:
+                        user.created_at,
+
+                    lastLogin:
+                        user.last_login
+
+                }
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "ME ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Internal server error."
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   LOGOUT
+========================================================= */
+
+app.post(
+    "/api/logout",
+    async (req, res) => {
+
+        try {
+
+            const sessionId =
+                getCookie(
+                    req,
+                    "session"
+                );
+
+            if (sessionId) {
+
+                await pool.query(
+                    `
+                    DELETE FROM auth_sessions
+                    WHERE id = $1
+                    `,
+                    [sessionId]
+                );
+
+            }
+
+            clearSessionCookie(
+                res
+            );
+
+            return res.json({
+
+                ok: true,
+
+                message:
+                    "Logged out successfully."
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "LOGOUT ERROR:",
+                error
+            );
+
+            clearSessionCookie(
+                res
+            );
+
+            return res.json({
+
+                ok: true
+
+            });
+
+        }
+
+    }
+);
+
+/* =========================================================
+   CREATE SCRIPT
+========================================================= */
+
+app.post(
+    "/api/create",
+    requireAuth,
+    async (req, res) => {
+
+        try {
+
+            let name =
+                req.body.name;
+
+            const source =
+                req.body.source;
+
+            if (
+                typeof source !==
+                "string"
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Script source is required."
+                );
+
+            }
+
+            if (
+                !source.trim()
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Script source cannot be empty."
+                );
+
+            }
+
+            if (
+                source.length >
+                2 * 1024 * 1024
+            ) {
+
+                return apiError(
+                    res,
+                    413,
+                    "Script is too large."
+                );
+
+            }
+
+            if (
+                typeof name !==
+                "string"
+            ) {
+
+                name =
+                    "Untitled Script";
+
+            }
+
+            name =
+                name.trim();
+
+            if (!name) {
+
+                name =
+                    "Untitled Script";
+
+            }
+
+            if (
+                name.length >
+                100
+            ) {
+
+                name =
+                    name.slice(
+                        0,
+                        100
+                    );
+
+            }
+
+            const id =
+                randomHex(12);
+
+            await pool.query(
+                `
+                INSERT INTO scripts
+                (
+                    id,
+                    user_id,
+                    name,
+                    source
+                )
+                VALUES
+                ($1, $2, $3, $4)
+                `,
+                [
+                    id,
+                    req.user.id,
+                    name,
+                    source
+                ]
+            );
+
+            const loader =
+                `${BASE_URL || `${req.protocol}://${req.get("host")}`}/api/loader/${id}`;
+
+            return res
+                .status(201)
+                .json({
+
+                    ok: true,
+
+                    id,
+
+                    name,
+
+                    loader
+
+                });
+
+        } catch (error) {
+
+            console.error(
+                "CREATE SCRIPT ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Failed to create script."
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   LIST SCRIPTS
+========================================================= */
+
+app.get(
+    "/api/scripts",
+    requireAuth,
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        id,
+                        name,
+                        created_at,
+                        updated_at
+                    FROM scripts
+                    WHERE user_id = $1
+                    ORDER BY created_at DESC
+                    `,
+                    [req.user.id]
+                );
+
+            const base =
+                BASE_URL ||
+                `${req.protocol}://${req.get("host")}`;
+
+            const scripts =
+                result.rows.map(
+                    script => ({
+
+                        id:
+                            script.id,
+
+                        name:
+                            script.name,
+
+                        createdAt:
+                            script.created_at,
+
+                        updatedAt:
+                            script.updated_at,
+
+                        loader:
+                            `${base}/api/loader/${script.id}`
+
+                    })
+                );
+
+            return res.json({
+
+                ok: true,
+
+                scripts
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "LIST SCRIPTS ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Failed to load scripts."
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   GET ONE SCRIPT
+========================================================= */
+
+app.get(
+    "/api/script/:id",
+    requireAuth,
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        id,
+                        name,
+                        source,
+                        created_at,
+                        updated_at
+                    FROM scripts
+                    WHERE
+                        id = $1
+                        AND user_id = $2
+                    LIMIT 1
+                    `,
+                    [
+                        req.params.id,
+                        req.user.id
+                    ]
+                );
+
+            if (
+                result.rows.length === 0
+            ) {
+
+                return apiError(
+                    res,
+                    404,
+                    "Script not found."
+                );
+
+            }
+
+            const script =
+                result.rows[0];
+
+            return res.json({
+
+                ok: true,
+
+                script: {
+
+                    id:
+                        script.id,
+
+                    name:
+                        script.name,
+
+                    source:
+                        script.source,
+
+                    createdAt:
+                        script.created_at,
+
+                    updatedAt:
+                        script.updated_at
+
+                }
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "GET SCRIPT ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Failed to load script."
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   EDIT SCRIPT
+========================================================= */
+
+app.put(
+    "/api/script/:id",
+    requireAuth,
+    async (req, res) => {
+
+        try {
+
+            let name =
+                req.body.name;
+
+            const source =
+                req.body.source;
+
+            if (
+                typeof name !==
+                "string" ||
+                typeof source !==
+                "string"
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Name and source are required."
+                );
+
+            }
+
+            name =
+                name.trim();
+
+            if (!name) {
+
+                name =
+                    "Untitled Script";
+
+            }
+
+            if (
+                name.length >
+                100
+            ) {
+
+                name =
+                    name.slice(
+                        0,
+                        100
+                    );
+
+            }
+
+            if (
+                !source.trim()
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Script source cannot be empty."
+                );
+
+            }
+
+            if (
+                source.length >
+                2 * 1024 * 1024
+            ) {
+
+                return apiError(
+                    res,
+                    413,
+                    "Script is too large."
+                );
+
+            }
+
+            const result =
+                await pool.query(
+                    `
+                    UPDATE scripts
+                    SET
+                        name = $1,
+                        source = $2,
+                        updated_at = NOW()
+                    WHERE
+                        id = $3
+                        AND user_id = $4
+                    RETURNING
+                        id,
+                        name,
+                        updated_at
+                    `,
+                    [
+                        name,
+                        source,
+                        req.params.id,
+                        req.user.id
+                    ]
+                );
+
+            if (
+                result.rows.length === 0
+            ) {
+
+                return apiError(
+                    res,
+                    404,
+                    "Script not found."
+                );
+
+            }
+
+            const script =
+                result.rows[0];
+
+            return res.json({
+
+                ok: true,
+
+                message:
+                    "Script updated successfully.",
+
+                script: {
+
+                    id:
+                        script.id,
+
+                    name:
+                        script.name,
+
+                    updatedAt:
+                        script.updated_at
+
+                }
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "EDIT SCRIPT ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Failed to update script."
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   DELETE SCRIPT
+========================================================= */
+
+app.delete(
+    "/api/script/:id",
+    requireAuth,
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await pool.query(
+                    `
+                    DELETE FROM scripts
+                    WHERE
+                        id = $1
+                        AND user_id = $2
+                    RETURNING id
+                    `,
+                    [
+                        req.params.id,
+                        req.user.id
+                    ]
+                );
+
+            if (
+                result.rows.length === 0
+            ) {
+
+                return apiError(
+                    res,
+                    404,
+                    "Script not found."
+                );
+
+            }
+
+            return res.json({
+
+                ok: true,
+
+                message:
+                    "Script deleted successfully."
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "DELETE SCRIPT ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Failed to delete script."
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   LOADER SESSIONS
+========================================================= */
+
+const loaderSessions =
+    new Map();
+
+/* =========================================================
+   CREATE LOADER SESSION
+========================================================= */
+
+function createLoaderSession(
+    scriptId
+) {
 
     const id =
         randomHex(32);
@@ -163,17 +1557,16 @@ function createLoaderSession(scriptId) {
 
         stage: 1,
 
-        tokens: new Set(),
-
-        created: Date.now(),
+        tokens:
+            new Set(),
 
         expires:
             Date.now() +
-            TOKEN_TTL
+            LOADER_TTL
 
     };
 
-    sessions.set(
+    loaderSessions.set(
         id,
         session
     );
@@ -181,10 +1574,16 @@ function createLoaderSession(scriptId) {
     return session;
 }
 
-function issueToken(session) {
+/* =========================================================
+   TOKEN
+========================================================= */
+
+function issueToken(
+    session
+) {
 
     const token =
-        createToken();
+        randomHex(32);
 
     session.tokens.add(
         token
@@ -207,7 +1606,9 @@ function consumeToken(
             token
         )
     ) {
+
         return false;
+
     }
 
     session.tokens.delete(
@@ -230,40 +1631,24 @@ function validLoaderSession(
         session.expires
     ) {
 
-        sessions.delete(
+        loaderSessions.delete(
             session.id
         );
 
         return false;
+
     }
 
     return true;
 }
 
 /* =========================================================
-   API ERROR
+   LUA HELPERS
 ========================================================= */
 
-function apiBlock(
-    res,
-    message = "LEXINX BLOCK"
+function luaString(
+    value
 ) {
-
-    return res.status(403).json({
-
-        ok: false,
-
-        error: message
-
-    });
-
-}
-
-/* =========================================================
-   LUA
-========================================================= */
-
-function luaString(value) {
 
     return JSON.stringify(
         String(value)
@@ -301,7 +1686,10 @@ function randomLuaName() {
    L2
 ========================================================= */
 
-function buildL2(session) {
+function buildL2(
+    session,
+    base
+) {
 
     const vm =
         randomLuaName();
@@ -318,6 +1706,9 @@ function buildL2(session) {
     const nextToken =
         issueToken(session);
 
+    const l3 =
+        `${base}/api/l3`;
+
     return `
 -- LEXINX L2
 
@@ -325,7 +1716,7 @@ local ${data} = {
 
     strings = {
 
-        [0] = "/api/l3",
+        [0] = ${luaString("/api/l3")},
         [1] = ${luaString(nextToken)},
         [2] = ${luaString(session.id)}
 
@@ -376,7 +1767,7 @@ local ${vm} =
     ${run}(${data})
 
 local ${endpoint} =
-    "https://Lexinx-protect.onrender.com/api/l3"
+    ${luaString(l3)}
 
 local ok, response =
     pcall(function()
@@ -408,7 +1799,10 @@ end
    L3
 ========================================================= */
 
-function buildL3(session) {
+function buildL3(
+    session,
+    base
+) {
 
     const nextToken =
         issueToken(session);
@@ -418,6 +1812,9 @@ function buildL3(session) {
 
     const run =
         randomLuaName();
+
+    const endpoint =
+        `${base}/api/l4`;
 
     return `
 -- LEXINX L3
@@ -475,7 +1872,7 @@ local result =
     ${run}(${data})
 
 local url =
-    "https://Lexinx-protect.onrender.com/api/l4"
+    ${luaString(endpoint)}
     .. "?session="
     .. ${luaString(session.id)}
     .. "&token="
@@ -484,7 +1881,9 @@ local url =
 local ok, response =
     pcall(function()
 
-        return game:HttpGet(url)
+        return game:HttpGet(
+            url
+        )
 
     end)
 
@@ -505,7 +1904,10 @@ end
    L4
 ========================================================= */
 
-function buildL4(session) {
+function buildL4(
+    session,
+    base
+) {
 
     const nextToken =
         issueToken(session);
@@ -515,6 +1917,9 @@ function buildL4(session) {
 
     const run =
         randomLuaName();
+
+    const endpoint =
+        `${base}/api/l5`;
 
     return `
 -- LEXINX L4
@@ -572,7 +1977,7 @@ local args =
     ${run}(${program})
 
 local url =
-    "https://Lexinx-protect.onrender.com/api/l5"
+    ${luaString(endpoint)}
     .. "?session="
     .. ${luaString(session.id)}
     .. "&token="
@@ -581,7 +1986,9 @@ local url =
 local success, result =
     pcall(function()
 
-        return game:HttpGet(url)
+        return game:HttpGet(
+            url
+        )
 
     end)
 
@@ -603,7 +2010,6 @@ end
 ========================================================= */
 
 function buildL5(
-    session,
     source
 ) {
 
@@ -728,646 +2134,75 @@ end
 }
 
 /* =========================================================
-   HOME
-========================================================= */
-
-app.get("/", (req, res) => {
-
-    return res.sendFile(
-        path.join(
-            publicPath,
-            "index.html"
-        )
-    );
-
-});
-
-/* =========================================================
-   HEALTH
-========================================================= */
-
-app.get(
-    "/health",
-    async (req, res) => {
-
-        try {
-
-            await pool.query(
-                "SELECT 1"
-            );
-
-            return res.json({
-
-                ok: true,
-
-                status: "online",
-
-                database: "online",
-
-                uptime:
-                    process.uptime()
-
-            });
-
-        } catch (error) {
-
-            return res.status(503).json({
-
-                ok: false,
-
-                status: "online",
-
-                database: "offline"
-
-            });
-
-        }
-
-    }
-);
-
-/* =========================================================
-   REGISTER
-========================================================= */
-
-app.post(
-    "/api/register",
-    async (req, res) => {
-
-        try {
-
-            let {
-                username,
-                password
-            } = req.body;
-
-            if (
-                typeof username !==
-                "string" ||
-                typeof password !==
-                "string"
-            ) {
-
-                return res.status(400).json({
-
-                    ok: false,
-
-                    error:
-                        "Username and password are required"
-
-                });
-
-            }
-
-            username =
-                username
-                    .trim()
-                    .toLowerCase();
-
-            if (
-                !/^[a-z0-9_]{3,32}$/
-                    .test(username)
-            ) {
-
-                return res.status(400).json({
-
-                    ok: false,
-
-                    error:
-                        "Username must be 3-32 characters and use only letters, numbers or _"
-
-                });
-
-            }
-
-            if (
-                password.length < 6 ||
-                password.length > 128
-            ) {
-
-                return res.status(400).json({
-
-                    ok: false,
-
-                    error:
-                        "Password must be 6-128 characters"
-
-                });
-
-            }
-
-            const existing =
-                await pool.query(
-                    `
-                    SELECT id
-                    FROM users
-                    WHERE username = $1
-                    LIMIT 1
-                    `,
-                    [username]
-                );
-
-            if (
-                existing.rows.length
-            ) {
-
-                return res.status(409).json({
-
-                    ok: false,
-
-                    error:
-                        "Username already exists"
-
-                });
-
-            }
-
-            const passwordHash =
-                await bcrypt.hash(
-                    password,
-                    12
-                );
-
-            const result =
-                await pool.query(
-                    `
-                    INSERT INTO users
-                    (
-                        username,
-                        password_hash
-                    )
-                    VALUES
-                    ($1, $2)
-                    RETURNING
-                        id,
-                        username,
-                        created_at
-                    `,
-                    [
-                        username,
-                        passwordHash
-                    ]
-                );
-
-            const user =
-                result.rows[0];
-
-            return res.status(201).json({
-
-                ok: true,
-
-                message:
-                    "Registration successful",
-
-                user: {
-
-                    id: user.id,
-
-                    username:
-                        user.username,
-
-                    createdAt:
-                        user.created_at
-
-                }
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "REGISTER ERROR:",
-                error
-            );
-
-            return res.status(500).json({
-
-                ok: false,
-
-                error:
-                    "Internal server error"
-
-            });
-
-        }
-
-    }
-);
-
-/* =========================================================
-   LOGIN
-========================================================= */
-
-app.post(
-    "/api/login",
-    async (req, res) => {
-
-        try {
-
-            let {
-                username,
-                password
-            } = req.body;
-
-            if (
-                typeof username !==
-                "string" ||
-                typeof password !==
-                "string"
-            ) {
-
-                return res.status(400).json({
-
-                    ok: false,
-
-                    error:
-                        "Username and password are required"
-
-                });
-
-            }
-
-            username =
-                username
-                    .trim()
-                    .toLowerCase();
-
-            const result =
-                await pool.query(
-                    `
-                    SELECT
-                        id,
-                        username,
-                        password_hash
-                    FROM users
-                    WHERE username = $1
-                    LIMIT 1
-                    `,
-                    [username]
-                );
-
-            if (
-                result.rows.length === 0
-            ) {
-
-                return res.status(401).json({
-
-                    ok: false,
-
-                    error:
-                        "Invalid username or password"
-
-                });
-
-            }
-
-            const user =
-                result.rows[0];
-
-            const valid =
-                await bcrypt.compare(
-                    password,
-                    user.password_hash
-                );
-
-            if (!valid) {
-
-                return res.status(401).json({
-
-                    ok: false,
-
-                    error:
-                        "Invalid username or password"
-
-                });
-
-            }
-
-            const sessionId =
-                randomHex(32);
-
-            const expiresAt =
-                new Date(
-                    Date.now() +
-                    7 * 24 * 60 * 60 * 1000
-                );
-
-            await pool.query(
-                `
-                INSERT INTO sessions
-                (
-                    id,
-                    user_id,
-                    expires_at
-                )
-                VALUES
-                ($1, $2, $3)
-                `,
-                [
-                    sessionId,
-                    user.id,
-                    expiresAt
-                ]
-            );
-
-            await pool.query(
-                `
-                UPDATE users
-                SET last_login = NOW()
-                WHERE id = $1
-                `,
-                [user.id]
-            );
-
-            res.cookie = res.cookie || function(){};
-
-            res.setHeader(
-                "Set-Cookie",
-                `session=${sessionId}; HttpOnly; Path=/; Max-Age=${7 * 24 * 60 * 60}; SameSite=Lax${process.env.NODE_ENV === "production" ? "; Secure" : ""}`
-            );
-
-            return res.json({
-
-                ok: true,
-
-                message:
-                    "Login successful",
-
-                user: {
-
-                    id: user.id,
-
-                    username:
-                        user.username
-
-                }
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "LOGIN ERROR:",
-                error
-            );
-
-            return res.status(500).json({
-
-                ok: false,
-
-                error:
-                    "Internal server error"
-
-            });
-
-        }
-
-    }
-);
-
-/* =========================================================
-   COOKIE PARSER
-========================================================= */
-
-function getSessionId(req) {
-
-    const header =
-        req.headers.cookie;
-
-    if (!header) {
-        return null;
-    }
-
-    const cookies =
-        header.split(";");
-
-    for (
-        const cookie of cookies
-    ) {
-
-        const parts =
-            cookie.trim().split("=");
-
-        if (
-            parts[0] ===
-            "session"
-        ) {
-
-            return parts
-                .slice(1)
-                .join("=");
-
-        }
-
-    }
-
-    return null;
-}
-
-/* =========================================================
-   CURRENT USER
-========================================================= */
-
-app.get(
-    "/api/me",
-    async (req, res) => {
-
-        try {
-
-            const sessionId =
-                getSessionId(req);
-
-            if (!sessionId) {
-
-                return res.status(401).json({
-
-                    ok: false,
-
-                    authenticated: false
-
-                });
-
-            }
-
-            const result =
-                await pool.query(
-                    `
-                    SELECT
-                        u.id,
-                        u.username,
-                        u.created_at,
-                        u.last_login,
-                        s.expires_at
-                    FROM sessions s
-                    JOIN users u
-                        ON u.id = s.user_id
-                    WHERE
-                        s.id = $1
-                        AND s.expires_at > NOW()
-                    LIMIT 1
-                    `,
-                    [sessionId]
-                );
-
-            if (
-                result.rows.length === 0
-            ) {
-
-                return res.status(401).json({
-
-                    ok: false,
-
-                    authenticated: false
-
-                });
-
-            }
-
-            const user =
-                result.rows[0];
-
-            return res.json({
-
-                ok: true,
-
-                authenticated: true,
-
-                user: {
-
-                    id: user.id,
-
-                    username:
-                        user.username,
-
-                    createdAt:
-                        user.created_at,
-
-                    lastLogin:
-                        user.last_login,
-
-                    sessionExpires:
-                        user.expires_at
-
-                }
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "ME ERROR:",
-                error
-            );
-
-            return res.status(500).json({
-
-                ok: false,
-
-                error:
-                    "Internal server error"
-
-            });
-
-        }
-
-    }
-);
-
-/* =========================================================
-   LOGOUT
-========================================================= */
-
-app.post(
-    "/api/logout",
-    async (req, res) => {
-
-        try {
-
-            const sessionId =
-                getSessionId(req);
-
-            if (sessionId) {
-
-                await pool.query(
-                    `
-                    DELETE FROM sessions
-                    WHERE id = $1
-                    `,
-                    [sessionId]
-                );
-
-            }
-
-            res.setHeader(
-                "Set-Cookie",
-                "session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax"
-            );
-
-            return res.json({
-
-                ok: true,
-
-                message:
-                    "Logged out"
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "LOGOUT ERROR:",
-                error
-            );
-
-            return res.status(500).json({
-
-                ok: false,
-
-                error:
-                    "Internal server error"
-
-            });
-
-        }
-
-    }
-);
-
-/* =========================================================
-   L1 LOADER
+   LOADER L1
 ========================================================= */
 
 app.get(
     "/api/loader/:id",
-    (req, res) => {
+    async (req, res) => {
 
-        const id =
-            req.params.id;
+        try {
 
-        const script =
-            scripts.get(id);
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        id
+                    FROM scripts
+                    WHERE id = $1
+                    LIMIT 1
+                    `,
+                    [req.params.id]
+                );
 
-        if (!script) {
+            if (
+                result.rows.length === 0
+            ) {
 
-            return apiBlock(
+                return apiError(
+                    res,
+                    404,
+                    "Script not found."
+                );
+
+            }
+
+            const session =
+                createLoaderSession(
+                    req.params.id
+                );
+
+            session.stage = 2;
+
+            const base =
+                BASE_URL ||
+                `${req.protocol}://${req.get("host")}`;
+
+            const output =
+                buildL2(
+                    session,
+                    base
+                );
+
+            return res
+                .status(200)
+                .type("text/plain")
+                .send(output);
+
+        } catch (error) {
+
+            console.error(
+                "LOADER ERROR:",
+                error
+            );
+
+            return apiError(
                 res,
-                "SCRIPT NOT FOUND"
+                500,
+                "Loader error."
             );
 
         }
-
-        const session =
-            createLoaderSession(id);
-
-        session.stage = 2;
-
-        const code =
-            buildL2(session);
-
-        return res
-            .status(200)
-            .type("text/plain")
-            .send(code);
 
     }
 );
@@ -1378,59 +2213,85 @@ app.get(
 
 app.get(
     "/api/l3",
-    (req, res) => {
+    async (req, res) => {
 
-        const session =
-            sessions.get(
-                req.query.session
+        try {
+
+            const session =
+                loaderSessions.get(
+                    req.query.session
+                );
+
+            if (
+                !validLoaderSession(
+                    session
+                )
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "Invalid session."
+                );
+
+            }
+
+            if (
+                session.stage !== 2
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "Invalid stage."
+                );
+
+            }
+
+            if (
+                !consumeToken(
+                    session,
+                    req.query.token
+                )
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "Invalid token."
+                );
+
+            }
+
+            session.stage = 3;
+
+            const base =
+                BASE_URL ||
+                `${req.protocol}://${req.get("host")}`;
+
+            return res
+                .type("text/plain")
+                .send(
+                    buildL3(
+                        session,
+                        base
+                    )
+                );
+
+        } catch (error) {
+
+            console.error(
+                "L3 ERROR:",
+                error
             );
 
-        if (
-            !validLoaderSession(
-                session
-            )
-        ) {
-
-            return apiBlock(
+            return apiError(
                 res,
-                "INVALID SESSION"
+                500,
+                "L3 error."
             );
 
         }
-
-        if (
-            session.stage !== 2
-        ) {
-
-            return apiBlock(
-                res,
-                "INVALID STAGE"
-            );
-
-        }
-
-        if (
-            !consumeToken(
-                session,
-                req.query.token
-            )
-        ) {
-
-            return apiBlock(
-                res,
-                "INVALID TOKEN"
-            );
-
-        }
-
-        session.stage = 3;
-
-        return res
-            .status(200)
-            .type("text/plain")
-            .send(
-                buildL3(session)
-            );
 
     }
 );
@@ -1441,59 +2302,85 @@ app.get(
 
 app.get(
     "/api/l4",
-    (req, res) => {
+    async (req, res) => {
 
-        const session =
-            sessions.get(
-                req.query.session
+        try {
+
+            const session =
+                loaderSessions.get(
+                    req.query.session
+                );
+
+            if (
+                !validLoaderSession(
+                    session
+                )
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "Invalid session."
+                );
+
+            }
+
+            if (
+                session.stage !== 3
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "Invalid stage."
+                );
+
+            }
+
+            if (
+                !consumeToken(
+                    session,
+                    req.query.token
+                )
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "Invalid token."
+                );
+
+            }
+
+            session.stage = 4;
+
+            const base =
+                BASE_URL ||
+                `${req.protocol}://${req.get("host")}`;
+
+            return res
+                .type("text/plain")
+                .send(
+                    buildL4(
+                        session,
+                        base
+                    )
+                );
+
+        } catch (error) {
+
+            console.error(
+                "L4 ERROR:",
+                error
             );
 
-        if (
-            !validLoaderSession(
-                session
-            )
-        ) {
-
-            return apiBlock(
+            return apiError(
                 res,
-                "INVALID SESSION"
+                500,
+                "L4 error."
             );
 
         }
-
-        if (
-            session.stage !== 3
-        ) {
-
-            return apiBlock(
-                res,
-                "INVALID STAGE"
-            );
-
-        }
-
-        if (
-            !consumeToken(
-                session,
-                req.query.token
-            )
-        ) {
-
-            return apiBlock(
-                res,
-                "INVALID TOKEN"
-            );
-
-        }
-
-        session.stage = 4;
-
-        return res
-            .status(200)
-            .type("text/plain")
-            .send(
-                buildL4(session)
-            );
 
     }
 );
@@ -1504,85 +2391,116 @@ app.get(
 
 app.get(
     "/api/l5",
-    (req, res) => {
+    async (req, res) => {
 
-        const session =
-            sessions.get(
-                req.query.session
-            );
+        try {
 
-        if (
-            !validLoaderSession(
-                session
-            )
-        ) {
+            const session =
+                loaderSessions.get(
+                    req.query.session
+                );
 
-            return apiBlock(
-                res,
-                "INVALID SESSION"
-            );
+            if (
+                !validLoaderSession(
+                    session
+                )
+            ) {
 
-        }
+                return apiError(
+                    res,
+                    403,
+                    "Invalid session."
+                );
 
-        if (
-            session.stage !== 4
-        ) {
+            }
 
-            return apiBlock(
-                res,
-                "INVALID STAGE"
-            );
+            if (
+                session.stage !== 4
+            ) {
 
-        }
+                return apiError(
+                    res,
+                    403,
+                    "Invalid stage."
+                );
 
-        if (
-            !consumeToken(
-                session,
-                req.query.token
-            )
-        ) {
+            }
 
-            return apiBlock(
-                res,
-                "INVALID TOKEN"
-            );
+            if (
+                !consumeToken(
+                    session,
+                    req.query.token
+                )
+            ) {
 
-        }
+                return apiError(
+                    res,
+                    403,
+                    "Invalid token."
+                );
 
-        const script =
-            scripts.get(
-                session.scriptId
-            );
+            }
 
-        if (!script) {
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        source
+                    FROM scripts
+                    WHERE id = $1
+                    LIMIT 1
+                    `,
+                    [session.scriptId]
+                );
 
-            sessions.delete(
+            if (
+                result.rows.length === 0
+            ) {
+
+                loaderSessions.delete(
+                    session.id
+                );
+
+                return apiError(
+                    res,
+                    404,
+                    "Script not found."
+                );
+
+            }
+
+            const source =
+                result.rows[0].source;
+
+            session.stage = 5;
+
+            const output =
+                buildL5(
+                    source
+                );
+
+            loaderSessions.delete(
                 session.id
             );
 
-            return apiBlock(
+            return res
+                .type("text/plain")
+                .send(output);
+
+        } catch (error) {
+
+            console.error(
+                "L5 ERROR:",
+                error
+            );
+
+            return apiError(
                 res,
-                "SCRIPT NOT FOUND"
+                500,
+                "L5 error."
             );
 
         }
-
-        session.stage = 5;
-
-        const output =
-            buildL5(
-                session,
-                script.source
-            );
-
-        sessions.delete(
-            session.id
-        );
-
-        return res
-            .status(200)
-            .type("text/plain")
-            .send(output);
 
     }
 );
@@ -1595,8 +2513,9 @@ app.use(
     "/api",
     (req, res) => {
 
-        return apiBlock(
+        return apiError(
             res,
+            404,
             "API ROUTE NOT FOUND"
         );
 
@@ -1626,31 +2545,39 @@ app.use(
    CLEAN LOADER SESSIONS
 ========================================================= */
 
-setInterval(() => {
+setInterval(
+    () => {
 
-    const now =
-        Date.now();
+        const now =
+            Date.now();
 
-    for (
-        const [id, session]
-        of sessions
-    ) {
-
-        if (
-            now >
-            session.expires
+        for (
+            const [
+                id,
+                session
+            ]
+            of loaderSessions
         ) {
 
-            sessions.delete(id);
+            if (
+                now >
+                session.expires
+            ) {
+
+                loaderSessions.delete(
+                    id
+                );
+
+            }
 
         }
 
-    }
-
-}, 30 * 1000);
+    },
+    30 * 1000
+);
 
 /* =========================================================
-   CLEAN DATABASE SESSIONS
+   CLEAN AUTH SESSIONS
 ========================================================= */
 
 setInterval(
@@ -1660,7 +2587,7 @@ setInterval(
 
             await pool.query(
                 `
-                DELETE FROM sessions
+                DELETE FROM auth_sessions
                 WHERE expires_at <= NOW()
                 `
             );
@@ -1668,7 +2595,7 @@ setInterval(
         } catch (error) {
 
             console.error(
-                "SESSION CLEANUP ERROR:",
+                "AUTH SESSION CLEANUP:",
                 error
             );
 
@@ -1688,11 +2615,11 @@ app.listen(
     () => {
 
         console.log(
-            `Server running on port ${PORT}`
+            `LEXINX Protect running on port ${PORT}`
         );
 
         console.log(
-            `Public: ${publicPath}`
+            `Public directory: ${publicPath}`
         );
 
     }
