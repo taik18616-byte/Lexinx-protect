@@ -1,8 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
+const fs = require("fs");
 const path = require("path");
-const bcrypt = require("bcryptjs");
-const { Pool } = require("pg");
 
 const app = express();
 
@@ -12,986 +11,566 @@ const PORT = process.env.PORT || 3000;
    CONFIG
 ========================================================= */
 
-const SESSION_TTL =
-    7 * 24 * 60 * 60 * 1000;
+const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
+const TOKEN_TTL = 60 * 1000;
 
-const LOADER_TTL =
-    60 * 1000;
+const DATA_DIR = path.join(__dirname, "data");
+const USERS_FILE = path.join(DATA_DIR, "users.json");
+const SCRIPTS_FILE = path.join(DATA_DIR, "scripts.json");
 
-const BASE_URL =
-    process.env.PUBLIC_URL ||
-    "";
-
-/* =========================================================
-   EXPRESS
-========================================================= */
-
-app.use(
-    express.json({
-        limit: "2mb"
-    })
-);
-
-/* =========================================================
-   PUBLIC
-========================================================= */
-
-const publicPath =
-    path.join(
-        __dirname,
-        "public"
-    );
-
-app.use(
-    express.static(publicPath)
-);
-
-/* =========================================================
-   POSTGRESQL
-========================================================= */
-
-if (!process.env.DATABASE_URL) {
-
-    console.error(
-        "ERROR: DATABASE_URL is not configured."
-    );
-
+if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
 }
 
-const pool = new Pool({
+function ensureFile(file, defaultValue) {
+    if (!fs.existsSync(file)) {
+        fs.writeFileSync(
+            file,
+            JSON.stringify(defaultValue, null, 2),
+            "utf8"
+        );
+    }
+}
 
-    connectionString:
-        process.env.DATABASE_URL,
-
-    ssl:
-        process.env.NODE_ENV === "production"
-            ? {
-                rejectUnauthorized: false
-            }
-            : false
-
-});
+ensureFile(USERS_FILE, []);
+ensureFile(SCRIPTS_FILE, []);
 
 /* =========================================================
-   DATABASE
+   MIDDLEWARE
 ========================================================= */
 
-async function initDatabase() {
+app.use(express.json({
+    limit: "2mb"
+}));
 
-    await pool.query(`
-        CREATE TABLE IF NOT EXISTS users (
+app.use(express.urlencoded({
+    extended: true,
+    limit: "2mb"
+}));
 
-            id BIGSERIAL PRIMARY KEY,
+app.use(express.static(
+    path.join(__dirname, "public")
+));
 
-            username VARCHAR(32)
-                UNIQUE NOT NULL,
+/* =========================================================
+   LOG
+========================================================= */
 
-            password_hash TEXT
-                NOT NULL,
-
-            created_at TIMESTAMPTZ
-                NOT NULL DEFAULT NOW(),
-
-            last_login TIMESTAMPTZ
-
-        );
-    `);
-
-    await pool.query(`
-        CREATE TABLE IF NOT EXISTS auth_sessions (
-
-            id TEXT PRIMARY KEY,
-
-            user_id BIGINT
-                NOT NULL
-                REFERENCES users(id)
-                ON DELETE CASCADE,
-
-            created_at TIMESTAMPTZ
-                NOT NULL DEFAULT NOW(),
-
-            expires_at TIMESTAMPTZ
-                NOT NULL
-
-        );
-    `);
-
-    await pool.query(`
-        CREATE TABLE IF NOT EXISTS scripts (
-
-            id VARCHAR(64) PRIMARY KEY,
-
-            user_id BIGINT
-                NOT NULL
-                REFERENCES users(id)
-                ON DELETE CASCADE,
-
-            name VARCHAR(100)
-                NOT NULL,
-
-            source TEXT
-                NOT NULL,
-
-            created_at TIMESTAMPTZ
-                NOT NULL DEFAULT NOW(),
-
-            updated_at TIMESTAMPTZ
-                NOT NULL DEFAULT NOW()
-
-        );
-    `);
-
-    await pool.query(`
-        CREATE INDEX IF NOT EXISTS
-        scripts_user_id_idx
-        ON scripts(user_id);
-    `);
-
-    await pool.query(`
-        CREATE INDEX IF NOT EXISTS
-        auth_sessions_user_id_idx
-        ON auth_sessions(user_id);
-    `);
-
+app.use((req, res, next) => {
     console.log(
-        "PostgreSQL initialized."
+        `[${new Date().toISOString()}]`,
+        req.method,
+        req.originalUrl
+    );
+
+    next();
+});
+
+/* =========================================================
+   JSON DATABASE
+========================================================= */
+
+function readJSON(file, fallback) {
+    try {
+        const raw = fs.readFileSync(file, "utf8");
+
+        if (!raw.trim()) {
+            return fallback;
+        }
+
+        return JSON.parse(raw);
+
+    } catch (err) {
+        console.error(
+            "READ DATABASE ERROR:",
+            file,
+            err.message
+        );
+
+        return fallback;
+    }
+}
+
+function writeJSON(file, data) {
+    fs.writeFileSync(
+        file,
+        JSON.stringify(data, null, 2),
+        "utf8"
     );
 }
 
-initDatabase().catch(error => {
+function getUsers() {
+    return readJSON(USERS_FILE, []);
+}
 
-    console.error(
-        "DATABASE INIT ERROR:",
-        error
-    );
+function saveUsers(users) {
+    writeJSON(USERS_FILE, users);
+}
 
-});
+function getScripts() {
+    return readJSON(SCRIPTS_FILE, []);
+}
+
+function saveScripts(scripts) {
+    writeJSON(SCRIPTS_FILE, scripts);
+}
 
 /* =========================================================
    RANDOM
 ========================================================= */
 
-function randomHex(
-    bytes = 32
-) {
-
+function randomHex(bytes = 32) {
     return crypto
         .randomBytes(bytes)
         .toString("hex");
+}
 
+function randomID() {
+    return randomHex(12);
 }
 
 /* =========================================================
-   COOKIE
+   PASSWORD HASH
 ========================================================= */
 
-function getCookie(
-    req,
-    name
-) {
+function hashPassword(password) {
+    const salt = crypto.randomBytes(16);
 
-    const header =
-        req.headers.cookie;
+    const hash = crypto.scryptSync(
+        password,
+        salt,
+        64
+    );
+
+    return {
+        salt: salt.toString("hex"),
+        hash: hash.toString("hex")
+    };
+}
+
+function verifyPassword(password, stored) {
+    try {
+        const salt = Buffer.from(
+            stored.salt,
+            "hex"
+        );
+
+        const hash = crypto.scryptSync(
+            password,
+            salt,
+            64
+        );
+
+        const original = Buffer.from(
+            stored.hash,
+            "hex"
+        );
+
+        return (
+            hash.length === original.length &&
+            crypto.timingSafeEqual(
+                hash,
+                original
+            )
+        );
+
+    } catch {
+        return false;
+    }
+}
+
+/* =========================================================
+   COOKIES
+========================================================= */
+
+function parseCookies(req) {
+    const header = req.headers.cookie;
 
     if (!header) {
-        return null;
+        return {};
     }
 
-    const cookies =
-        header.split(";");
+    const cookies = {};
 
-    for (
-        const item of cookies
-    ) {
-
-        const index =
-            item.indexOf("=");
+    for (const part of header.split(";")) {
+        const index = part.indexOf("=");
 
         if (index === -1) {
             continue;
         }
 
-        const key =
-            item
-                .slice(0, index)
-                .trim();
+        const key = part
+            .slice(0, index)
+            .trim();
 
-        const value =
-            item
-                .slice(index + 1)
-                .trim();
+        const value = part
+            .slice(index + 1)
+            .trim();
 
-        if (key === name) {
-            return decodeURIComponent(
-                value
-            );
-        }
-
+        cookies[key] =
+            decodeURIComponent(value);
     }
 
-    return null;
+    return cookies;
 }
 
-/* =========================================================
-   SET SESSION COOKIE
-========================================================= */
-
-function setSessionCookie(
+function setCookie(
     res,
-    sessionId
+    name,
+    value,
+    maxAge
 ) {
-
-    const maxAge =
-        Math.floor(
-            SESSION_TTL / 1000
-        );
-
-    let cookie =
-        `session=${encodeURIComponent(sessionId)}; ` +
-        `Path=/; ` +
-        `HttpOnly; ` +
-        `SameSite=Lax; ` +
-        `Max-Age=${maxAge}`;
-
-    if (
-        process.env.NODE_ENV ===
-        "production"
-    ) {
-
-        cookie +=
-            "; Secure";
-
-    }
+    const parts = [
+        `${name}=${encodeURIComponent(value)}`,
+        "Path=/",
+        `Max-Age=${Math.floor(maxAge / 1000)}`,
+        "HttpOnly",
+        "SameSite=Lax"
+    ];
 
     res.setHeader(
         "Set-Cookie",
-        cookie
+        parts.join("; ")
+    );
+}
+
+function clearCookie(res, name) {
+    res.setHeader(
+        "Set-Cookie",
+        `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`
     );
 }
 
 /* =========================================================
-   CLEAR SESSION COOKIE
+   AUTH SESSIONS
 ========================================================= */
 
-function clearSessionCookie(
-    res
-) {
+const authSessions = new Map();
 
-    res.setHeader(
-        "Set-Cookie",
-        "session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0"
-    );
+function createAuthSession(userId) {
+    const token = randomHex(32);
 
+    authSessions.set(token, {
+        userId,
+        created: Date.now(),
+        expires:
+            Date.now() + SESSION_TTL
+    });
+
+    return token;
 }
 
-/* =========================================================
-   AUTH USER
-========================================================= */
+function getAuthUser(req) {
+    const cookies = parseCookies(req);
 
-async function getAuthUser(
-    req
-) {
+    const token =
+        cookies.lexinx_session;
 
-    const sessionId =
-        getCookie(
-            req,
-            "session"
-        );
-
-    if (!sessionId) {
+    if (!token) {
         return null;
     }
 
-    const result =
-        await pool.query(
-            `
-            SELECT
-                u.id,
-                u.username,
-                u.created_at,
-                u.last_login,
-                s.id AS session_id,
-                s.expires_at
-            FROM auth_sessions s
-            JOIN users u
-                ON u.id = s.user_id
-            WHERE
-                s.id = $1
-                AND s.expires_at > NOW()
-            LIMIT 1
-            `,
-            [sessionId]
-        );
+    const session =
+        authSessions.get(token);
 
-    if (
-        result.rows.length === 0
-    ) {
-
+    if (!session) {
         return null;
-
     }
 
-    return result.rows[0];
-}
+    if (Date.now() > session.expires) {
+        authSessions.delete(token);
+        return null;
+    }
 
-/* =========================================================
-   REQUIRE AUTH
-========================================================= */
+    const users = getUsers();
 
-async function requireAuth(
-    req,
-    res,
-    next
-) {
-
-    try {
-
-        const user =
-            await getAuthUser(req);
-
-        if (!user) {
-
-            return res
-                .status(401)
-                .json({
-                    ok: false,
-                    error:
-                        "Not authenticated"
-                });
-
-        }
-
-        req.user =
-            user;
-
-        next();
-
-    } catch (error) {
-
-        console.error(
-            "AUTH ERROR:",
-            error
+    const user =
+        users.find(
+            x => x.id === session.userId
         );
 
-        return res
-            .status(500)
-            .json({
-                ok: false,
-                error:
-                    "Internal server error"
-            });
-
+    if (!user) {
+        authSessions.delete(token);
+        return null;
     }
 
+    return {
+        user,
+        token,
+        session
+    };
 }
 
-/* =========================================================
-   API ERROR
-========================================================= */
+function requireAuth(req, res, next) {
+    const auth =
+        getAuthUser(req);
 
-function apiError(
-    res,
-    status,
-    message
-) {
-
-    return res
-        .status(status)
-        .json({
-
+    if (!auth) {
+        return res.status(401).json({
             ok: false,
-
-            error: message
-
+            error: "Not authenticated"
         });
+    }
 
+    req.user = auth.user;
+    req.authToken = auth.token;
+
+    next();
 }
 
 /* =========================================================
-   HOME
+   SCRIPT LOADER
 ========================================================= */
 
-app.get(
-    "/",
-    (req, res) => {
-
-        return res.sendFile(
-            path.join(
-                publicPath,
-                "index.html"
-            )
-        );
-
-    }
-);
+function loaderURL(id) {
+    return (
+        "https://lexinx-protect.onrender.com" +
+        "/api/loader/" +
+        encodeURIComponent(id)
+    );
+}
 
 /* =========================================================
-   HEALTH
+   AUTH RESPONSE
 ========================================================= */
 
-app.get(
-    "/health",
-    async (req, res) => {
-
-        try {
-
-            await pool.query(
-                "SELECT 1"
-            );
-
-            return res.json({
-
-                ok: true,
-
-                status:
-                    "API ONLINE",
-
-                database:
-                    "ONLINE",
-
-                uptime:
-                    process.uptime()
-
-            });
-
-        } catch (error) {
-
-            return res
-                .status(503)
-                .json({
-
-                    ok: false,
-
-                    status:
-                        "API ONLINE",
-
-                    database:
-                        "OFFLINE"
-
-                });
-
-        }
-
-    }
-);
+function accountResponse(user) {
+    return {
+        ok: true,
+        username: user.username,
+        url:
+            "https://lexinx-protect.onrender.com"
+    };
+}
 
 /* =========================================================
    REGISTER
 ========================================================= */
 
-app.post(
-    "/api/register",
-    async (req, res) => {
+app.post("/api/register", (req, res) => {
+    try {
+        const username =
+            String(
+                req.body.username || ""
+            ).trim();
 
-        try {
-
-            let username =
-                req.body.username;
-
-            const password =
-                req.body.password;
-
-            if (
-                typeof username !==
-                "string" ||
-                typeof password !==
-                "string"
-            ) {
-
-                return apiError(
-                    res,
-                    400,
-                    "Username and password are required."
-                );
-
-            }
-
-            username =
-                username
-                    .trim()
-                    .toLowerCase();
-
-            if (
-                !/^[a-z0-9_]{3,32}$/
-                    .test(username)
-            ) {
-
-                return apiError(
-                    res,
-                    400,
-                    "Username must be 3-32 characters and use only letters, numbers or underscore."
-                );
-
-            }
-
-            if (
-                password.length < 6
-            ) {
-
-                return apiError(
-                    res,
-                    400,
-                    "Password must contain at least 6 characters."
-                );
-
-            }
-
-            if (
-                password.length > 128
-            ) {
-
-                return apiError(
-                    res,
-                    400,
-                    "Password is too long."
-                );
-
-            }
-
-            const existing =
-                await pool.query(
-                    `
-                    SELECT id
-                    FROM users
-                    WHERE username = $1
-                    LIMIT 1
-                    `,
-                    [username]
-                );
-
-            if (
-                existing.rows.length
-            ) {
-
-                return apiError(
-                    res,
-                    409,
-                    "Username already exists."
-                );
-
-            }
-
-            const passwordHash =
-                await bcrypt.hash(
-                    password,
-                    12
-                );
-
-            const result =
-                await pool.query(
-                    `
-                    INSERT INTO users
-                    (
-                        username,
-                        password_hash
-                    )
-                    VALUES
-                    ($1, $2)
-                    RETURNING
-                        id,
-                        username,
-                        created_at
-                    `,
-                    [
-                        username,
-                        passwordHash
-                    ]
-                );
-
-            const user =
-                result.rows[0];
-
-            /* Automatically login after registration */
-
-            const sessionId =
-                randomHex(32);
-
-            const expires =
-                new Date(
-                    Date.now() +
-                    SESSION_TTL
-                );
-
-            await pool.query(
-                `
-                INSERT INTO auth_sessions
-                (
-                    id,
-                    user_id,
-                    expires_at
-                )
-                VALUES
-                ($1, $2, $3)
-                `,
-                [
-                    sessionId,
-                    user.id,
-                    expires
-                ]
+        const password =
+            String(
+                req.body.password || ""
             );
 
-            setSessionCookie(
-                res,
-                sessionId
-            );
-
-            return res
-                .status(201)
-                .json({
-
-                    ok: true,
-
-                    message:
-                        "Account created successfully.",
-
-                    username:
-                        user.username,
-
-                    url:
-                        BASE_URL ||
-                        `${req.protocol}://${req.get("host")}`,
-
-                    user: {
-
-                        id:
-                            user.id,
-
-                        username:
-                            user.username
-
-                    }
-
-                });
-
-        } catch (error) {
-
-            console.error(
-                "REGISTER ERROR:",
-                error
-            );
-
-            if (
-                error.code ===
-                "23505"
-            ) {
-
-                return apiError(
-                    res,
-                    409,
-                    "Username already exists."
-                );
-
-            }
-
-            return apiError(
-                res,
-                500,
-                "Internal server error."
-            );
-
+        if (!username) {
+            return res.status(400).json({
+                ok: false,
+                error:
+                    "Username is required"
+            });
         }
 
+        if (!/^[a-zA-Z0-9_]{3,32}$/.test(username)) {
+            return res.status(400).json({
+                ok: false,
+                error:
+                    "Username must be 3-32 characters and contain only letters, numbers, or underscore"
+            });
+        }
+
+        if (password.length < 6) {
+            return res.status(400).json({
+                ok: false,
+                error:
+                    "Password must contain at least 6 characters"
+            });
+        }
+
+        const users = getUsers();
+
+        const exists =
+            users.some(
+                user =>
+                    user.username.toLowerCase() ===
+                    username.toLowerCase()
+            );
+
+        if (exists) {
+            return res.status(409).json({
+                ok: false,
+                error:
+                    "Username already exists"
+            });
+        }
+
+        const passwordData =
+            hashPassword(password);
+
+        const user = {
+            id: randomID(),
+            username,
+            password: passwordData,
+            createdAt: Date.now()
+        };
+
+        users.push(user);
+
+        saveUsers(users);
+
+        const session =
+            createAuthSession(user.id);
+
+        setCookie(
+            res,
+            "lexinx_session",
+            session,
+            SESSION_TTL
+        );
+
+        return res.json(
+            accountResponse(user)
+        );
+
+    } catch (err) {
+        console.error(
+            "REGISTER ERROR:",
+            err
+        );
+
+        return res.status(500).json({
+            ok: false,
+            error:
+                "Internal server error"
+        });
     }
-);
+});
 
 /* =========================================================
    LOGIN
 ========================================================= */
 
-app.post(
-    "/api/login",
-    async (req, res) => {
+app.post("/api/login", (req, res) => {
+    try {
+        const username =
+            String(
+                req.body.username || ""
+            ).trim();
 
-        try {
-
-            let username =
-                req.body.username;
-
-            const password =
-                req.body.password;
-
-            if (
-                typeof username !==
-                "string" ||
-                typeof password !==
-                "string"
-            ) {
-
-                return apiError(
-                    res,
-                    400,
-                    "Username and password are required."
-                );
-
-            }
-
-            username =
-                username
-                    .trim()
-                    .toLowerCase();
-
-            const result =
-                await pool.query(
-                    `
-                    SELECT
-                        id,
-                        username,
-                        password_hash
-                    FROM users
-                    WHERE username = $1
-                    LIMIT 1
-                    `,
-                    [username]
-                );
-
-            if (
-                result.rows.length === 0
-            ) {
-
-                return apiError(
-                    res,
-                    401,
-                    "Invalid username or password."
-                );
-
-            }
-
-            const user =
-                result.rows[0];
-
-            const valid =
-                await bcrypt.compare(
-                    password,
-                    user.password_hash
-                );
-
-            if (!valid) {
-
-                return apiError(
-                    res,
-                    401,
-                    "Invalid username or password."
-                );
-
-            }
-
-            const sessionId =
-                randomHex(32);
-
-            const expires =
-                new Date(
-                    Date.now() +
-                    SESSION_TTL
-                );
-
-            await pool.query(
-                `
-                INSERT INTO auth_sessions
-                (
-                    id,
-                    user_id,
-                    expires_at
-                )
-                VALUES
-                ($1, $2, $3)
-                `,
-                [
-                    sessionId,
-                    user.id,
-                    expires
-                ]
+        const password =
+            String(
+                req.body.password || ""
             );
 
-            await pool.query(
-                `
-                UPDATE users
-                SET last_login = NOW()
-                WHERE id = $1
-                `,
-                [user.id]
-            );
-
-            setSessionCookie(
-                res,
-                sessionId
-            );
-
-            return res.json({
-
-                ok: true,
-
-                message:
-                    "Login successful.",
-
-                username:
-                    user.username,
-
-                url:
-                    BASE_URL ||
-                    `${req.protocol}://${req.get("host")}`,
-
-                user: {
-
-                    id:
-                        user.id,
-
-                    username:
-                        user.username
-
-                }
-
+        if (!username || !password) {
+            return res.status(400).json({
+                ok: false,
+                error:
+                    "Username and password are required"
             });
-
-        } catch (error) {
-
-            console.error(
-                "LOGIN ERROR:",
-                error
-            );
-
-            return apiError(
-                res,
-                500,
-                "Internal server error."
-            );
-
         }
 
+        const users = getUsers();
+
+        const user =
+            users.find(
+                x =>
+                    x.username.toLowerCase() ===
+                    username.toLowerCase()
+            );
+
+        if (!user) {
+            return res.status(401).json({
+                ok: false,
+                error:
+                    "Invalid username or password"
+            });
+        }
+
+        if (
+            !verifyPassword(
+                password,
+                user.password
+            )
+        ) {
+            return res.status(401).json({
+                ok: false,
+                error:
+                    "Invalid username or password"
+            });
+        }
+
+        const session =
+            createAuthSession(user.id);
+
+        setCookie(
+            res,
+            "lexinx_session",
+            session,
+            SESSION_TTL
+        );
+
+        return res.json(
+            accountResponse(user)
+        );
+
+    } catch (err) {
+        console.error(
+            "LOGIN ERROR:",
+            err
+        );
+
+        return res.status(500).json({
+            ok: false,
+            error:
+                "Internal server error"
+        });
     }
-);
+});
 
 /* =========================================================
    ME
 ========================================================= */
 
-app.get(
-    "/api/me",
-    async (req, res) => {
+app.get("/api/me", (req, res) => {
+    const auth =
+        getAuthUser(req);
 
-        try {
-
-            const user =
-                await getAuthUser(req);
-
-            if (!user) {
-
-                return apiError(
-                    res,
-                    401,
-                    "Not authenticated."
-                );
-
-            }
-
-            return res.json({
-
-                ok: true,
-
-                username:
-                    user.username,
-
-                url:
-                    BASE_URL ||
-                    `${req.protocol}://${req.get("host")}`,
-
-                user: {
-
-                    id:
-                        user.id,
-
-                    username:
-                        user.username,
-
-                    createdAt:
-                        user.created_at,
-
-                    lastLogin:
-                        user.last_login
-
-                }
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "ME ERROR:",
-                error
-            );
-
-            return apiError(
-                res,
-                500,
-                "Internal server error."
-            );
-
-        }
-
+    if (!auth) {
+        return res.status(401).json({
+            ok: false,
+            error:
+                "Not authenticated"
+        });
     }
-);
+
+    return res.json(
+        accountResponse(auth.user)
+    );
+});
 
 /* =========================================================
    LOGOUT
 ========================================================= */
 
-app.post(
-    "/api/logout",
-    async (req, res) => {
+app.post("/api/logout", (req, res) => {
+    const cookies =
+        parseCookies(req);
 
-        try {
+    const token =
+        cookies.lexinx_session;
 
-            const sessionId =
-                getCookie(
-                    req,
-                    "session"
-                );
-
-            if (sessionId) {
-
-                await pool.query(
-                    `
-                    DELETE FROM auth_sessions
-                    WHERE id = $1
-                    `,
-                    [sessionId]
-                );
-
-            }
-
-            clearSessionCookie(
-                res
-            );
-
-            return res.json({
-
-                ok: true,
-
-                message:
-                    "Logged out successfully."
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "LOGOUT ERROR:",
-                error
-            );
-
-            clearSessionCookie(
-                res
-            );
-
-            return res.json({
-
-                ok: true
-
-            });
-
-        }
-
+    if (token) {
+        authSessions.delete(token);
     }
-);
+
+    clearCookie(
+        res,
+        "lexinx_session"
+    );
+
+    return res.json({
+        ok: true,
+        message:
+            "Logged out successfully"
+    });
+});
 
 /* =========================================================
    CREATE SCRIPT
@@ -1000,469 +579,235 @@ app.post(
 app.post(
     "/api/create",
     requireAuth,
-    async (req, res) => {
+    (req, res) => {
 
         try {
-
-            let name =
-                req.body.name;
+            const name =
+                String(
+                    req.body.name ||
+                    "Untitled Script"
+                ).trim();
 
             const source =
-                req.body.source;
-
-            if (
-                typeof source !==
-                "string"
-            ) {
-
-                return apiError(
-                    res,
-                    400,
-                    "Script source is required."
+                String(
+                    req.body.source || ""
                 );
 
+            if (!source.trim()) {
+                return res.status(400).json({
+                    ok: false,
+                    error:
+                        "Script source cannot be empty"
+                });
             }
 
-            if (
-                !source.trim()
-            ) {
-
-                return apiError(
-                    res,
-                    400,
-                    "Script source cannot be empty."
-                );
-
+            if (source.length > 2 * 1024 * 1024) {
+                return res.status(413).json({
+                    ok: false,
+                    error:
+                        "Script is too large"
+                });
             }
 
-            if (
-                source.length >
-                2 * 1024 * 1024
-            ) {
-
-                return apiError(
-                    res,
-                    413,
-                    "Script is too large."
-                );
-
-            }
-
-            if (
-                typeof name !==
-                "string"
-            ) {
-
-                name =
-                    "Untitled Script";
-
-            }
-
-            name =
-                name.trim();
-
-            if (!name) {
-
-                name =
-                    "Untitled Script";
-
-            }
-
-            if (
-                name.length >
-                100
-            ) {
-
-                name =
-                    name.slice(
-                        0,
-                        100
-                    );
-
-            }
+            const scripts =
+                getScripts();
 
             const id =
-                randomHex(12);
+                randomID();
 
-            await pool.query(
-                `
-                INSERT INTO scripts
-                (
-                    id,
-                    user_id,
-                    name,
-                    source
-                )
-                VALUES
-                ($1, $2, $3, $4)
-                `,
-                [
-                    id,
-                    req.user.id,
-                    name,
-                    source
-                ]
-            );
+            const script = {
+                id,
+                ownerId: req.user.id,
+                name:
+                    name ||
+                    "Untitled Script",
+                source,
+                createdAt: Date.now(),
+                updatedAt: Date.now()
+            };
 
-            const loader =
-                `${BASE_URL || `${req.protocol}://${req.get("host")}`}/api/loader/${id}`;
+            scripts.push(script);
 
-            return res
-                .status(201)
-                .json({
+            saveScripts(scripts);
 
-                    ok: true,
+            return res.json({
+                ok: true,
+                id,
+                name: script.name,
+                loader:
+                    `loadstring(game:HttpGet("${loaderURL(id)}"))()`
+            });
 
-                    id,
-
-                    name,
-
-                    loader
-
-                });
-
-        } catch (error) {
-
+        } catch (err) {
             console.error(
                 "CREATE SCRIPT ERROR:",
-                error
+                err
             );
 
-            return apiError(
-                res,
-                500,
-                "Failed to create script."
-            );
-
+            return res.status(500).json({
+                ok: false,
+                error:
+                    "Internal server error"
+            });
         }
-
     }
 );
 
 /* =========================================================
-   LIST SCRIPTS
+   LIST USER SCRIPTS
 ========================================================= */
 
 app.get(
     "/api/scripts",
     requireAuth,
-    async (req, res) => {
+    (req, res) => {
 
-        try {
+        const scripts =
+            getScripts()
+            .filter(
+                script =>
+                    script.ownerId ===
+                    req.user.id
+            )
+            .map(script => ({
+                id: script.id,
+                name: script.name,
+                loader:
+                    `loadstring(game:HttpGet("${loaderURL(script.id)}"))()`,
+                createdAt:
+                    script.createdAt,
+                updatedAt:
+                    script.updatedAt
+            }));
 
-            const result =
-                await pool.query(
-                    `
-                    SELECT
-                        id,
-                        name,
-                        created_at,
-                        updated_at
-                    FROM scripts
-                    WHERE user_id = $1
-                    ORDER BY created_at DESC
-                    `,
-                    [req.user.id]
-                );
-
-            const base =
-                BASE_URL ||
-                `${req.protocol}://${req.get("host")}`;
-
-            const scripts =
-                result.rows.map(
-                    script => ({
-
-                        id:
-                            script.id,
-
-                        name:
-                            script.name,
-
-                        createdAt:
-                            script.created_at,
-
-                        updatedAt:
-                            script.updated_at,
-
-                        loader:
-                            `${base}/api/loader/${script.id}`
-
-                    })
-                );
-
-            return res.json({
-
-                ok: true,
-
-                scripts
-
-            });
-
-        } catch (error) {
-
-            console.error(
-                "LIST SCRIPTS ERROR:",
-                error
-            );
-
-            return apiError(
-                res,
-                500,
-                "Failed to load scripts."
-            );
-
-        }
-
+        return res.json({
+            ok: true,
+            scripts
+        });
     }
 );
 
 /* =========================================================
-   GET ONE SCRIPT
+   GET SINGLE SCRIPT
 ========================================================= */
 
 app.get(
     "/api/script/:id",
     requireAuth,
-    async (req, res) => {
+    (req, res) => {
 
-        try {
+        const id =
+            req.params.id;
 
-            const result =
-                await pool.query(
-                    `
-                    SELECT
-                        id,
-                        name,
-                        source,
-                        created_at,
-                        updated_at
-                    FROM scripts
-                    WHERE
-                        id = $1
-                        AND user_id = $2
-                    LIMIT 1
-                    `,
-                    [
-                        req.params.id,
-                        req.user.id
-                    ]
-                );
+        const scripts =
+            getScripts();
 
-            if (
-                result.rows.length === 0
-            ) {
+        const script =
+            scripts.find(
+                x =>
+                    x.id === id &&
+                    x.ownerId ===
+                    req.user.id
+            );
 
-                return apiError(
-                    res,
-                    404,
-                    "Script not found."
-                );
-
-            }
-
-            const script =
-                result.rows[0];
-
-            return res.json({
-
-                ok: true,
-
-                script: {
-
-                    id:
-                        script.id,
-
-                    name:
-                        script.name,
-
-                    source:
-                        script.source,
-
-                    createdAt:
-                        script.created_at,
-
-                    updatedAt:
-                        script.updated_at
-
-                }
-
+        if (!script) {
+            return res.status(404).json({
+                ok: false,
+                error:
+                    "Script not found"
             });
-
-        } catch (error) {
-
-            console.error(
-                "GET SCRIPT ERROR:",
-                error
-            );
-
-            return apiError(
-                res,
-                500,
-                "Failed to load script."
-            );
-
         }
 
+        return res.json({
+            ok: true,
+            script: {
+                id: script.id,
+                name: script.name,
+                source: script.source,
+                createdAt:
+                    script.createdAt,
+                updatedAt:
+                    script.updatedAt
+            }
+        });
     }
 );
 
 /* =========================================================
-   EDIT SCRIPT
+   UPDATE SCRIPT
 ========================================================= */
 
 app.put(
     "/api/script/:id",
     requireAuth,
-    async (req, res) => {
+    (req, res) => {
 
-        try {
+        const id =
+            req.params.id;
 
-            let name =
-                req.body.name;
+        const scripts =
+            getScripts();
 
-            const source =
-                req.body.source;
+        const index =
+            scripts.findIndex(
+                x =>
+                    x.id === id &&
+                    x.ownerId ===
+                    req.user.id
+            );
 
-            if (
-                typeof name !==
-                "string" ||
-                typeof source !==
-                "string"
-            ) {
-
-                return apiError(
-                    res,
-                    400,
-                    "Name and source are required."
-                );
-
-            }
-
-            name =
-                name.trim();
-
-            if (!name) {
-
-                name =
-                    "Untitled Script";
-
-            }
-
-            if (
-                name.length >
-                100
-            ) {
-
-                name =
-                    name.slice(
-                        0,
-                        100
-                    );
-
-            }
-
-            if (
-                !source.trim()
-            ) {
-
-                return apiError(
-                    res,
-                    400,
-                    "Script source cannot be empty."
-                );
-
-            }
-
-            if (
-                source.length >
-                2 * 1024 * 1024
-            ) {
-
-                return apiError(
-                    res,
-                    413,
-                    "Script is too large."
-                );
-
-            }
-
-            const result =
-                await pool.query(
-                    `
-                    UPDATE scripts
-                    SET
-                        name = $1,
-                        source = $2,
-                        updated_at = NOW()
-                    WHERE
-                        id = $3
-                        AND user_id = $4
-                    RETURNING
-                        id,
-                        name,
-                        updated_at
-                    `,
-                    [
-                        name,
-                        source,
-                        req.params.id,
-                        req.user.id
-                    ]
-                );
-
-            if (
-                result.rows.length === 0
-            ) {
-
-                return apiError(
-                    res,
-                    404,
-                    "Script not found."
-                );
-
-            }
-
-            const script =
-                result.rows[0];
-
-            return res.json({
-
-                ok: true,
-
-                message:
-                    "Script updated successfully.",
-
-                script: {
-
-                    id:
-                        script.id,
-
-                    name:
-                        script.name,
-
-                    updatedAt:
-                        script.updated_at
-
-                }
-
+        if (index === -1) {
+            return res.status(404).json({
+                ok: false,
+                error:
+                    "Script not found"
             });
-
-        } catch (error) {
-
-            console.error(
-                "EDIT SCRIPT ERROR:",
-                error
-            );
-
-            return apiError(
-                res,
-                500,
-                "Failed to update script."
-            );
-
         }
 
+        const name =
+            String(
+                req.body.name ||
+                "Untitled Script"
+            ).trim();
+
+        const source =
+            String(
+                req.body.source || ""
+            );
+
+        if (!source.trim()) {
+            return res.status(400).json({
+                ok: false,
+                error:
+                    "Script source cannot be empty"
+            });
+        }
+
+        if (source.length > 2 * 1024 * 1024) {
+            return res.status(413).json({
+                ok: false,
+                error:
+                    "Script is too large"
+            });
+        }
+
+        scripts[index].name =
+            name ||
+            "Untitled Script";
+
+        scripts[index].source =
+            source;
+
+        scripts[index].updatedAt =
+            Date.now();
+
+        saveScripts(scripts);
+
+        return res.json({
+            ok: true,
+            message:
+                "Script updated successfully"
+        });
     }
 );
 
@@ -1473,97 +818,59 @@ app.put(
 app.delete(
     "/api/script/:id",
     requireAuth,
-    async (req, res) => {
+    (req, res) => {
 
-        try {
+        const id =
+            req.params.id;
 
-            const result =
-                await pool.query(
-                    `
-                    DELETE FROM scripts
-                    WHERE
-                        id = $1
-                        AND user_id = $2
-                    RETURNING id
-                    `,
-                    [
-                        req.params.id,
-                        req.user.id
-                    ]
-                );
+        const scripts =
+            getScripts();
 
-            if (
-                result.rows.length === 0
-            ) {
+        const index =
+            scripts.findIndex(
+                x =>
+                    x.id === id &&
+                    x.ownerId ===
+                    req.user.id
+            );
 
-                return apiError(
-                    res,
-                    404,
-                    "Script not found."
-                );
-
-            }
-
-            return res.json({
-
-                ok: true,
-
-                message:
-                    "Script deleted successfully."
-
+        if (index === -1) {
+            return res.status(404).json({
+                ok: false,
+                error:
+                    "Script not found"
             });
-
-        } catch (error) {
-
-            console.error(
-                "DELETE SCRIPT ERROR:",
-                error
-            );
-
-            return apiError(
-                res,
-                500,
-                "Failed to delete script."
-            );
-
         }
 
+        scripts.splice(index, 1);
+
+        saveScripts(scripts);
+
+        return res.json({
+            ok: true,
+            message:
+                "Script deleted successfully"
+        });
     }
 );
 
 /* =========================================================
-   LOADER SESSIONS
+   LOADER SESSION
 ========================================================= */
 
-const loaderSessions =
-    new Map();
+const loaderSessions = new Map();
 
-/* =========================================================
-   CREATE LOADER SESSION
-========================================================= */
-
-function createLoaderSession(
-    scriptId
-) {
-
-    const id =
-        randomHex(32);
+function createLoaderSession(scriptId) {
+    const id = randomHex(32);
 
     const session = {
-
         id,
-
         scriptId,
-
         stage: 1,
-
-        tokens:
-            new Set(),
-
+        tokens: new Set(),
+        created: Date.now(),
         expires:
-            Date.now() +
-            LOADER_TTL
-
+            Date.now() + TOKEN_TTL
     };
 
     loaderSessions.set(
@@ -1574,54 +881,33 @@ function createLoaderSession(
     return session;
 }
 
-/* =========================================================
-   TOKEN
-========================================================= */
-
-function issueToken(
-    session
-) {
-
+function createLoaderToken(session) {
     const token =
         randomHex(32);
 
-    session.tokens.add(
-        token
-    );
+    session.tokens.add(token);
 
     return token;
 }
 
-function consumeToken(
+function consumeLoaderToken(
     session,
     token
 ) {
-
     if (!token) {
         return false;
     }
 
-    if (
-        !session.tokens.has(
-            token
-        )
-    ) {
-
+    if (!session.tokens.has(token)) {
         return false;
-
     }
 
-    session.tokens.delete(
-        token
-    );
+    session.tokens.delete(token);
 
     return true;
 }
 
-function validLoaderSession(
-    session
-) {
-
+function validLoaderSession(session) {
     if (!session) {
         return false;
     }
@@ -1630,53 +916,39 @@ function validLoaderSession(
         Date.now() >
         session.expires
     ) {
-
         loaderSessions.delete(
             session.id
         );
 
         return false;
-
     }
 
     return true;
 }
 
 /* =========================================================
-   LUA HELPERS
+   LUA STRING
 ========================================================= */
 
-function luaString(
-    value
-) {
-
+function luaString(value) {
     return JSON.stringify(
         String(value)
     );
-
 }
 
 function randomLuaName() {
-
     const chars =
         "abcdefghijklmnopqrstuvwxyz";
 
     let result = "_";
 
-    for (
-        let i = 0;
-        i < 8;
-        i++
-    ) {
-
-        result +=
-            chars[
-                crypto.randomInt(
-                    0,
-                    chars.length
-                )
-            ];
-
+    for (let i = 0; i < 8; i++) {
+        result += chars[
+            crypto.randomInt(
+                0,
+                chars.length
+            )
+        ];
     }
 
     return result;
@@ -1687,107 +959,48 @@ function randomLuaName() {
 ========================================================= */
 
 function buildL2(
-    session,
-    base
+    session
 ) {
-
-    const vm =
+    const data =
         randomLuaName();
 
     const run =
         randomLuaName();
 
-    const data =
-        randomLuaName();
-
-    const endpoint =
-        randomLuaName();
-
     const nextToken =
-        issueToken(session);
-
-    const l3 =
-        `${base}/api/l3`;
+        createLoaderToken(
+            session
+        );
 
     return `
--- LEXINX L2
-
 local ${data} = {
-
     strings = {
-
-        [0] = ${luaString("/api/l3")},
+        [0] = "/api/l3",
         [1] = ${luaString(nextToken)},
         [2] = ${luaString(session.id)}
-
-    },
-
-    constants = {
-
-        [0] = 2
-
-    },
-
-    instructions = {
-
-        {opcode="LOADK",arg=0},
-        {opcode="LOADK",arg=1},
-        {opcode="LOADK",arg=2}
-
     }
-
 }
 
 local function ${run}(p)
-
-    local stack = {}
-
-    for _, instruction in ipairs(
-        p.instructions
-    ) do
-
-        if instruction.opcode == "LOADK" then
-
-            table.insert(
-                stack,
-                p.strings[
-                    instruction.arg
-                ]
-            )
-
-        end
-
-    end
-
-    return stack
-
+    return p.strings
 end
 
-local ${vm} =
-    ${run}(${data})
+${run}(${data})
 
-local ${endpoint} =
-    ${luaString(l3)}
+local url =
+    "https://lexinx-protect.onrender.com/api/l3"
+    .. "?session=" .. ${luaString(session.id)}
+    .. "&token=" .. ${luaString(nextToken)}
 
-local ok, response =
-    pcall(function()
-
-        return game:HttpGet(
-            ${endpoint}
-            .. "?session="
-            .. ${luaString(session.id)}
-            .. "&token="
-            .. ${luaString(nextToken)}
-        )
-
-    end)
+local ok, response = pcall(function()
+    return game:HttpGet(url)
+end)
 
 if not ok then
     return
 end
 
-local fn =
-    loadstring(response)
+local fn = loadstring(response)
 
 if fn then
     return fn()
@@ -1800,99 +1013,48 @@ end
 ========================================================= */
 
 function buildL3(
-    session,
-    base
+    session
 ) {
-
-    const nextToken =
-        issueToken(session);
-
     const data =
         randomLuaName();
 
     const run =
         randomLuaName();
 
-    const endpoint =
-        `${base}/api/l4`;
+    const nextToken =
+        createLoaderToken(
+            session
+        );
 
     return `
--- LEXINX L3
-
 local ${data} = {
-
     strings = {
-
         [0] = "/api/l4",
         [1] = ${luaString(session.id)},
         [2] = ${luaString(nextToken)}
-
-    },
-
-    constants = {
-
-        [0] = 3
-
-    },
-
-    instructions = {
-
-        {opcode="LOADK",arg=0},
-        {opcode="LOADK",arg=1},
-        {opcode="LOADK",arg=2}
-
     }
-
 }
 
-local function ${run}(program)
-
-    local stack = {}
-
-    for _, instruction in ipairs(
-        program.instructions
-    ) do
-
-        if instruction.opcode == "LOADK" then
-
-            stack[#stack + 1] =
-                program.strings[
-                    instruction.arg
-                ]
-
-        end
-
-    end
-
-    return stack
-
+local function ${run}(p)
+    return p.strings
 end
 
-local result =
-    ${run}(${data})
+${run}(${data})
 
 local url =
-    ${luaString(endpoint)}
-    .. "?session="
-    .. ${luaString(session.id)}
-    .. "&token="
-    .. ${luaString(nextToken)}
+    "https://lexinx-protect.onrender.com/api/l4"
+    .. "?session=" .. ${luaString(session.id)}
+    .. "&token=" .. ${luaString(nextToken)}
 
-local ok, response =
-    pcall(function()
-
-        return game:HttpGet(
-            url
-        )
-
-    end)
+local ok, response = pcall(function()
+    return game:HttpGet(url)
+end)
 
 if not ok then
     return
 end
 
-local fn =
-    loadstring(response)
+local fn = loadstring(response)
 
 if fn then
     return fn()
@@ -1905,102 +1067,51 @@ end
 ========================================================= */
 
 function buildL4(
-    session,
-    base
+    session
 ) {
-
-    const nextToken =
-        issueToken(session);
-
-    const program =
+    const data =
         randomLuaName();
 
     const run =
         randomLuaName();
 
-    const endpoint =
-        `${base}/api/l5`;
+    const nextToken =
+        createLoaderToken(
+            session
+        );
 
     return `
--- LEXINX L4
-
-local ${program} = {
-
+local ${data} = {
     strings = {
-
         [0] = "/api/l5",
         [1] = ${luaString(session.id)},
         [2] = ${luaString(nextToken)}
-
-    },
-
-    constants = {
-
-        [0] = 4
-
-    },
-
-    instructions = {
-
-        {opcode="LOADK",arg=0},
-        {opcode="LOADK",arg=1},
-        {opcode="LOADK",arg=2}
-
     }
-
 }
 
-local function ${run}(data)
-
-    local stack = {}
-
-    for _, instruction in ipairs(
-        data.instructions
-    ) do
-
-        if instruction.opcode == "LOADK" then
-
-            stack[#stack + 1] =
-                data.strings[
-                    instruction.arg
-                ]
-
-        end
-
-    end
-
-    return stack
-
+local function ${run}(p)
+    return p.strings
 end
 
-local args =
-    ${run}(${program})
+${run}(${data})
 
 local url =
-    ${luaString(endpoint)}
-    .. "?session="
-    .. ${luaString(session.id)}
-    .. "&token="
-    .. ${luaString(nextToken)}
+    "https://lexinx-protect.onrender.com/api/l5"
+    .. "?session=" .. ${luaString(session.id)}
+    .. "&token=" .. ${luaString(nextToken)}
 
-local success, result =
-    pcall(function()
+local ok, response = pcall(function()
+    return game:HttpGet(url)
+end)
 
-        return game:HttpGet(
-            url
-        )
-
-    end)
-
-if not success then
+if not ok then
     return
 end
 
-local execute =
-    loadstring(result)
+local fn = loadstring(response)
 
-if execute then
-    return execute()
+if fn then
+    return fn()
 end
 `;
 }
@@ -2010,116 +1121,97 @@ end
 ========================================================= */
 
 function buildL5(
+    session,
     source
 ) {
-
-    const payload =
-        Buffer
-            .from(
-                source,
-                "utf8"
-            )
-            .toString("base64");
+    const data =
+        randomLuaName();
 
     const fn =
         randomLuaName();
 
-    const data =
-        randomLuaName();
+    const payload =
+        Buffer
+        .from(source, "utf8")
+        .toString("base64");
 
     return `
--- LEXINX L5
+local ${data} = "${payload}"
 
-local ${data} =
-    "${payload}"
+local ${fn} = function(input)
 
-local ${fn} =
-    function(input)
+    local alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
-        local alphabet =
-            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+    input = input:gsub(
+        "[^" .. alphabet .. "=]",
+        ""
+    )
 
-        local decoded = {}
+    local bits = ""
 
-        input = input:gsub(
-            "[^" .. alphabet .. "=]",
-            ""
-        )
+    for i = 1, #input do
 
-        local bits = ""
+        local c = input:sub(i, i)
 
-        for i = 1, #input do
+        if c ~= "=" then
 
-            local c =
-                input:sub(
-                    i,
-                    i
+            local p =
+                alphabet:find(
+                    c,
+                    1,
+                    true
                 )
 
-            if c ~= "=" then
+            if p then
 
-                local p =
-                    alphabet:find(
-                        c,
-                        1,
-                        true
-                    )
+                p = p - 1
 
-                if p then
+                for j = 5, 0, -1 do
 
-                    p = p - 1
-
-                    local b = ""
-
-                    for j = 6, 1, -1 do
-
-                        b = b ..
-                            (
-                                (p % 2^j >= 2^(j-1))
-                                and "1"
-                                or "0"
-                            )
-
+                    if p % (2 ^ (j + 1))
+                        >= (2 ^ j)
+                    then
+                        bits = bits .. "1"
+                    else
+                        bits = bits .. "0"
                     end
 
-                    bits =
-                        bits .. b
-
                 end
 
             end
 
         end
-
-        for i = 1, #bits - 7, 8 do
-
-            local byte = 0
-
-            for j = 0, 7 do
-
-                if bits:sub(
-                    i + j,
-                    i + j
-                ) == "1" then
-
-                    byte =
-                        byte +
-                        2^(7-j)
-
-                end
-
-            end
-
-            decoded[#decoded + 1] =
-                string.char(byte)
-
-        end
-
-        return table.concat(
-            decoded
-        )
 
     end
+
+    local decoded = {}
+
+    for i = 1, #bits - 7, 8 do
+
+        local byte = 0
+
+        for j = 0, 7 do
+
+            if bits:sub(
+                i + j,
+                i + j
+            ) == "1"
+            then
+                byte =
+                    byte +
+                    2 ^ (7 - j)
+            end
+
+        end
+
+        decoded[#decoded + 1] =
+            string.char(byte)
+
+    end
+
+    return table.concat(decoded)
+end
 
 local source =
     ${fn}(${data})
@@ -2139,71 +1231,41 @@ end
 
 app.get(
     "/api/loader/:id",
-    async (req, res) => {
+    (req, res) => {
 
-        try {
+        const id =
+            req.params.id;
 
-            const result =
-                await pool.query(
-                    `
-                    SELECT
-                        id
-                    FROM scripts
-                    WHERE id = $1
-                    LIMIT 1
-                    `,
-                    [req.params.id]
-                );
+        const scripts =
+            getScripts();
 
-            if (
-                result.rows.length === 0
-            ) {
-
-                return apiError(
-                    res,
-                    404,
-                    "Script not found."
-                );
-
-            }
-
-            const session =
-                createLoaderSession(
-                    req.params.id
-                );
-
-            session.stage = 2;
-
-            const base =
-                BASE_URL ||
-                `${req.protocol}://${req.get("host")}`;
-
-            const output =
-                buildL2(
-                    session,
-                    base
-                );
-
-            return res
-                .status(200)
-                .type("text/plain")
-                .send(output);
-
-        } catch (error) {
-
-            console.error(
-                "LOADER ERROR:",
-                error
+        const script =
+            scripts.find(
+                x => x.id === id
             );
 
-            return apiError(
-                res,
-                500,
-                "Loader error."
+        if (!script) {
+            return res.status(404).send(
+                "Script not found"
             );
-
         }
 
+        const session =
+            createLoaderSession(id);
+
+        const token =
+            createLoaderToken(
+                session
+            );
+
+        session.stage = 2;
+
+        const code =
+            buildL2(session, token);
+
+        res.type("text/plain");
+
+        return res.send(code);
     }
 );
 
@@ -2213,86 +1275,43 @@ app.get(
 
 app.get(
     "/api/l3",
-    async (req, res) => {
+    (req, res) => {
 
-        try {
-
-            const session =
-                loaderSessions.get(
-                    req.query.session
-                );
-
-            if (
-                !validLoaderSession(
-                    session
-                )
-            ) {
-
-                return apiError(
-                    res,
-                    403,
-                    "Invalid session."
-                );
-
-            }
-
-            if (
-                session.stage !== 2
-            ) {
-
-                return apiError(
-                    res,
-                    403,
-                    "Invalid stage."
-                );
-
-            }
-
-            if (
-                !consumeToken(
-                    session,
-                    req.query.token
-                )
-            ) {
-
-                return apiError(
-                    res,
-                    403,
-                    "Invalid token."
-                );
-
-            }
-
-            session.stage = 3;
-
-            const base =
-                BASE_URL ||
-                `${req.protocol}://${req.get("host")}`;
-
-            return res
-                .type("text/plain")
-                .send(
-                    buildL3(
-                        session,
-                        base
-                    )
-                );
-
-        } catch (error) {
-
-            console.error(
-                "L3 ERROR:",
-                error
+        const session =
+            loaderSessions.get(
+                req.query.session
             );
 
-            return apiError(
-                res,
-                500,
-                "L3 error."
+        if (!validLoaderSession(session)) {
+            return res.status(403).send(
+                "LEXINX BLOCK"
             );
-
         }
 
+        if (session.stage !== 2) {
+            return res.status(403).send(
+                "LEXINX BLOCK"
+            );
+        }
+
+        if (
+            !consumeLoaderToken(
+                session,
+                req.query.token
+            )
+        ) {
+            return res.status(403).send(
+                "LEXINX BLOCK"
+            );
+        }
+
+        session.stage = 3;
+
+        return res
+            .type("text/plain")
+            .send(
+                buildL3(session)
+            );
     }
 );
 
@@ -2302,86 +1321,43 @@ app.get(
 
 app.get(
     "/api/l4",
-    async (req, res) => {
+    (req, res) => {
 
-        try {
-
-            const session =
-                loaderSessions.get(
-                    req.query.session
-                );
-
-            if (
-                !validLoaderSession(
-                    session
-                )
-            ) {
-
-                return apiError(
-                    res,
-                    403,
-                    "Invalid session."
-                );
-
-            }
-
-            if (
-                session.stage !== 3
-            ) {
-
-                return apiError(
-                    res,
-                    403,
-                    "Invalid stage."
-                );
-
-            }
-
-            if (
-                !consumeToken(
-                    session,
-                    req.query.token
-                )
-            ) {
-
-                return apiError(
-                    res,
-                    403,
-                    "Invalid token."
-                );
-
-            }
-
-            session.stage = 4;
-
-            const base =
-                BASE_URL ||
-                `${req.protocol}://${req.get("host")}`;
-
-            return res
-                .type("text/plain")
-                .send(
-                    buildL4(
-                        session,
-                        base
-                    )
-                );
-
-        } catch (error) {
-
-            console.error(
-                "L4 ERROR:",
-                error
+        const session =
+            loaderSessions.get(
+                req.query.session
             );
 
-            return apiError(
-                res,
-                500,
-                "L4 error."
+        if (!validLoaderSession(session)) {
+            return res.status(403).send(
+                "LEXINX BLOCK"
             );
-
         }
 
+        if (session.stage !== 3) {
+            return res.status(403).send(
+                "LEXINX BLOCK"
+            );
+        }
+
+        if (
+            !consumeLoaderToken(
+                session,
+                req.query.token
+            )
+        ) {
+            return res.status(403).send(
+                "LEXINX BLOCK"
+            );
+        }
+
+        session.stage = 4;
+
+        return res
+            .type("text/plain")
+            .send(
+                buildL4(session)
+            );
     }
 );
 
@@ -2391,222 +1367,188 @@ app.get(
 
 app.get(
     "/api/l5",
-    async (req, res) => {
+    (req, res) => {
 
-        try {
+        const session =
+            loaderSessions.get(
+                req.query.session
+            );
 
-            const session =
-                loaderSessions.get(
-                    req.query.session
-                );
+        if (!validLoaderSession(session)) {
+            return res.status(403).send(
+                "LEXINX BLOCK"
+            );
+        }
 
-            if (
-                !validLoaderSession(
-                    session
-                )
-            ) {
+        if (session.stage !== 4) {
+            return res.status(403).send(
+                "LEXINX BLOCK"
+            );
+        }
 
-                return apiError(
-                    res,
-                    403,
-                    "Invalid session."
-                );
+        if (
+            !consumeLoaderToken(
+                session,
+                req.query.token
+            )
+        ) {
+            return res.status(403).send(
+                "LEXINX BLOCK"
+            );
+        }
 
-            }
+        const scripts =
+            getScripts();
 
-            if (
-                session.stage !== 4
-            ) {
+        const script =
+            scripts.find(
+                x =>
+                    x.id ===
+                    session.scriptId
+            );
 
-                return apiError(
-                    res,
-                    403,
-                    "Invalid stage."
-                );
-
-            }
-
-            if (
-                !consumeToken(
-                    session,
-                    req.query.token
-                )
-            ) {
-
-                return apiError(
-                    res,
-                    403,
-                    "Invalid token."
-                );
-
-            }
-
-            const result =
-                await pool.query(
-                    `
-                    SELECT
-                        source
-                    FROM scripts
-                    WHERE id = $1
-                    LIMIT 1
-                    `,
-                    [session.scriptId]
-                );
-
-            if (
-                result.rows.length === 0
-            ) {
-
-                loaderSessions.delete(
-                    session.id
-                );
-
-                return apiError(
-                    res,
-                    404,
-                    "Script not found."
-                );
-
-            }
-
-            const source =
-                result.rows[0].source;
-
-            session.stage = 5;
-
-            const output =
-                buildL5(
-                    source
-                );
-
+        if (!script) {
             loaderSessions.delete(
                 session.id
             );
 
-            return res
-                .type("text/plain")
-                .send(output);
-
-        } catch (error) {
-
-            console.error(
-                "L5 ERROR:",
-                error
+            return res.status(404).send(
+                "Script not found"
             );
-
-            return apiError(
-                res,
-                500,
-                "L5 error."
-            );
-
         }
 
-    }
-);
+        session.stage = 5;
 
-/* =========================================================
-   UNKNOWN API
-========================================================= */
+        const output =
+            buildL5(
+                session,
+                script.source
+            );
 
-app.use(
-    "/api",
-    (req, res) => {
-
-        return apiError(
-            res,
-            404,
-            "API ROUTE NOT FOUND"
+        loaderSessions.delete(
+            session.id
         );
 
+        return res
+            .type("text/plain")
+            .send(output);
     }
 );
 
 /* =========================================================
-   UNKNOWN WEBSITE ROUTES
+   API TEST
+========================================================= */
+
+app.get("/api/test", (req, res) => {
+    res.json({
+        ok: true,
+        message:
+            "LEXINX API ONLINE"
+    });
+});
+
+/* =========================================================
+   API NOT FOUND
+========================================================= */
+
+app.use("/api", (req, res) => {
+    return res.status(404).json({
+        ok: false,
+        error:
+            "API ROUTE NOT FOUND"
+    });
+});
+
+/* =========================================================
+   FRONTEND
+========================================================= */
+
+app.get("*", (req, res) => {
+    res.sendFile(
+        path.join(
+            __dirname,
+            "public",
+            "index.html"
+        )
+    );
+});
+
+/* =========================================================
+   EXPIRED AUTH SESSIONS
+========================================================= */
+
+setInterval(() => {
+
+    const now =
+        Date.now();
+
+    for (
+        const [token, session]
+        of authSessions
+    ) {
+
+        if (
+            now >
+            session.expires
+        ) {
+            authSessions.delete(
+                token
+            );
+        }
+    }
+
+}, 60 * 1000);
+
+/* =========================================================
+   EXPIRED LOADER SESSIONS
+========================================================= */
+
+setInterval(() => {
+
+    const now =
+        Date.now();
+
+    for (
+        const [id, session]
+        of loaderSessions
+    ) {
+
+        if (
+            now >
+            session.expires
+        ) {
+            loaderSessions.delete(id);
+        }
+    }
+
+}, 30 * 1000);
+
+/* =========================================================
+   ERROR HANDLER
 ========================================================= */
 
 app.use(
-    (req, res) => {
+    (err, req, res, next) => {
 
-        return res
-            .status(404)
-            .sendFile(
-                path.join(
-                    publicPath,
-                    "index.html"
-                )
-            );
+        console.error(
+            "SERVER ERROR:",
+            err
+        );
 
+        if (res.headersSent) {
+            return next(err);
+        }
+
+        return res.status(500).json({
+            ok: false,
+            error:
+                "Internal server error"
+        });
     }
 );
 
 /* =========================================================
-   CLEAN LOADER SESSIONS
-========================================================= */
-
-setInterval(
-    () => {
-
-        const now =
-            Date.now();
-
-        for (
-            const [
-                id,
-                session
-            ]
-            of loaderSessions
-        ) {
-
-            if (
-                now >
-                session.expires
-            ) {
-
-                loaderSessions.delete(
-                    id
-                );
-
-            }
-
-        }
-
-    },
-    30 * 1000
-);
-
-/* =========================================================
-   CLEAN AUTH SESSIONS
-========================================================= */
-
-setInterval(
-    async () => {
-
-        try {
-
-            await pool.query(
-                `
-                DELETE FROM auth_sessions
-                WHERE expires_at <= NOW()
-                `
-            );
-
-        } catch (error) {
-
-            console.error(
-                "AUTH SESSION CLEANUP:",
-                error
-            );
-
-        }
-
-    },
-    60 * 60 * 1000
-);
-
-/* =========================================================
-   SERVER
+   START
 ========================================================= */
 
 app.listen(
@@ -2615,11 +1557,19 @@ app.listen(
     () => {
 
         console.log(
-            `LEXINX Protect running on port ${PORT}`
+            "================================="
         );
 
         console.log(
-            `Public directory: ${publicPath}`
+            "LEXINX SERVER ONLINE"
+        );
+
+        console.log(
+            `PORT: ${PORT}`
+        );
+
+        console.log(
+            "================================="
         );
 
     }
