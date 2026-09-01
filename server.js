@@ -1,5 +1,6 @@
 const express = require("express");
 const crypto = require("crypto");
+const path = require("path");
 
 const app = express();
 
@@ -10,6 +11,17 @@ const PORT = process.env.PORT || 3000;
 const TOKEN_TTL = 60 * 1000;
 
 const scripts = new Map();
+
+/* =========================================================
+   WEBSITE
+========================================================= */
+
+// Nếu index.html nằm cùng thư mục với server.js
+app.use(express.static(__dirname));
+
+/* =========================================================
+   SCRIPTS
+========================================================= */
 
 scripts.set("58ceecd03f8a061d8af1d341", {
     source: `
@@ -44,6 +56,7 @@ function createNonce() {
 ========================================================= */
 
 function createSession(scriptId) {
+
     const id = randomHex(32);
 
     const session = {
@@ -61,6 +74,7 @@ function createSession(scriptId) {
 }
 
 function issueToken(session) {
+
     const token = createToken();
 
     session.tokens.add(token);
@@ -69,6 +83,7 @@ function issueToken(session) {
 }
 
 function consumeToken(session, token) {
+
     if (!token) {
         return false;
     }
@@ -83,12 +98,15 @@ function consumeToken(session, token) {
 }
 
 function validSession(session) {
+
     if (!session) {
         return false;
     }
 
     if (Date.now() > session.expires) {
+
         sessions.delete(session.id);
+
         return false;
     }
 
@@ -100,6 +118,7 @@ function validSession(session) {
 ========================================================= */
 
 function apiBlock(res, message = "LEXINX BLOCK") {
+
     return res.status(403).json({
         ok: false,
         error: message
@@ -119,11 +138,13 @@ function luaString(value) {
 ========================================================= */
 
 function randomLuaName() {
+
     const chars = "abcdefghijklmnopqrstuvwxyz";
 
     let result = "_";
 
     for (let i = 0; i < 8; i++) {
+
         result += chars[
             crypto.randomInt(0, chars.length)
         ];
@@ -178,7 +199,9 @@ local function ${run}(p)
 
     local stack = {}
 
-    for _, instruction in ipairs(p.instructions) do
+    for _, instruction in ipairs(
+        p.instructions
+    ) do
 
         if instruction.opcode == "LOADK" then
 
@@ -429,7 +452,7 @@ local ${fn} = function(input)
 
     for i = 1, #input do
 
-        local c = input:sub(i,i)
+        local c = input:sub(i, i)
 
         if c ~= "=" then
 
@@ -465,8 +488,11 @@ local ${fn} = function(input)
 
         for j = 0, 7 do
 
-            if bits:sub(i+j,i+j) == "1" then
-                byte = byte + 2^(7-j)
+            if bits:sub(i+j, i+j) == "1" then
+
+                byte =
+                    byte + 2^(7-j)
+
             end
 
         end
@@ -493,145 +519,33 @@ end
 }
 
 /* =========================================================
-   ROOT
+   HOME PAGE
 ========================================================= */
 
 app.get("/", (req, res) => {
 
-    res.status(200).type("html").send(`
-<!doctype html>
-<html lang="en">
-
-<head>
-
-<meta charset="utf-8">
-
-<meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
->
-
-<title>LEXINX Protect</title>
-
-<style>
-
-* {
-    box-sizing: border-box;
-}
-
-html,
-body {
-    margin: 0;
-    width: 100%;
-    height: 100%;
-}
-
-body {
-
-    background: #050505;
-
-    color: #fff;
-
-    font-family:
-        Arial,
-        sans-serif;
-
-    display: flex;
-
-    align-items: center;
-
-    justify-content: center;
-}
-
-.box {
-
-    width: min(520px, 90%);
-
-    padding: 45px 30px;
-
-    text-align: center;
-
-    border: 1px solid #333;
-
-    border-radius: 16px;
-
-    background: #111;
-
-    box-shadow:
-        0 0 50px
-        rgba(255,255,255,.04);
-}
-
-.logo {
-
-    font-size: 38px;
-
-    font-weight: 900;
-
-    letter-spacing: 7px;
-}
-
-.status {
-
-    margin-top: 15px;
-
-    color: #777;
-
-    font-size: 14px;
-
-    letter-spacing: 2px;
-}
-
-.online {
-
-    margin-top: 25px;
-
-    color: #aaa;
-
-    font-size: 13px;
-}
-
-</style>
-
-</head>
-
-<body>
-
-<div class="box">
-
-    <div class="logo">
-        LEXINX
-    </div>
-
-    <div class="status">
-        PROTECT
-    </div>
-
-    <div class="online">
-        API ONLINE
-    </div>
-
-</div>
-
-</body>
-
-</html>
-    `);
+    return res.sendFile(
+        path.join(__dirname, "index.html")
+    );
 
 });
 
 /* =========================================================
-   HEALTH CHECK
+   HEALTH
 ========================================================= */
 
 app.get("/health", (req, res) => {
 
     return res.status(200).json({
+
         ok: true,
+
         status: "online",
-        service: "LEXINX",
+
         uptime: process.uptime(),
+
         time: new Date().toISOString()
+
     });
 
 });
@@ -647,10 +561,12 @@ app.get("/api/loader/:id", (req, res) => {
     const script = scripts.get(id);
 
     if (!script) {
+
         return apiBlock(
             res,
             "SCRIPT NOT FOUND"
         );
+
     }
 
     const session =
@@ -851,7 +767,7 @@ app.get("/api/l5", (req, res) => {
 });
 
 /* =========================================================
-   UNKNOWN API ROUTES
+   UNKNOWN API
 ========================================================= */
 
 app.use("/api", (req, res) => {
@@ -864,44 +780,33 @@ app.use("/api", (req, res) => {
 });
 
 /* =========================================================
-   UNKNOWN WEB ROUTES
+   UNKNOWN WEB PAGE
 ========================================================= */
 
 app.use((req, res) => {
 
-    res.status(404).type("html").send(`
-<!doctype html>
+    return res.status(404).send(`
+<!DOCTYPE html>
 <html>
 <head>
-<meta charset="utf-8">
-<title>404 - LEXINX</title>
-<style>
-body {
-    margin: 0;
-    background: #050505;
-    color: white;
-    font-family: Arial, sans-serif;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100vh;
-    text-align: center;
-}
-h1 {
-    font-size: 50px;
-    margin: 0;
-}
-p {
-    color: #777;
-}
-</style>
+<meta charset="UTF-8">
+<title>404</title>
 </head>
 
-<body>
+<body style="
+    margin:0;
+    background:#050505;
+    color:white;
+    font-family:Arial;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    height:100vh;
+">
 
-<div>
+<div style="text-align:center">
     <h1>404</h1>
-    <p>LEXINX — Page not found</p>
+    <p>Page not found</p>
 </div>
 
 </body>
@@ -911,7 +816,7 @@ p {
 });
 
 /* =========================================================
-   CLEAN EXPIRED SESSIONS
+   CLEAN SESSIONS
 ========================================================= */
 
 setInterval(() => {
