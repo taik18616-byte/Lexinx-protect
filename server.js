@@ -6,120 +6,152 @@ const path = require("path");
 const app = express();
 
 const PORT = process.env.PORT || 3000;
+const BASE_URL = "https://lexinx-protect.onrender.com";
+
+const AUTH_TTL = 7 * 24 * 60 * 60 * 1000;
+const LOADER_TTL = 60 * 1000;
 
 /* =========================================================
-   CONFIG
+   PATHS
 ========================================================= */
 
-const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
-const TOKEN_TTL = 60 * 1000;
+const PUBLIC_DIR =
+    path.join(__dirname, "public");
 
-const DATA_DIR = path.join(__dirname, "data");
-const USERS_FILE = path.join(DATA_DIR, "users.json");
-const SCRIPTS_FILE = path.join(DATA_DIR, "scripts.json");
+const DATA_DIR =
+    path.join(__dirname, "data");
+
+const USERS_FILE =
+    path.join(DATA_DIR, "users.json");
+
+const SCRIPTS_FILE =
+    path.join(DATA_DIR, "scripts.json");
+
+/* =========================================================
+   INIT
+========================================================= */
 
 if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.mkdirSync(DATA_DIR, {
+        recursive: true
+    });
 }
 
-function ensureFile(file, defaultValue) {
+function ensureJSON(file, value) {
     if (!fs.existsSync(file)) {
         fs.writeFileSync(
             file,
-            JSON.stringify(defaultValue, null, 2),
+            JSON.stringify(
+                value,
+                null,
+                2
+            ),
             "utf8"
         );
     }
 }
 
-ensureFile(USERS_FILE, []);
-ensureFile(SCRIPTS_FILE, []);
+ensureJSON(USERS_FILE, []);
+ensureJSON(SCRIPTS_FILE, []);
 
 /* =========================================================
    MIDDLEWARE
 ========================================================= */
 
-app.use(express.json({
-    limit: "2mb"
-}));
+app.use(
+    express.json({
+        limit: "2mb"
+    })
+);
 
-app.use(express.urlencoded({
-    extended: true,
-    limit: "2mb"
-}));
+app.use(
+    express.urlencoded({
+        extended: true,
+        limit: "2mb"
+    })
+);
 
-app.use(express.static(
-    path.join(__dirname, "public")
-));
-
-/* =========================================================
-   LOG
-========================================================= */
-
-app.use((req, res, next) => {
-    console.log(
-        `[${new Date().toISOString()}]`,
-        req.method,
-        req.originalUrl
-    );
-
-    next();
-});
+app.use(
+    express.static(PUBLIC_DIR)
+);
 
 /* =========================================================
-   JSON DATABASE
+   JSON STORAGE
 ========================================================= */
 
-function readJSON(file, fallback) {
+function readJSON(file) {
     try {
-        const raw = fs.readFileSync(file, "utf8");
+        const raw =
+            fs.readFileSync(
+                file,
+                "utf8"
+            );
 
         if (!raw.trim()) {
-            return fallback;
+            return [];
         }
 
         return JSON.parse(raw);
 
     } catch (err) {
+
         console.error(
-            "READ DATABASE ERROR:",
-            file,
+            "READ ERROR:",
             err.message
         );
 
-        return fallback;
+        return [];
     }
 }
 
-function writeJSON(file, data) {
+function writeJSON(
+    file,
+    data
+) {
     fs.writeFileSync(
         file,
-        JSON.stringify(data, null, 2),
+        JSON.stringify(
+            data,
+            null,
+            2
+        ),
         "utf8"
     );
 }
 
 function getUsers() {
-    return readJSON(USERS_FILE, []);
+    return readJSON(
+        USERS_FILE
+    );
 }
 
 function saveUsers(users) {
-    writeJSON(USERS_FILE, users);
+    writeJSON(
+        USERS_FILE,
+        users
+    );
 }
 
 function getScripts() {
-    return readJSON(SCRIPTS_FILE, []);
+    return readJSON(
+        SCRIPTS_FILE
+    );
 }
 
 function saveScripts(scripts) {
-    writeJSON(SCRIPTS_FILE, scripts);
+    writeJSON(
+        SCRIPTS_FILE,
+        scripts
+    );
 }
 
 /* =========================================================
    RANDOM
 ========================================================= */
 
-function randomHex(bytes = 32) {
+function randomHex(
+    bytes = 32
+) {
     return crypto
         .randomBytes(bytes)
         .toString("hex");
@@ -129,52 +161,101 @@ function randomID() {
     return randomHex(12);
 }
 
-/* =========================================================
-   PASSWORD HASH
-========================================================= */
+function randomLuaName() {
 
-function hashPassword(password) {
-    const salt = crypto.randomBytes(16);
+    const chars =
+        "abcdefghijklmnopqrstuvwxyz";
 
-    const hash = crypto.scryptSync(
-        password,
-        salt,
-        64
-    );
+    let out = "_";
 
-    return {
-        salt: salt.toString("hex"),
-        hash: hash.toString("hex")
-    };
+    for (
+        let i = 0;
+        i < 9;
+        i++
+    ) {
+
+        out +=
+            chars[
+                crypto.randomInt(
+                    0,
+                    chars.length
+                )
+            ];
+    }
+
+    return out;
 }
 
-function verifyPassword(password, stored) {
-    try {
-        const salt = Buffer.from(
-            stored.salt,
-            "hex"
-        );
+function luaString(value) {
+    return JSON.stringify(
+        String(value)
+    );
+}
 
-        const hash = crypto.scryptSync(
+/* =========================================================
+   PASSWORD
+========================================================= */
+
+function hashPassword(
+    password
+) {
+
+    const salt =
+        crypto.randomBytes(16);
+
+    const hash =
+        crypto.scryptSync(
             password,
             salt,
             64
         );
 
-        const original = Buffer.from(
-            stored.hash,
-            "hex"
-        );
+    return {
+        salt:
+            salt.toString("hex"),
+
+        hash:
+            hash.toString("hex")
+    };
+}
+
+function verifyPassword(
+    password,
+    stored
+) {
+
+    try {
+
+        const salt =
+            Buffer.from(
+                stored.salt,
+                "hex"
+            );
+
+        const expected =
+            Buffer.from(
+                stored.hash,
+                "hex"
+            );
+
+        const actual =
+            crypto.scryptSync(
+                password,
+                salt,
+                64
+            );
 
         return (
-            hash.length === original.length &&
+            actual.length ===
+            expected.length &&
             crypto.timingSafeEqual(
-                hash,
-                original
+                actual,
+                expected
             )
         );
 
     } catch {
+
         return false;
     }
 }
@@ -184,34 +265,45 @@ function verifyPassword(password, stored) {
 ========================================================= */
 
 function parseCookies(req) {
-    const header = req.headers.cookie;
+
+    const header =
+        req.headers.cookie;
 
     if (!header) {
         return {};
     }
 
-    const cookies = {};
+    const result = {};
 
-    for (const part of header.split(";")) {
-        const index = part.indexOf("=");
+    for (
+        const part
+        of header.split(";")
+    ) {
 
-        if (index === -1) {
+        const index =
+            part.indexOf("=");
+
+        if (index < 0) {
             continue;
         }
 
-        const key = part
-            .slice(0, index)
-            .trim();
+        const key =
+            part
+                .slice(0, index)
+                .trim();
 
-        const value = part
-            .slice(index + 1)
-            .trim();
+        const value =
+            part
+                .slice(index + 1)
+                .trim();
 
-        cookies[key] =
-            decodeURIComponent(value);
+        result[key] =
+            decodeURIComponent(
+                value
+            );
     }
 
-    return cookies;
+    return result;
 }
 
 function setCookie(
@@ -220,21 +312,24 @@ function setCookie(
     value,
     maxAge
 ) {
-    const parts = [
-        `${name}=${encodeURIComponent(value)}`,
-        "Path=/",
-        `Max-Age=${Math.floor(maxAge / 1000)}`,
-        "HttpOnly",
-        "SameSite=Lax"
-    ];
 
     res.setHeader(
         "Set-Cookie",
-        parts.join("; ")
+        [
+            `${name}=${encodeURIComponent(value)}`,
+            "Path=/",
+            `Max-Age=${Math.floor(maxAge / 1000)}`,
+            "HttpOnly",
+            "SameSite=Lax"
+        ].join("; ")
     );
 }
 
-function clearCookie(res, name) {
+function clearCookie(
+    res,
+    name
+) {
+
     res.setHeader(
         "Set-Cookie",
         `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`
@@ -245,23 +340,35 @@ function clearCookie(res, name) {
    AUTH SESSIONS
 ========================================================= */
 
-const authSessions = new Map();
+const authSessions =
+    new Map();
 
-function createAuthSession(userId) {
-    const token = randomHex(32);
+function createAuthSession(
+    userId
+) {
 
-    authSessions.set(token, {
-        userId,
-        created: Date.now(),
-        expires:
-            Date.now() + SESSION_TTL
-    });
+    const token =
+        randomHex(32);
+
+    authSessions.set(
+        token,
+        {
+            userId,
+            created:
+                Date.now(),
+            expires:
+                Date.now() +
+                AUTH_TTL
+        }
+    );
 
     return token;
 }
 
-function getAuthUser(req) {
-    const cookies = parseCookies(req);
+function getAuth(req) {
+
+    const cookies =
+        parseCookies(req);
 
     const token =
         cookies.lexinx_session;
@@ -277,89 +384,93 @@ function getAuthUser(req) {
         return null;
     }
 
-    if (Date.now() > session.expires) {
-        authSessions.delete(token);
+    if (
+        Date.now() >
+        session.expires
+    ) {
+
+        authSessions.delete(
+            token
+        );
+
         return null;
     }
 
-    const users = getUsers();
+    const users =
+        getUsers();
 
     const user =
         users.find(
-            x => x.id === session.userId
+            x =>
+                x.id ===
+                session.userId
         );
 
     if (!user) {
-        authSessions.delete(token);
+
+        authSessions.delete(
+            token
+        );
+
         return null;
     }
 
     return {
-        user,
         token,
-        session
+        session,
+        user
     };
 }
 
-function requireAuth(req, res, next) {
+function requireAuth(
+    req,
+    res,
+    next
+) {
+
     const auth =
-        getAuthUser(req);
+        getAuth(req);
 
     if (!auth) {
+
         return res.status(401).json({
             ok: false,
-            error: "Not authenticated"
+            error:
+                "Not authenticated"
         });
     }
 
-    req.user = auth.user;
-    req.authToken = auth.token;
+    req.user =
+        auth.user;
+
+    req.auth =
+        auth;
 
     next();
-}
-
-/* =========================================================
-   SCRIPT LOADER
-========================================================= */
-
-function loaderURL(id) {
-    return (
-        "https://lexinx-protect.onrender.com" +
-        "/api/loader/" +
-        encodeURIComponent(id)
-    );
-}
-
-/* =========================================================
-   AUTH RESPONSE
-========================================================= */
-
-function accountResponse(user) {
-    return {
-        ok: true,
-        username: user.username,
-        url:
-            "https://lexinx-protect.onrender.com"
-    };
 }
 
 /* =========================================================
    REGISTER
 ========================================================= */
 
-app.post("/api/register", (req, res) => {
-    try {
+app.post(
+    "/api/register",
+    (req, res) => {
+
         const username =
             String(
-                req.body.username || ""
+                req.body.username ||
+                ""
             ).trim();
 
         const password =
             String(
-                req.body.password || ""
+                req.body.password ||
+                ""
             );
 
         if (!username) {
+
             return res.status(400).json({
                 ok: false,
                 error:
@@ -367,15 +478,22 @@ app.post("/api/register", (req, res) => {
             });
         }
 
-        if (!/^[a-zA-Z0-9_]{3,32}$/.test(username)) {
+        if (
+            !/^[A-Za-z0-9_]{3,32}$/
+                .test(username)
+        ) {
+
             return res.status(400).json({
                 ok: false,
                 error:
-                    "Username must be 3-32 characters and contain only letters, numbers, or underscore"
+                    "Username must be 3-32 characters and use only letters, numbers or underscore"
             });
         }
 
-        if (password.length < 6) {
+        if (
+            password.length < 6
+        ) {
+
             return res.status(400).json({
                 ok: false,
                 error:
@@ -383,16 +501,19 @@ app.post("/api/register", (req, res) => {
             });
         }
 
-        const users = getUsers();
+        const users =
+            getUsers();
 
         const exists =
             users.some(
                 user =>
-                    user.username.toLowerCase() ===
+                    user.username
+                        .toLowerCase() ===
                     username.toLowerCase()
             );
 
         if (exists) {
+
             return res.status(409).json({
                 ok: false,
                 error:
@@ -400,14 +521,19 @@ app.post("/api/register", (req, res) => {
             });
         }
 
-        const passwordData =
-            hashPassword(password);
-
         const user = {
-            id: randomID(),
+            id:
+                randomID(),
+
             username,
-            password: passwordData,
-            createdAt: Date.now()
+
+            password:
+                hashPassword(
+                    password
+                ),
+
+            createdAt:
+                Date.now()
         };
 
         users.push(user);
@@ -415,50 +541,54 @@ app.post("/api/register", (req, res) => {
         saveUsers(users);
 
         const session =
-            createAuthSession(user.id);
+            createAuthSession(
+                user.id
+            );
 
         setCookie(
             res,
             "lexinx_session",
             session,
-            SESSION_TTL
+            AUTH_TTL
         );
 
-        return res.json(
-            accountResponse(user)
-        );
+        return res.json({
+            ok: true,
 
-    } catch (err) {
-        console.error(
-            "REGISTER ERROR:",
-            err
-        );
+            username:
+                user.username,
 
-        return res.status(500).json({
-            ok: false,
-            error:
-                "Internal server error"
+            url:
+                BASE_URL
         });
     }
-});
+);
 
 /* =========================================================
    LOGIN
 ========================================================= */
 
-app.post("/api/login", (req, res) => {
-    try {
+app.post(
+    "/api/login",
+    (req, res) => {
+
         const username =
             String(
-                req.body.username || ""
+                req.body.username ||
+                ""
             ).trim();
 
         const password =
             String(
-                req.body.password || ""
+                req.body.password ||
+                ""
             );
 
-        if (!username || !password) {
+        if (
+            !username ||
+            !password
+        ) {
+
             return res.status(400).json({
                 ok: false,
                 error:
@@ -466,16 +596,19 @@ app.post("/api/login", (req, res) => {
             });
         }
 
-        const users = getUsers();
+        const users =
+            getUsers();
 
         const user =
             users.find(
                 x =>
-                    x.username.toLowerCase() ===
+                    x.username
+                        .toLowerCase() ===
                     username.toLowerCase()
             );
 
         if (!user) {
+
             return res.status(401).json({
                 ok: false,
                 error:
@@ -489,6 +622,7 @@ app.post("/api/login", (req, res) => {
                 user.password
             )
         ) {
+
             return res.status(401).json({
                 ok: false,
                 error:
@@ -497,80 +631,91 @@ app.post("/api/login", (req, res) => {
         }
 
         const session =
-            createAuthSession(user.id);
+            createAuthSession(
+                user.id
+            );
 
         setCookie(
             res,
             "lexinx_session",
             session,
-            SESSION_TTL
+            AUTH_TTL
         );
 
-        return res.json(
-            accountResponse(user)
-        );
+        return res.json({
+            ok: true,
 
-    } catch (err) {
-        console.error(
-            "LOGIN ERROR:",
-            err
-        );
+            username:
+                user.username,
 
-        return res.status(500).json({
-            ok: false,
-            error:
-                "Internal server error"
+            url:
+                BASE_URL
         });
     }
-});
+);
 
 /* =========================================================
    ME
 ========================================================= */
 
-app.get("/api/me", (req, res) => {
-    const auth =
-        getAuthUser(req);
+app.get(
+    "/api/me",
+    (req, res) => {
 
-    if (!auth) {
-        return res.status(401).json({
-            ok: false,
-            error:
-                "Not authenticated"
+        const auth =
+            getAuth(req);
+
+        if (!auth) {
+
+            return res.status(401).json({
+                ok: false,
+                error:
+                    "Not authenticated"
+            });
+        }
+
+        return res.json({
+            ok: true,
+
+            username:
+                auth.user.username,
+
+            url:
+                BASE_URL
         });
     }
-
-    return res.json(
-        accountResponse(auth.user)
-    );
-});
+);
 
 /* =========================================================
    LOGOUT
 ========================================================= */
 
-app.post("/api/logout", (req, res) => {
-    const cookies =
-        parseCookies(req);
+app.post(
+    "/api/logout",
+    (req, res) => {
 
-    const token =
-        cookies.lexinx_session;
+        const cookies =
+            parseCookies(req);
 
-    if (token) {
-        authSessions.delete(token);
+        if (
+            cookies.lexinx_session
+        ) {
+
+            authSessions.delete(
+                cookies.lexinx_session
+            );
+        }
+
+        clearCookie(
+            res,
+            "lexinx_session"
+        );
+
+        return res.json({
+            ok: true
+        });
     }
-
-    clearCookie(
-        res,
-        "lexinx_session"
-    );
-
-    return res.json({
-        ok: true,
-        message:
-            "Logged out successfully"
-    });
-});
+);
 
 /* =========================================================
    CREATE SCRIPT
@@ -581,80 +726,82 @@ app.post(
     requireAuth,
     (req, res) => {
 
-        try {
-            const name =
-                String(
-                    req.body.name ||
-                    "Untitled Script"
-                ).trim();
+        const name =
+            String(
+                req.body.name ||
+                "Untitled Script"
+            ).trim();
 
-            const source =
-                String(
-                    req.body.source || ""
-                );
-
-            if (!source.trim()) {
-                return res.status(400).json({
-                    ok: false,
-                    error:
-                        "Script source cannot be empty"
-                });
-            }
-
-            if (source.length > 2 * 1024 * 1024) {
-                return res.status(413).json({
-                    ok: false,
-                    error:
-                        "Script is too large"
-                });
-            }
-
-            const scripts =
-                getScripts();
-
-            const id =
-                randomID();
-
-            const script = {
-                id,
-                ownerId: req.user.id,
-                name:
-                    name ||
-                    "Untitled Script",
-                source,
-                createdAt: Date.now(),
-                updatedAt: Date.now()
-            };
-
-            scripts.push(script);
-
-            saveScripts(scripts);
-
-            return res.json({
-                ok: true,
-                id,
-                name: script.name,
-                loader:
-                    `loadstring(game:HttpGet("${loaderURL(id)}"))()`
-            });
-
-        } catch (err) {
-            console.error(
-                "CREATE SCRIPT ERROR:",
-                err
+        const source =
+            String(
+                req.body.source ||
+                ""
             );
 
-            return res.status(500).json({
+        if (!source.trim()) {
+
+            return res.status(400).json({
                 ok: false,
                 error:
-                    "Internal server error"
+                    "Script source cannot be empty"
             });
         }
+
+        if (
+            source.length >
+            2 * 1024 * 1024
+        ) {
+
+            return res.status(413).json({
+                ok: false,
+                error:
+                    "Script is too large"
+            });
+        }
+
+        const scripts =
+            getScripts();
+
+        const id =
+            randomID();
+
+        scripts.push({
+            id,
+
+            ownerId:
+                req.user.id,
+
+            name:
+                name ||
+                "Untitled Script",
+
+            source,
+
+            createdAt:
+                Date.now(),
+
+            updatedAt:
+                Date.now()
+        });
+
+        saveScripts(
+            scripts
+        );
+
+        return res.json({
+
+            ok: true,
+
+            id,
+
+            loader:
+                `loadstring(game:HttpGet("${BASE_URL}/api/loader/${id}"))()`
+        });
     }
 );
 
 /* =========================================================
-   LIST USER SCRIPTS
+   LIST SCRIPTS
 ========================================================= */
 
 app.get(
@@ -664,21 +811,29 @@ app.get(
 
         const scripts =
             getScripts()
-            .filter(
-                script =>
-                    script.ownerId ===
-                    req.user.id
-            )
-            .map(script => ({
-                id: script.id,
-                name: script.name,
-                loader:
-                    `loadstring(game:HttpGet("${loaderURL(script.id)}"))()`,
-                createdAt:
-                    script.createdAt,
-                updatedAt:
-                    script.updatedAt
-            }));
+                .filter(
+                    x =>
+                        x.ownerId ===
+                        req.user.id
+                )
+                .map(
+                    x => ({
+                        id:
+                            x.id,
+
+                        name:
+                            x.name,
+
+                        loader:
+                            `loadstring(game:HttpGet("${BASE_URL}/api/loader/${x.id}"))()`,
+
+                        createdAt:
+                            x.createdAt,
+
+                        updatedAt:
+                            x.updatedAt
+                    })
+                );
 
         return res.json({
             ok: true,
@@ -688,7 +843,7 @@ app.get(
 );
 
 /* =========================================================
-   GET SINGLE SCRIPT
+   GET SCRIPT
 ========================================================= */
 
 app.get(
@@ -696,21 +851,20 @@ app.get(
     requireAuth,
     (req, res) => {
 
-        const id =
-            req.params.id;
-
         const scripts =
             getScripts();
 
         const script =
             scripts.find(
                 x =>
-                    x.id === id &&
+                    x.id ===
+                    req.params.id &&
                     x.ownerId ===
                     req.user.id
             );
 
         if (!script) {
+
             return res.status(404).json({
                 ok: false,
                 error:
@@ -719,15 +873,18 @@ app.get(
         }
 
         return res.json({
+
             ok: true,
+
             script: {
-                id: script.id,
-                name: script.name,
-                source: script.source,
-                createdAt:
-                    script.createdAt,
-                updatedAt:
-                    script.updatedAt
+                id:
+                    script.id,
+
+                name:
+                    script.name,
+
+                source:
+                    script.source
             }
         });
     }
@@ -742,21 +899,20 @@ app.put(
     requireAuth,
     (req, res) => {
 
-        const id =
-            req.params.id;
-
         const scripts =
             getScripts();
 
         const index =
             scripts.findIndex(
                 x =>
-                    x.id === id &&
+                    x.id ===
+                    req.params.id &&
                     x.ownerId ===
                     req.user.id
             );
 
         if (index === -1) {
+
             return res.status(404).json({
                 ok: false,
                 error:
@@ -772,22 +928,16 @@ app.put(
 
         const source =
             String(
-                req.body.source || ""
+                req.body.source ||
+                ""
             );
 
         if (!source.trim()) {
+
             return res.status(400).json({
                 ok: false,
                 error:
                     "Script source cannot be empty"
-            });
-        }
-
-        if (source.length > 2 * 1024 * 1024) {
-            return res.status(413).json({
-                ok: false,
-                error:
-                    "Script is too large"
             });
         }
 
@@ -801,12 +951,12 @@ app.put(
         scripts[index].updatedAt =
             Date.now();
 
-        saveScripts(scripts);
+        saveScripts(
+            scripts
+        );
 
         return res.json({
-            ok: true,
-            message:
-                "Script updated successfully"
+            ok: true
         });
     }
 );
@@ -820,21 +970,20 @@ app.delete(
     requireAuth,
     (req, res) => {
 
-        const id =
-            req.params.id;
-
         const scripts =
             getScripts();
 
         const index =
             scripts.findIndex(
                 x =>
-                    x.id === id &&
+                    x.id ===
+                    req.params.id &&
                     x.ownerId ===
                     req.user.id
             );
 
         if (index === -1) {
+
             return res.status(404).json({
                 ok: false,
                 error:
@@ -842,14 +991,17 @@ app.delete(
             });
         }
 
-        scripts.splice(index, 1);
+        scripts.splice(
+            index,
+            1
+        );
 
-        saveScripts(scripts);
+        saveScripts(
+            scripts
+        );
 
         return res.json({
-            ok: true,
-            message:
-                "Script deleted successfully"
+            ok: true
         });
     }
 );
@@ -858,19 +1010,30 @@ app.delete(
    LOADER SESSION
 ========================================================= */
 
-const loaderSessions = new Map();
+const loaderSessions =
+    new Map();
 
-function createLoaderSession(scriptId) {
-    const id = randomHex(32);
+function createLoaderSession(
+    scriptId
+) {
+
+    const id =
+        randomHex(32);
 
     const session = {
+
         id,
+
         scriptId,
+
         stage: 1,
-        tokens: new Set(),
-        created: Date.now(),
+
+        tokens:
+            new Set(),
+
         expires:
-            Date.now() + TOKEN_TTL
+            Date.now() +
+            LOADER_TTL
     };
 
     loaderSessions.set(
@@ -881,33 +1044,48 @@ function createLoaderSession(scriptId) {
     return session;
 }
 
-function createLoaderToken(session) {
+function issueToken(
+    session
+) {
+
     const token =
         randomHex(32);
 
-    session.tokens.add(token);
+    session.tokens.add(
+        token
+    );
 
     return token;
 }
 
-function consumeLoaderToken(
+function consumeToken(
     session,
     token
 ) {
+
     if (!token) {
         return false;
     }
 
-    if (!session.tokens.has(token)) {
+    if (
+        !session.tokens.has(
+            token
+        )
+    ) {
         return false;
     }
 
-    session.tokens.delete(token);
+    session.tokens.delete(
+        token
+    );
 
     return true;
 }
 
-function validLoaderSession(session) {
+function validLoaderSession(
+    session
+) {
+
     if (!session) {
         return false;
     }
@@ -916,6 +1094,7 @@ function validLoaderSession(session) {
         Date.now() >
         session.expires
     ) {
+
         loaderSessions.delete(
             session.id
         );
@@ -927,31 +1106,202 @@ function validLoaderSession(session) {
 }
 
 /* =========================================================
-   LUA STRING
+   BROWSER DETECTION
 ========================================================= */
 
-function luaString(value) {
-    return JSON.stringify(
-        String(value)
+function isBrowserRequest(
+    req
+) {
+
+    const ua =
+        String(
+            req.headers[
+                "user-agent"
+            ] || ""
+        ).toLowerCase();
+
+    const accept =
+        String(
+            req.headers.accept ||
+            ""
+        ).toLowerCase();
+
+    const browserUA =
+        ua.includes("mozilla") ||
+        ua.includes("chrome") ||
+        ua.includes("firefox") ||
+        ua.includes("safari") ||
+        ua.includes("edg") ||
+        ua.includes("opera");
+
+    const wantsHTML =
+        accept.includes(
+            "text/html"
+        );
+
+    return (
+        browserUA &&
+        wantsHTML
     );
 }
 
-function randomLuaName() {
-    const chars =
-        "abcdefghijklmnopqrstuvwxyz";
+/* =========================================================
+   PROTECT PAGE
+========================================================= */
 
-    let result = "_";
+function protectPage(
+    res
+) {
 
-    for (let i = 0; i < 8; i++) {
-        result += chars[
-            crypto.randomInt(
-                0,
-                chars.length
-            )
-        ];
-    }
+    return res
+        .status(403)
+        .type("html")
+        .send(`
+<!doctype html>
 
-    return result;
+<html>
+
+<head>
+
+<meta charset="utf-8">
+
+<meta
+    name="viewport"
+    content="width=device-width,initial-scale=1"
+>
+
+<title>LEXINX PROTECT</title>
+
+<style>
+
+*{
+    box-sizing:border-box;
+}
+
+html,
+body{
+    margin:0;
+    width:100%;
+    height:100%;
+}
+
+body{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+
+    background:#050505;
+    color:#eee;
+
+    font-family:
+        Arial,
+        sans-serif;
+}
+
+.box{
+    width:min(
+        520px,
+        90%
+    );
+
+    padding:55px 30px;
+
+    text-align:center;
+
+    background:#101010;
+
+    border:
+        1px solid #292929;
+
+    border-radius:18px;
+
+    box-shadow:
+        0 0 80px
+        rgba(255,255,255,.04);
+}
+
+.logo{
+    font-size:42px;
+    font-weight:900;
+    letter-spacing:8px;
+}
+
+.protect{
+    margin-top:16px;
+    color:#777;
+    font-size:12px;
+    letter-spacing:5px;
+}
+
+.line{
+    height:1px;
+    background:#292929;
+    margin:28px 0;
+}
+
+.access{
+    color:#777;
+    font-size:11px;
+    letter-spacing:3px;
+}
+
+.info{
+    margin-top:14px;
+    color:#444;
+    font-size:11px;
+    line-height:1.7;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="box">
+
+    <div class="logo">
+        LEXINX
+    </div>
+
+    <div class="protect">
+        PROTECT
+    </div>
+
+    <div class="line"></div>
+
+    <div class="access">
+        ACCESS DENIED
+    </div>
+
+    <div class="info">
+        Protected loader endpoint.
+        <br>
+        Direct browser access is disabled.
+    </div>
+
+</div>
+
+</body>
+
+</html>
+`);
+}
+
+/* =========================================================
+   LOADER ERROR
+========================================================= */
+
+function loaderBlock(
+    res
+) {
+
+    return res
+        .status(403)
+        .type("text/plain")
+        .send(
+            "LEXINX PROTECT"
+        );
 }
 
 /* =========================================================
@@ -961,46 +1311,51 @@ function randomLuaName() {
 function buildL2(
     session
 ) {
+
     const data =
         randomLuaName();
 
     const run =
         randomLuaName();
 
-    const nextToken =
-        createLoaderToken(
+    const token =
+        issueToken(
             session
         );
 
     return `
+-- LEXINX L2
+
 local ${data} = {
-    strings = {
-        [0] = "/api/l3",
-        [1] = ${luaString(nextToken)},
-        [2] = ${luaString(session.id)}
-    }
+    session = ${luaString(session.id)},
+    token = ${luaString(token)},
+    stage = 2
 }
 
-local function ${run}(p)
-    return p.strings
+local function ${run}(x)
+    return x
 end
 
 ${run}(${data})
 
 local url =
-    "https://lexinx-protect.onrender.com/api/l3"
-    .. "?session=" .. ${luaString(session.id)}
-    .. "&token=" .. ${luaString(nextToken)}
+    "${BASE_URL}/api/l3"
+    .. "?session="
+    .. ${luaString(session.id)}
+    .. "&token="
+    .. ${luaString(token)}
 
-local ok, response = pcall(function()
-    return game:HttpGet(url)
-end)
+local ok, response =
+    pcall(function()
+        return game:HttpGet(url)
+    end)
 
 if not ok then
     return
 end
 
-local fn = loadstring(response)
+local fn =
+    loadstring(response)
 
 if fn then
     return fn()
@@ -1015,46 +1370,145 @@ end
 function buildL3(
     session
 ) {
+
     const data =
         randomLuaName();
 
     const run =
         randomLuaName();
 
-    const nextToken =
-        createLoaderToken(
+    const token =
+        issueToken(
             session
         );
 
     return `
+-- LEXINX L3
+
 local ${data} = {
-    strings = {
-        [0] = "/api/l4",
-        [1] = ${luaString(session.id)},
-        [2] = ${luaString(nextToken)}
-    }
+    session = ${luaString(session.id)},
+    token = ${luaString(token)},
+    stage = 3
 }
 
-local function ${run}(p)
-    return p.strings
+local function ${run}(x)
+    return x
 end
 
 ${run}(${data})
 
 local url =
-    "https://lexinx-protect.onrender.com/api/l4"
-    .. "?session=" .. ${luaString(session.id)}
-    .. "&token=" .. ${luaString(nextToken)}
+    "${BASE_URL}/api/prototype"
+    .. "?session="
+    .. ${luaString(session.id)}
+    .. "&token="
+    .. ${luaString(token)}
 
-local ok, response = pcall(function()
-    return game:HttpGet(url)
-end)
+local ok, response =
+    pcall(function()
+        return game:HttpGet(url)
+    end)
 
 if not ok then
     return
 end
 
-local fn = loadstring(response)
+local fn =
+    loadstring(response)
+
+if fn then
+    return fn()
+end
+`;
+}
+
+/* =========================================================
+   PACKED PROTOTYPE
+========================================================= */
+
+function buildPrototype(
+    session
+) {
+
+    const data =
+        randomLuaName();
+
+    const run =
+        randomLuaName();
+
+    const token =
+        issueToken(
+            session
+        );
+
+    /*
+       This stage is intentionally separate
+       from L3 and L4.
+    */
+
+    return `
+-- LEXINX PACKED PROTOTYPE
+
+local ${data} = {
+
+    version = "PROTO-1",
+
+    session = ${luaString(session.id)},
+
+    token = ${luaString(token)},
+
+    constants = {
+        1,
+        2,
+        3,
+        4
+    },
+
+    strings = {
+        "LEXINX",
+        "PROTECTED",
+        "RUNTIME",
+        "BOOTSTRAP"
+    }
+}
+
+local function ${run}(prototype)
+
+    local checksum = 0
+
+    for _, value
+    in ipairs(prototype.constants)
+    do
+
+        checksum =
+            checksum +
+            value
+
+    end
+
+    return checksum
+end
+
+${run}(${data})
+
+local url =
+    "${BASE_URL}/api/l4"
+    .. "?session="
+    .. ${luaString(session.id)}
+    .. "&token="
+    .. ${luaString(token)}
+
+local ok, response =
+    pcall(function()
+        return game:HttpGet(url)
+    end)
+
+if not ok then
+    return
+end
+
+local fn =
+    loadstring(response)
 
 if fn then
     return fn()
@@ -1069,46 +1523,132 @@ end
 function buildL4(
     session
 ) {
+
     const data =
         randomLuaName();
 
     const run =
         randomLuaName();
 
-    const nextToken =
-        createLoaderToken(
+    const token =
+        issueToken(
             session
         );
 
     return `
+-- LEXINX L4
+
 local ${data} = {
-    strings = {
-        [0] = "/api/l5",
-        [1] = ${luaString(session.id)},
-        [2] = ${luaString(nextToken)}
-    }
+
+    session = ${luaString(session.id)},
+
+    token = ${luaString(token)},
+
+    stage = 4
+
 }
 
-local function ${run}(p)
-    return p.strings
+local function ${run}(x)
+
+    return
+        x.session,
+        x.token
+
 end
 
 ${run}(${data})
 
 local url =
-    "https://lexinx-protect.onrender.com/api/l5"
-    .. "?session=" .. ${luaString(session.id)}
-    .. "&token=" .. ${luaString(nextToken)}
+    "${BASE_URL}/api/bootstrap"
+    .. "?session="
+    .. ${luaString(session.id)}
+    .. "&token="
+    .. ${luaString(token)}
 
-local ok, response = pcall(function()
-    return game:HttpGet(url)
-end)
+local ok, response =
+    pcall(function()
+        return game:HttpGet(url)
+    end)
 
 if not ok then
     return
 end
 
-local fn = loadstring(response)
+local fn =
+    loadstring(response)
+
+if fn then
+    return fn()
+end
+`;
+}
+
+/* =========================================================
+   RUNTIME BOOTSTRAP
+========================================================= */
+
+function buildBootstrap(
+    session
+) {
+
+    const data =
+        randomLuaName();
+
+    const run =
+        randomLuaName();
+
+    const token =
+        issueToken(
+            session
+        );
+
+    return `
+-- LEXINX RUNTIME BOOTSTRAP
+
+local ${data} = {
+
+    session = ${luaString(session.id)},
+
+    token = ${luaString(token)},
+
+    runtime = true,
+
+    version = "RUNTIME-1"
+
+}
+
+local function ${run}(x)
+
+    if not x.runtime then
+        return false
+    end
+
+    return true
+
+end
+
+if not ${run}(${data}) then
+    return
+end
+
+local url =
+    "${BASE_URL}/api/l5"
+    .. "?session="
+    .. ${luaString(session.id)}
+    .. "&token="
+    .. ${luaString(token)}
+
+local ok, response =
+    pcall(function()
+        return game:HttpGet(url)
+    end)
+
+if not ok then
+    return
+end
+
+local fn =
+    loadstring(response)
 
 if fn then
     return fn()
@@ -1121,38 +1661,50 @@ end
 ========================================================= */
 
 function buildL5(
-    session,
     source
 ) {
+
     const data =
         randomLuaName();
 
-    const fn =
+    const decode =
         randomLuaName();
 
     const payload =
         Buffer
-        .from(source, "utf8")
-        .toString("base64");
+            .from(
+                source,
+                "utf8"
+            )
+            .toString(
+                "base64"
+            );
 
     return `
-local ${data} = "${payload}"
+-- LEXINX L5
 
-local ${fn} = function(input)
+local ${data} =
+    "${payload}"
+
+local function ${decode}(input)
 
     local alphabet =
         "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
-    input = input:gsub(
-        "[^" .. alphabet .. "=]",
-        ""
-    )
+    input =
+        input:gsub(
+            "[^" ..
+            alphabet ..
+            "=]",
+            ""
+        )
 
     local bits = ""
 
     for i = 1, #input do
 
-        local c = input:sub(i, i)
+        local c =
+            input:sub(i,i)
 
         if c ~= "=" then
 
@@ -1169,12 +1721,21 @@ local ${fn} = function(input)
 
                 for j = 5, 0, -1 do
 
-                    if p % (2 ^ (j + 1))
-                        >= (2 ^ j)
+                    if
+                        p %
+                        (2 ^ (j + 1))
+                        >=
+                        (2 ^ j)
                     then
-                        bits = bits .. "1"
+
+                        bits =
+                            bits .. "1"
+
                     else
-                        bits = bits .. "0"
+
+                        bits =
+                            bits .. "0"
+
                     end
 
                 end
@@ -1185,36 +1746,45 @@ local ${fn} = function(input)
 
     end
 
-    local decoded = {}
+    local output = {}
 
-    for i = 1, #bits - 7, 8 do
+    for i = 1,
+        #bits - 7,
+        8
+    do
 
         local byte = 0
 
         for j = 0, 7 do
 
-            if bits:sub(
-                i + j,
-                i + j
-            ) == "1"
+            if
+                bits:sub(
+                    i + j,
+                    i + j
+                ) == "1"
             then
+
                 byte =
                     byte +
                     2 ^ (7 - j)
+
             end
 
         end
 
-        decoded[#decoded + 1] =
+        output[#output + 1] =
             string.char(byte)
 
     end
 
-    return table.concat(decoded)
+    return table.concat(
+        output
+    )
+
 end
 
 local source =
-    ${fn}(${data})
+    ${decode}(${data})
 
 local execute =
     loadstring(source)
@@ -1226,12 +1796,29 @@ end
 }
 
 /* =========================================================
-   LOADER L1
+   L1 → L2
 ========================================================= */
 
 app.get(
     "/api/loader/:id",
     (req, res) => {
+
+        /*
+         * Direct browser:
+         *
+         * /api/loader/:id
+         *
+         * => PROTECT PAGE
+         */
+
+        if (
+            isBrowserRequest(req)
+        ) {
+
+            return protectPage(
+                res
+            );
+        }
 
         const id =
             req.params.id;
@@ -1241,36 +1828,36 @@ app.get(
 
         const script =
             scripts.find(
-                x => x.id === id
+                x =>
+                    x.id === id
             );
 
         if (!script) {
-            return res.status(404).send(
-                "Script not found"
-            );
+
+            return res.status(404)
+                .type("text/plain")
+                .send(
+                    "Script not found"
+                );
         }
 
         const session =
-            createLoaderSession(id);
-
-        const token =
-            createLoaderToken(
-                session
+            createLoaderSession(
+                id
             );
 
         session.stage = 2;
 
-        const code =
-            buildL2(session, token);
-
-        res.type("text/plain");
-
-        return res.send(code);
+        return res
+            .type("text/plain")
+            .send(
+                buildL2(session)
+            );
     }
 );
 
 /* =========================================================
-   L3
+   L2 → L3
 ========================================================= */
 
 app.get(
@@ -1282,27 +1869,30 @@ app.get(
                 req.query.session
             );
 
-        if (!validLoaderSession(session)) {
-            return res.status(403).send(
-                "LEXINX BLOCK"
-            );
-        }
+        if (
+            !validLoaderSession(
+                session
+            )
+        ) {
 
-        if (session.stage !== 2) {
-            return res.status(403).send(
-                "LEXINX BLOCK"
-            );
+            return loaderBlock(res);
         }
 
         if (
-            !consumeLoaderToken(
+            session.stage !== 2
+        ) {
+
+            return loaderBlock(res);
+        }
+
+        if (
+            !consumeToken(
                 session,
                 req.query.token
             )
         ) {
-            return res.status(403).send(
-                "LEXINX BLOCK"
-            );
+
+            return loaderBlock(res);
         }
 
         session.stage = 3;
@@ -1316,7 +1906,58 @@ app.get(
 );
 
 /* =========================================================
-   L4
+   L3 → PACKED PROTOTYPE
+========================================================= */
+
+app.get(
+    "/api/prototype",
+    (req, res) => {
+
+        const session =
+            loaderSessions.get(
+                req.query.session
+            );
+
+        if (
+            !validLoaderSession(
+                session
+            )
+        ) {
+
+            return loaderBlock(res);
+        }
+
+        if (
+            session.stage !== 3
+        ) {
+
+            return loaderBlock(res);
+        }
+
+        if (
+            !consumeToken(
+                session,
+                req.query.token
+            )
+        ) {
+
+            return loaderBlock(res);
+        }
+
+        session.stage = 3.5;
+
+        return res
+            .type("text/plain")
+            .send(
+                buildPrototype(
+                    session
+                )
+            );
+    }
+);
+
+/* =========================================================
+   PACKED PROTOTYPE → L4
 ========================================================= */
 
 app.get(
@@ -1328,27 +1969,30 @@ app.get(
                 req.query.session
             );
 
-        if (!validLoaderSession(session)) {
-            return res.status(403).send(
-                "LEXINX BLOCK"
-            );
-        }
+        if (
+            !validLoaderSession(
+                session
+            )
+        ) {
 
-        if (session.stage !== 3) {
-            return res.status(403).send(
-                "LEXINX BLOCK"
-            );
+            return loaderBlock(res);
         }
 
         if (
-            !consumeLoaderToken(
+            session.stage !== 3.5
+        ) {
+
+            return loaderBlock(res);
+        }
+
+        if (
+            !consumeToken(
                 session,
                 req.query.token
             )
         ) {
-            return res.status(403).send(
-                "LEXINX BLOCK"
-            );
+
+            return loaderBlock(res);
         }
 
         session.stage = 4;
@@ -1362,7 +2006,58 @@ app.get(
 );
 
 /* =========================================================
-   L5
+   L4 → RUNTIME BOOTSTRAP
+========================================================= */
+
+app.get(
+    "/api/bootstrap",
+    (req, res) => {
+
+        const session =
+            loaderSessions.get(
+                req.query.session
+            );
+
+        if (
+            !validLoaderSession(
+                session
+            )
+        ) {
+
+            return loaderBlock(res);
+        }
+
+        if (
+            session.stage !== 4
+        ) {
+
+            return loaderBlock(res);
+        }
+
+        if (
+            !consumeToken(
+                session,
+                req.query.token
+            )
+        ) {
+
+            return loaderBlock(res);
+        }
+
+        session.stage = 4.5;
+
+        return res
+            .type("text/plain")
+            .send(
+                buildBootstrap(
+                    session
+                )
+            );
+    }
+);
+
+/* =========================================================
+   BOOTSTRAP → L5 → SOURCE
 ========================================================= */
 
 app.get(
@@ -1374,27 +2069,30 @@ app.get(
                 req.query.session
             );
 
-        if (!validLoaderSession(session)) {
-            return res.status(403).send(
-                "LEXINX BLOCK"
-            );
-        }
+        if (
+            !validLoaderSession(
+                session
+            )
+        ) {
 
-        if (session.stage !== 4) {
-            return res.status(403).send(
-                "LEXINX BLOCK"
-            );
+            return loaderBlock(res);
         }
 
         if (
-            !consumeLoaderToken(
+            session.stage !== 4.5
+        ) {
+
+            return loaderBlock(res);
+        }
+
+        if (
+            !consumeToken(
                 session,
                 req.query.token
             )
         ) {
-            return res.status(403).send(
-                "LEXINX BLOCK"
-            );
+
+            return loaderBlock(res);
         }
 
         const scripts =
@@ -1408,22 +2106,29 @@ app.get(
             );
 
         if (!script) {
+
             loaderSessions.delete(
                 session.id
             );
 
-            return res.status(404).send(
-                "Script not found"
-            );
+            return res.status(404)
+                .type("text/plain")
+                .send(
+                    "Script not found"
+                );
         }
 
         session.stage = 5;
 
         const output =
             buildL5(
-                session,
                 script.source
             );
+
+        /*
+         * Destroy the session after
+         * the final payload is delivered.
+         */
 
         loaderSessions.delete(
             session.id
@@ -1439,89 +2144,146 @@ app.get(
    API TEST
 ========================================================= */
 
-app.get("/api/test", (req, res) => {
-    res.json({
-        ok: true,
-        message:
-            "LEXINX API ONLINE"
-    });
-});
+app.get(
+    "/api/test",
+    (req, res) => {
+
+        return res.json({
+            ok: true,
+            message:
+                "LEXINX API ONLINE"
+        });
+    }
+);
 
 /* =========================================================
-   API NOT FOUND
+   UNKNOWN API
 ========================================================= */
 
-app.use("/api", (req, res) => {
-    return res.status(404).json({
-        ok: false,
-        error:
-            "API ROUTE NOT FOUND"
-    });
-});
+app.use(
+    "/api",
+    (req, res) => {
+
+        return res.status(404).json({
+            ok: false,
+            error:
+                "API ROUTE NOT FOUND"
+        });
+    }
+);
 
 /* =========================================================
    FRONTEND
 ========================================================= */
 
-app.get("*", (req, res) => {
-    res.sendFile(
-        path.join(
-            __dirname,
-            "public",
-            "index.html"
-        )
-    );
-});
+app.get(
+    "/",
+    (req, res) => {
 
-/* =========================================================
-   EXPIRED AUTH SESSIONS
-========================================================= */
+        return res.sendFile(
+            path.join(
+                PUBLIC_DIR,
+                "index.html"
+            )
+        );
+    }
+);
 
-setInterval(() => {
+/*
+ * Any non-API route can return
+ * index.html for the frontend.
+ */
 
-    const now =
-        Date.now();
-
-    for (
-        const [token, session]
-        of authSessions
-    ) {
+app.use(
+    (req, res) => {
 
         if (
-            now >
-            session.expires
+            req.path.startsWith(
+                "/api/"
+            )
         ) {
-            authSessions.delete(
-                token
-            );
-        }
-    }
 
-}, 60 * 1000);
+            return res.status(404).json({
+                ok: false,
+                error:
+                    "API ROUTE NOT FOUND"
+            });
+        }
+
+        return res.sendFile(
+            path.join(
+                PUBLIC_DIR,
+                "index.html"
+            )
+        );
+    }
+);
 
 /* =========================================================
-   EXPIRED LOADER SESSIONS
+   CLEAN AUTH SESSIONS
 ========================================================= */
 
-setInterval(() => {
+setInterval(
+    () => {
 
-    const now =
-        Date.now();
+        const now =
+            Date.now();
 
-    for (
-        const [id, session]
-        of loaderSessions
-    ) {
-
-        if (
-            now >
-            session.expires
+        for (
+            const [
+                token,
+                session
+            ]
+            of authSessions
         ) {
-            loaderSessions.delete(id);
-        }
-    }
 
-}, 30 * 1000);
+            if (
+                now >
+                session.expires
+            ) {
+
+                authSessions.delete(
+                    token
+                );
+            }
+        }
+
+    },
+    60 * 1000
+);
+
+/* =========================================================
+   CLEAN LOADER SESSIONS
+========================================================= */
+
+setInterval(
+    () => {
+
+        const now =
+            Date.now();
+
+        for (
+            const [
+                id,
+                session
+            ]
+            of loaderSessions
+        ) {
+
+            if (
+                now >
+                session.expires
+            ) {
+
+                loaderSessions.delete(
+                    id
+                );
+            }
+        }
+
+    },
+    30 * 1000
+);
 
 /* =========================================================
    ERROR HANDLER
@@ -1535,7 +2297,10 @@ app.use(
             err
         );
 
-        if (res.headersSent) {
+        if (
+            res.headersSent
+        ) {
+
             return next(err);
         }
 
@@ -1557,11 +2322,11 @@ app.listen(
     () => {
 
         console.log(
-            "================================="
+            "================================"
         );
 
         console.log(
-            "LEXINX SERVER ONLINE"
+            "LEXINX PROTECT ONLINE"
         );
 
         console.log(
@@ -1569,8 +2334,11 @@ app.listen(
         );
 
         console.log(
-            "================================="
+            `BASE: ${BASE_URL}`
         );
 
+        console.log(
+            "================================"
+        );
     }
 );
