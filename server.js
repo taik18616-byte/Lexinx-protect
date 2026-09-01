@@ -3,17 +3,36 @@ const crypto = require("crypto");
 const path = require("path");
 
 const app = express();
+
 const PORT = process.env.PORT || 3000;
+const PUBLIC_URL =
+    process.env.PUBLIC_URL ||
+    "https://lexinx-protect.onrender.com";
+
+app.set("trust proxy", 1);
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: false }));
-app.use(express.static(path.join(__dirname, "public")));
+
+/* =========================================================
+   PUBLIC
+========================================================= */
+
+app.use(
+    express.static(
+        path.join(__dirname, "public")
+    )
+);
 
 /* =========================================================
    CONFIG
 ========================================================= */
 
-const TOKEN_TTL = 60 * 1000;
+const WEB_SESSION_TTL =
+    7 * 24 * 60 * 60 * 1000;
+
+const LOADER_SESSION_TTL =
+    60 * 1000;
 
 /* =========================================================
    STORAGE
@@ -21,15 +40,17 @@ const TOKEN_TTL = 60 * 1000;
 
 const users = new Map();
 const webSessions = new Map();
-const loaderSessions = new Map();
 const scripts = new Map();
+const loaderSessions = new Map();
 
 /* =========================================================
-   RANDOM
+   HELPERS
 ========================================================= */
 
 function randomHex(bytes = 32) {
-    return crypto.randomBytes(bytes).toString("hex");
+    return crypto
+        .randomBytes(bytes)
+        .toString("hex");
 }
 
 function hashPassword(password) {
@@ -40,16 +61,29 @@ function hashPassword(password) {
 }
 
 function luaString(value) {
-    return JSON.stringify(String(value));
+    return JSON.stringify(
+        String(value)
+    );
+}
+
+function toHex(value) {
+    return Buffer
+        .from(
+            String(value),
+            "utf8"
+        )
+        .toString("hex");
 }
 
 function randomLuaName() {
+
     const chars =
         "abcdefghijklmnopqrstuvwxyz";
 
     let result = "_";
 
     for (let i = 0; i < 10; i++) {
+
         result +=
             chars[
                 crypto.randomInt(
@@ -62,27 +96,14 @@ function randomLuaName() {
     return result;
 }
 
-/* =========================================================
-   HEX
-========================================================= */
-
-function toHex(value) {
-    return Buffer
-        .from(String(value), "utf8")
-        .toString("hex");
-}
-
-/* =========================================================
-   API ERROR
-========================================================= */
-
 function apiError(
     res,
-    status,
+    code,
     message
 ) {
+
     return res
-        .status(status)
+        .status(code)
         .json({
             ok: false,
             error: message
@@ -90,34 +111,21 @@ function apiError(
 }
 
 /* =========================================================
-   WEB AUTH COOKIE
+   COOKIE
 ========================================================= */
 
-function createWebSession(username) {
-
-    const id =
-        randomHex(32);
-
-    webSessions.set(id, {
-        username,
-        created: Date.now(),
-        expires:
-            Date.now() +
-            7 * 24 * 60 * 60 * 1000
-    });
-
-    return id;
-}
-
-function getCookie(req, name) {
+function getCookie(
+    req,
+    name
+) {
 
     const header =
         req.headers.cookie || "";
 
-    const parts =
-        header.split(";");
-
-    for (const part of parts) {
+    for (
+        const part
+        of header.split(";")
+    ) {
 
         const item =
             part.trim();
@@ -129,17 +137,51 @@ function getCookie(req, name) {
             continue;
 
         const key =
-            item.slice(0, index);
+            item.slice(
+                0,
+                index
+            );
 
         const value =
-            item.slice(index + 1);
+            item.slice(
+                index + 1
+            );
 
         if (key === name) {
-            return decodeURIComponent(value);
+
+            return decodeURIComponent(
+                value
+            );
         }
     }
 
     return null;
+}
+
+/* =========================================================
+   WEB SESSION
+========================================================= */
+
+function createWebSession(
+    username
+) {
+
+    const id =
+        randomHex(32);
+
+    webSessions.set(
+        id,
+        {
+            username,
+            created:
+                Date.now(),
+            expires:
+                Date.now() +
+                WEB_SESSION_TTL
+        }
+    );
+
+    return id;
 }
 
 function getWebAuth(req) {
@@ -203,8 +245,7 @@ function requireAuth(
         );
     }
 
-    req.auth =
-        auth;
+    req.auth = auth;
 
     next();
 }
@@ -219,12 +260,14 @@ app.post(
 
         const username =
             String(
-                req.body.username || ""
+                req.body.username ||
+                ""
             ).trim();
 
         const password =
             String(
-                req.body.password || ""
+                req.body.password ||
+                ""
             );
 
         if (!username) {
@@ -236,7 +279,9 @@ app.post(
             );
         }
 
-        if (username.length < 3) {
+        if (
+            username.length < 3
+        ) {
 
             return apiError(
                 res,
@@ -245,7 +290,9 @@ app.post(
             );
         }
 
-        if (username.length > 32) {
+        if (
+            username.length > 32
+        ) {
 
             return apiError(
                 res,
@@ -266,7 +313,9 @@ app.post(
             );
         }
 
-        if (password.length < 6) {
+        if (
+            password.length < 6
+        ) {
 
             return apiError(
                 res,
@@ -278,7 +327,9 @@ app.post(
         const key =
             username.toLowerCase();
 
-        if (users.has(key)) {
+        if (
+            users.has(key)
+        ) {
 
             return apiError(
                 res,
@@ -292,7 +343,9 @@ app.post(
             {
                 username,
                 password:
-                    hashPassword(password),
+                    hashPassword(
+                        password
+                    ),
                 created:
                     Date.now()
             }
@@ -307,13 +360,9 @@ app.post(
             {
                 httpOnly: true,
                 sameSite: "lax",
-                secure:
-                    req.secure ||
-                    req.headers[
-                        "x-forwarded-proto"
-                    ] === "https",
+                secure: true,
                 maxAge:
-                    7 * 24 * 60 * 60 * 1000,
+                    WEB_SESSION_TTL,
                 path: "/"
             }
         );
@@ -322,7 +371,7 @@ app.post(
             ok: true,
             username,
             url:
-                `${req.protocol}://${req.get("host")}/`
+                PUBLIC_URL + "/"
         });
     }
 );
@@ -337,12 +386,14 @@ app.post(
 
         const username =
             String(
-                req.body.username || ""
+                req.body.username ||
+                ""
             ).trim();
 
         const password =
             String(
-                req.body.password || ""
+                req.body.password ||
+                ""
             );
 
         const key =
@@ -381,13 +432,9 @@ app.post(
             {
                 httpOnly: true,
                 sameSite: "lax",
-                secure:
-                    req.secure ||
-                    req.headers[
-                        "x-forwarded-proto"
-                    ] === "https",
+                secure: true,
                 maxAge:
-                    7 * 24 * 60 * 60 * 1000,
+                    WEB_SESSION_TTL,
                 path: "/"
             }
         );
@@ -397,7 +444,7 @@ app.post(
             username:
                 user.username,
             url:
-                `${req.protocol}://${req.get("host")}/`
+                PUBLIC_URL + "/"
         });
     }
 );
@@ -427,7 +474,7 @@ app.get(
             username:
                 auth.username,
             url:
-                `${req.protocol}://${req.get("host")}/`
+                PUBLIC_URL + "/"
         });
     }
 );
@@ -515,8 +562,7 @@ app.post(
         do {
             id =
                 randomHex(12);
-        }
-        while (
+        } while (
             scripts.has(id)
         );
 
@@ -538,7 +584,7 @@ app.post(
         );
 
         const loader =
-            `${req.protocol}://${req.get("host")}/api/loader/${id}`;
+            `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${id}"))()`;
 
         return res.json({
             ok: true,
@@ -579,7 +625,7 @@ app.get(
                     script.name,
 
                 loader:
-                    `${req.protocol}://${req.get("host")}/api/loader/${script.id}`,
+                    `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${script.id}"))()`,
 
                 created:
                     script.created,
@@ -642,10 +688,8 @@ app.get(
             script: {
                 id:
                     script.id,
-
                 name:
                     script.name,
-
                 source:
                     script.source
             }
@@ -802,7 +846,7 @@ function createLoaderSession(
 
         expires:
             Date.now() +
-            TOKEN_TTL
+            LOADER_SESSION_TTL
     };
 
     loaderSessions.set(
@@ -811,6 +855,41 @@ function createLoaderSession(
     );
 
     return session;
+}
+
+function issueToken(
+    session
+) {
+
+    const token =
+        randomHex(32);
+
+    session.tokens.add(
+        token
+    );
+
+    return token;
+}
+
+function consumeToken(
+    session,
+    token
+) {
+
+    if (!token)
+        return false;
+
+    if (
+        !session.tokens.has(token)
+    ) {
+        return false;
+    }
+
+    session.tokens.delete(
+        token
+    );
+
+    return true;
 }
 
 function validLoaderSession(
@@ -835,41 +914,6 @@ function validLoaderSession(
     return true;
 }
 
-function issueLoaderToken(
-    session
-) {
-
-    const token =
-        randomHex(32);
-
-    session.tokens.add(
-        token
-    );
-
-    return token;
-}
-
-function consumeLoaderToken(
-    session,
-    token
-) {
-
-    if (!token)
-        return false;
-
-    if (
-        !session.tokens.has(token)
-    ) {
-        return false;
-    }
-
-    session.tokens.delete(
-        token
-    );
-
-    return true;
-}
-
 /* =========================================================
    PROTECT PAGE
 ========================================================= */
@@ -885,6 +929,7 @@ function blockPage(res) {
 <meta charset="utf-8">
 <meta name="viewport"
 content="width=device-width,initial-scale=1">
+
 <title>LEXINX PROTECT</title>
 
 <style>
@@ -955,183 +1000,24 @@ ANTI-SKID
 }
 
 /* =========================================================
-   WRAPPER VM
+   HEX DECODER LUA
 ========================================================= */
 
-function buildWrapperVM(
-    session
-) {
-
-    const endpoint =
-        "https://lexinx-protect.onrender.com";
-
-    const endpointHex =
-        toHex(endpoint);
-
-    const token =
-        issueLoaderToken(
-            session
-        );
-
-    const hex =
-        randomLuaName();
-
-    const decode =
-        randomLuaName();
-
-    const dispatch =
-        randomLuaName();
-
-    const vm =
-        randomLuaName();
+function luaHexDecoder() {
 
     return `
-
--- LEXINX LOADER WRAPPER VM
-
-local ${hex} =
-    "${endpointHex}"
-
-local function ${decode}(s)
+local function decodeHex(s)
 
     local out = {}
 
     for i = 1, #s, 2 do
 
-        local byte =
+        local n =
             tonumber(
                 s:sub(i, i + 1),
                 16
             )
 
-        if byte then
-
-            out[#out + 1] =
-                string.char(byte)
-
-        end
-
-    end
-
-    return table.concat(out)
-
-end
-
-local ${vm} = {
-
-    stage = 1,
-
-    session =
-        ${luaString(session.id)},
-
-    token =
-        ${luaString(token)},
-
-    endpoint =
-        ${decode}(${hex})
-
-}
-
-local function ${dispatch}(state)
-
-    if not state then
-        return
-    end
-
-    if state.stage ~= 1 then
-        return
-    end
-
-    local url =
-        state.endpoint
-        .. "/api/l3"
-        .. "?session="
-        .. state.session
-        .. "&token="
-        .. state.token
-
-    local ok, response =
-        pcall(function()
-
-            return game:HttpGet(
-                url
-            )
-
-        end)
-
-    if not ok then
-        return
-    end
-
-    if type(response) ~= "string" then
-        return
-    end
-
-    local fn =
-        loadstring(response)
-
-    if fn then
-        return fn()
-    end
-
-end
-
-return ${dispatch}(
-    ${vm}
-)
-
-`;
-}
-
-/* =========================================================
-   L2
-========================================================= */
-
-function buildL2(
-    session
-) {
-
-    const endpoint =
-        toHex(
-            "https://lexinx-protect.onrender.com"
-        );
-
-    const token =
-        issueLoaderToken(
-            session
-        );
-
-    const h =
-        randomLuaName();
-
-    const decode =
-        randomLuaName();
-
-    const run =
-        randomLuaName();
-
-    const data =
-        randomLuaName();
-
-    return `
-
--- LEXINX L2
-
-local ${h} =
-    "${endpoint}"
-
-local function ${decode}(s)
-
-    local out = {}
-
-    for i = 1, #s, 2 do
-
-        local n =
-            tonumber(
-                s:sub(i,i+1),
-                16
-            )
-
         if n then
             out[#out + 1] =
                 string.char(n)
@@ -1142,302 +1028,6 @@ local function ${decode}(s)
     return table.concat(out)
 
 end
-
-local ${data} = {
-
-    endpoint =
-        ${decode}(${h}),
-
-    session =
-        ${luaString(session.id)},
-
-    token =
-        ${luaString(token)}
-
-}
-
-local function ${run}(p)
-
-    local url =
-        p.endpoint
-        .. "/api/l4"
-        .. "?session="
-        .. p.session
-        .. "&token="
-        .. p.token
-
-    local ok, response =
-        pcall(function()
-
-            return game:HttpGet(
-                url
-            )
-
-        end)
-
-    if not ok then
-        return
-    end
-
-    local fn =
-        loadstring(response)
-
-    if fn then
-        return fn()
-    end
-
-end
-
-return ${run}(
-    ${data}
-)
-
-`;
-}
-
-/* =========================================================
-   L3 PACKED PROTOTYPE
-========================================================= */
-
-function buildL3(
-    session
-) {
-
-    const endpoint =
-        toHex(
-            "https://lexinx-protect.onrender.com"
-        );
-
-    const token =
-        issueLoaderToken(
-            session
-        );
-
-    const h =
-        randomLuaName();
-
-    const decode =
-        randomLuaName();
-
-    const execute =
-        randomLuaName();
-
-    const prototype =
-        randomLuaName();
-
-    return `
-
--- LEXINX L3
--- PACKED PROTOTYPE
-
-local ${h} =
-    "${endpoint}"
-
-local function ${decode}(s)
-
-    local out = {}
-
-    for i = 1, #s, 2 do
-
-        local n =
-            tonumber(
-                s:sub(i,i+1),
-                16
-            )
-
-        if n then
-            out[#out + 1] =
-                string.char(n)
-        end
-
-    end
-
-    return table.concat(out)
-
-end
-
-local ${prototype} = {
-
-    opcode = {
-
-        LOAD = 1,
-
-        REQUEST = 2,
-
-        EXEC = 3
-
-    },
-
-    endpoint =
-        ${decode}(${h}),
-
-    session =
-        ${luaString(session.id)},
-
-    token =
-        ${luaString(token)}
-
-}
-
-local function ${execute}(p)
-
-    local url =
-        p.endpoint
-        .. "/api/l5"
-        .. "?session="
-        .. p.session
-        .. "&token="
-        .. p.token
-
-    local ok, response =
-        pcall(function()
-
-            return game:HttpGet(
-                url
-            )
-
-        end)
-
-    if not ok then
-        return
-    end
-
-    if type(response) ~= "string" then
-        return
-    end
-
-    local fn =
-        loadstring(response)
-
-    if fn then
-        return fn()
-    end
-
-end
-
-return ${execute}(
-    ${prototype}
-)
-
-`;
-}
-
-/* =========================================================
-   L4 RUNTIME BOOTSTRAP
-========================================================= */
-
-function buildL4(
-    session
-) {
-
-    const endpoint =
-        toHex(
-            "https://lexinx-protect.onrender.com"
-        );
-
-    const token =
-        issueLoaderToken(
-            session
-        );
-
-    const h =
-        randomLuaName();
-
-    const decode =
-        randomLuaName();
-
-    const runtime =
-        randomLuaName();
-
-    const bootstrap =
-        randomLuaName();
-
-    return `
-
--- LEXINX L4
--- RUNTIME BOOTSTRAP
-
-local ${h} =
-    "${endpoint}"
-
-local function ${decode}(s)
-
-    local out = {}
-
-    for i = 1, #s, 2 do
-
-        local n =
-            tonumber(
-                s:sub(i,i+1),
-                16
-            )
-
-        if n then
-            out[#out + 1] =
-                string.char(n)
-        end
-
-    end
-
-    return table.concat(out)
-
-end
-
-local ${runtime} = {
-
-    endpoint =
-        ${decode}(${h}),
-
-    session =
-        ${luaString(session.id)},
-
-    token =
-        ${luaString(token)},
-
-    stage = 4
-
-}
-
-local function ${bootstrap}(state)
-
-    if state.stage ~= 4 then
-        return
-    end
-
-    local url =
-        state.endpoint
-        .. "/api/l5/final"
-        .. "?session="
-        .. state.session
-        .. "&token="
-        .. state.token
-
-    local ok, response =
-        pcall(function()
-
-            return game:HttpGet(
-                url
-            )
-
-        end)
-
-    if not ok then
-        return
-    end
-
-    local fn =
-        loadstring(response)
-
-    if fn then
-        return fn()
-    end
-
-end
-
-return ${bootstrap}(
-    ${runtime}
-)
-
 `;
 }
 
@@ -1493,7 +1083,7 @@ local function ${decode}(input)
     for i = 1, #input do
 
         local c =
-            input:sub(i,i)
+            input:sub(i, i)
 
         if c ~= "=" then
 
@@ -1511,19 +1101,14 @@ local function ${decode}(input)
                 for j = 6, 1, -1 do
 
                     if
-                        p % 2^j
-                        >=
-                        2^(j-1)
+                        p % 2^j >=
+                        2^(j - 1)
                     then
-
-                        bits[#bits+1] =
+                        bits[#bits + 1] =
                             "1"
-
                     else
-
-                        bits[#bits+1] =
+                        bits[#bits + 1] =
                             "0"
-
                     end
 
                 end
@@ -1544,17 +1129,19 @@ local function ${decode}(input)
 
         for j = 0, 7 do
 
-            if bits[i+j] == "1" then
+            if bits[i + j] ==
+                "1"
+            then
 
                 byte =
                     byte +
-                    2^(7-j)
+                    2^(7 - j)
 
             end
 
         end
 
-        output[#output+1] =
+        output[#output + 1] =
             string.char(byte)
 
     end
@@ -1587,7 +1174,385 @@ return ${execute}()
 }
 
 /* =========================================================
-   LOADER ENTRY
+   L4
+========================================================= */
+
+function buildL4(
+    session
+) {
+
+    const token =
+        issueToken(
+            session
+        );
+
+    const endpoint =
+        toHex(
+            PUBLIC_URL
+        );
+
+    const h =
+        randomLuaName();
+
+    const decode =
+        randomLuaName();
+
+    const runtime =
+        randomLuaName();
+
+    const bootstrap =
+        randomLuaName();
+
+    return `
+
+-- LEXINX L4
+-- RUNTIME BOOTSTRAP
+
+local ${h} =
+    "${endpoint}"
+
+${luaHexDecoder()}
+
+local ${runtime} = {
+
+    endpoint =
+        decodeHex(${h}),
+
+    session =
+        ${luaString(session.id)},
+
+    token =
+        ${luaString(token)},
+
+    stage = 4
+
+}
+
+local function ${bootstrap}(state)
+
+    local url =
+        state.endpoint
+        .. "/api/l5/final"
+        .. "?session="
+        .. state.session
+        .. "&token="
+        .. state.token
+
+    local ok, response =
+        pcall(function()
+
+            return game:HttpGet(
+                url
+            )
+
+        end)
+
+    if not ok then
+        return
+    end
+
+    local fn =
+        loadstring(response)
+
+    if fn then
+        return fn()
+    end
+
+end
+
+return ${bootstrap}(
+    ${runtime}
+)
+
+`;
+}
+
+/* =========================================================
+   L3
+========================================================= */
+
+function buildL3(
+    session
+) {
+
+    const token =
+        issueToken(
+            session
+        );
+
+    const endpoint =
+        toHex(
+            PUBLIC_URL
+        );
+
+    const h =
+        randomLuaName();
+
+    const prototype =
+        randomLuaName();
+
+    const execute =
+        randomLuaName();
+
+    return `
+
+-- LEXINX L3
+-- PACKED PROTOTYPE
+
+local ${h} =
+    "${endpoint}"
+
+${luaHexDecoder()}
+
+local ${prototype} = {
+
+    opcode = {
+
+        LOAD = 1,
+        REQUEST = 2,
+        EXEC = 3
+
+    },
+
+    endpoint =
+        decodeHex(${h}),
+
+    session =
+        ${luaString(session.id)},
+
+    token =
+        ${luaString(token)}
+
+}
+
+local function ${execute}(p)
+
+    local url =
+        p.endpoint
+        .. "/api/l5"
+        .. "?session="
+        .. p.session
+        .. "&token="
+        .. p.token
+
+    local ok, response =
+        pcall(function()
+
+            return game:HttpGet(
+                url
+            )
+
+        end)
+
+    if not ok then
+        return
+    end
+
+    local fn =
+        loadstring(response)
+
+    if fn then
+        return fn()
+    end
+
+end
+
+return ${execute}(
+    ${prototype}
+)
+
+`;
+}
+
+/* =========================================================
+   L2
+========================================================= */
+
+function buildL2(
+    session
+) {
+
+    const token =
+        issueToken(
+            session
+        );
+
+    const endpoint =
+        toHex(
+            PUBLIC_URL
+        );
+
+    const h =
+        randomLuaName();
+
+    const data =
+        randomLuaName();
+
+    const run =
+        randomLuaName();
+
+    return `
+
+-- LEXINX L2
+
+local ${h} =
+    "${endpoint}"
+
+${luaHexDecoder()}
+
+local ${data} = {
+
+    endpoint =
+        decodeHex(${h}),
+
+    session =
+        ${luaString(session.id)},
+
+    token =
+        ${luaString(token)}
+
+}
+
+local function ${run}(p)
+
+    local url =
+        p.endpoint
+        .. "/api/l4"
+        .. "?session="
+        .. p.session
+        .. "&token="
+        .. p.token
+
+    local ok, response =
+        pcall(function()
+
+            return game:HttpGet(
+                url
+            )
+
+        end)
+
+    if not ok then
+        return
+    end
+
+    local fn =
+        loadstring(response)
+
+    if fn then
+        return fn()
+    end
+
+end
+
+return ${run}(
+    ${data}
+)
+
+`;
+}
+
+/* =========================================================
+   WRAPPER VM
+========================================================= */
+
+function buildWrapper(
+    session
+) {
+
+    const token =
+        issueToken(
+            session
+        );
+
+    const endpoint =
+        toHex(
+            PUBLIC_URL
+        );
+
+    const h =
+        randomLuaName();
+
+    const vm =
+        randomLuaName();
+
+    const run =
+        randomLuaName();
+
+    return `
+
+-- LEXINX LOADER WRAPPER
+-- VM BOOTSTRAP
+
+local ${h} =
+    "${endpoint}"
+
+${luaHexDecoder()}
+
+local ${vm} = {
+
+    endpoint =
+        decodeHex(${h}),
+
+    session =
+        ${luaString(session.id)},
+
+    token =
+        ${luaString(token)},
+
+    stage = 0
+
+}
+
+local function ${run}(state)
+
+    if not state then
+        return
+    end
+
+    local url =
+        state.endpoint
+        .. "/api/l3"
+        .. "?session="
+        .. state.session
+        .. "&token="
+        .. state.token
+
+    local ok, response =
+        pcall(function()
+
+            return game:HttpGet(
+                url
+            )
+
+        end)
+
+    if not ok then
+        return
+    end
+
+    if type(response) ~= "string" then
+        return
+    end
+
+    local fn =
+        loadstring(response)
+
+    if fn then
+        return fn()
+    end
+
+end
+
+return ${run}(
+    ${vm}
+)
+
+`;
+}
+
+/* =========================================================
+   LOADER
 ========================================================= */
 
 app.get(
@@ -1604,14 +1569,15 @@ app.get(
         }
 
         /*
-         * Browser access:
-         * show protection page.
+         * Browser -> PROTECT PAGE
+         * Roblox/executor -> loader wrapper
          */
 
         const ua =
             String(
-                req.headers["user-agent"] ||
-                ""
+                req.headers[
+                    "user-agent"
+                ] || ""
             ).toLowerCase();
 
         const isBrowser =
@@ -1627,12 +1593,10 @@ app.get(
                 script.id
             );
 
-        session.stage = 0;
-
         return res
             .type("text/plain")
             .send(
-                buildWrapperVM(
+                buildWrapper(
                     session
                 )
             );
@@ -1657,6 +1621,7 @@ app.get(
                 session
             )
         ) {
+
             return apiError(
                 res,
                 403,
@@ -1667,6 +1632,7 @@ app.get(
         if (
             session.stage !== 0
         ) {
+
             return apiError(
                 res,
                 403,
@@ -1675,11 +1641,12 @@ app.get(
         }
 
         if (
-            !consumeLoaderToken(
+            !consumeToken(
                 session,
                 req.query.token
             )
         ) {
+
             return apiError(
                 res,
                 403,
@@ -1692,7 +1659,9 @@ app.get(
         return res
             .type("text/plain")
             .send(
-                buildL2(session)
+                buildL2(
+                    session
+                )
             );
     }
 );
@@ -1715,6 +1684,7 @@ app.get(
                 session
             )
         ) {
+
             return apiError(
                 res,
                 403,
@@ -1725,6 +1695,7 @@ app.get(
         if (
             session.stage !== 1
         ) {
+
             return apiError(
                 res,
                 403,
@@ -1733,11 +1704,12 @@ app.get(
         }
 
         if (
-            !consumeLoaderToken(
+            !consumeToken(
                 session,
                 req.query.token
             )
         ) {
+
             return apiError(
                 res,
                 403,
@@ -1750,7 +1722,9 @@ app.get(
         return res
             .type("text/plain")
             .send(
-                buildL3(session)
+                buildL3(
+                    session
+                )
             );
     }
 );
@@ -1773,6 +1747,7 @@ app.get(
                 session
             )
         ) {
+
             return apiError(
                 res,
                 403,
@@ -1783,6 +1758,7 @@ app.get(
         if (
             session.stage !== 2
         ) {
+
             return apiError(
                 res,
                 403,
@@ -1791,11 +1767,12 @@ app.get(
         }
 
         if (
-            !consumeLoaderToken(
+            !consumeToken(
                 session,
                 req.query.token
             )
         ) {
+
             return apiError(
                 res,
                 403,
@@ -1808,7 +1785,9 @@ app.get(
         return res
             .type("text/plain")
             .send(
-                buildL4(session)
+                buildL4(
+                    session
+                )
             );
     }
 );
@@ -1831,6 +1810,7 @@ app.get(
                 session
             )
         ) {
+
             return apiError(
                 res,
                 403,
@@ -1839,8 +1819,9 @@ app.get(
         }
 
         if (
-            session.stage !== 3
+            session.stage !== 4
         ) {
+
             return apiError(
                 res,
                 403,
@@ -1849,11 +1830,12 @@ app.get(
         }
 
         if (
-            !consumeLoaderToken(
+            !consumeToken(
                 session,
                 req.query.token
             )
         ) {
+
             return apiError(
                 res,
                 403,
@@ -1878,8 +1860,6 @@ app.get(
                 "Script not found."
             );
         }
-
-        session.stage = 4;
 
         const output =
             buildL5(
@@ -1914,14 +1894,14 @@ app.use(
 );
 
 /* =========================================================
-   PUBLIC WEBSITE
+   ROOT
 ========================================================= */
 
 app.get(
     "/",
     (req, res) => {
 
-        res.sendFile(
+        return res.sendFile(
             path.join(
                 __dirname,
                 "public",
@@ -1940,7 +1920,9 @@ app.use(
 
         return res
             .status(404)
-            .send("Page not found.");
+            .send(
+                "Page not found."
+            );
     }
 );
 
@@ -2005,7 +1987,13 @@ app.listen(
     () => {
 
         console.log(
-            `LEXINX server running on port ${PORT}`
+            "LEXINX server running on port " +
+            PORT
+        );
+
+        console.log(
+            "PUBLIC_URL: " +
+            PUBLIC_URL
         );
 
     }
