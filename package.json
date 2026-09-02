@@ -1,7 +1,7 @@
 {
   "name": "lexinx-protect",
   "version": "5.1.0",
-  "description": "LEXINX PROTECT V5 - PostgreSQL + custom bytecode VM",
+  "description": "LEXINX PROTECT V5 - PostgreSQL + custom LXVM",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
