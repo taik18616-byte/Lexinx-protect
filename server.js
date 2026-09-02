@@ -1,3 +1,8 @@
+//============================================================
+// LEXINX PROTECT V5
+// server.js
+//============================================================
+
 "use strict";
 
 const express = require("express");
@@ -6,17 +11,25 @@ const { Pool } = require("pg");
 
 const app = express();
 
-app.use(express.json({
-    limit: "2mb"
-}));
+app.use(express.json({ limit: "2mb" }));
+
+//============================================================
+// CONFIG
+//============================================================
 
 const PORT = process.env.PORT || 3000;
 const BASE_URL =
     process.env.BASE_URL ||
     "https://lexinx-protect.onrender.com";
 
+const DATABASE_URL = process.env.DATABASE_URL;
+
+//============================================================
+// DATABASE
+//============================================================
+
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: DATABASE_URL,
 
     ssl:
         process.env.NODE_ENV === "production"
@@ -24,24 +37,29 @@ const pool = new Pool({
             : false
 });
 
-// ============================================================
-// DATABASE
-// ============================================================
+//============================================================
+// HELPERS
+//============================================================
 
-async function query(text, params = []) {
-    return pool.query(text, params);
-}
+function randomScriptId(length = 20) {
+    const chars =
+        "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
 
-// ============================================================
-// UTIL
-// ============================================================
+    let out = "";
 
-function randomId(length = 16) {
-    return crypto
-        .randomBytes(32)
-        .toString("base64url")
-        .replace(/[^a-zA-Z0-9]/g, "")
-        .slice(0, length);
+    while (out.length < length) {
+        const bytes = crypto.randomBytes(length);
+
+        for (const byte of bytes) {
+            out += chars[byte % chars.length];
+
+            if (out.length >= length) {
+                break;
+            }
+        }
+    }
+
+    return out;
 }
 
 function sha256(data) {
@@ -68,23 +86,22 @@ function deriveVMKey(scriptId) {
 }
 
 function xorBuffer(data, key) {
-    const out = Buffer.alloc(data.length);
+    const output = Buffer.alloc(data.length);
 
     for (let i = 0; i < data.length; i++) {
-        out[i] =
+        output[i] =
             data[i] ^
             key[i % key.length];
     }
 
-    return out;
+    return output;
 }
 
-// ============================================================
-// BYTECODE
-// ============================================================
+//============================================================
+// CUSTOM OPCODES
+//============================================================
 
 const OP = Object.freeze({
-
     NOP: 0x00,
 
     PUSH_STRING: 0x01,
@@ -106,31 +123,25 @@ const OP = Object.freeze({
 
     POP: 0x50,
 
-    RETURN: 0xFF
+    RETURN: 0xff
 });
 
-// ============================================================
+//============================================================
 // BYTECODE WRITER
-// ============================================================
+//============================================================
 
-class Writer {
-
+class BytecodeWriter {
     constructor() {
         this.parts = [];
     }
 
-    u8(value) {
-        const b = Buffer.alloc(1);
-
-        b.writeUInt8(
-            value & 0xFF,
-            0
+    byte(value) {
+        this.parts.push(
+            Buffer.from([value & 0xff])
         );
-
-        this.parts.push(b);
     }
 
-    u32(value) {
+    uint32(value) {
         const b = Buffer.alloc(4);
 
         b.writeUInt32BE(
@@ -141,7 +152,7 @@ class Writer {
         this.parts.push(b);
     }
 
-    f64(value) {
+    number(value) {
         const b = Buffer.alloc(8);
 
         b.writeDoubleBE(
@@ -153,366 +164,885 @@ class Writer {
     }
 
     string(value) {
-        const b =
-            Buffer.from(
-                String(value),
-                "utf8"
-            );
+        const data = Buffer.from(
+            String(value),
+            "utf8"
+        );
 
-        this.u32(b.length);
-        this.parts.push(b);
+        this.uint32(data.length);
+        this.parts.push(data);
     }
 
-    build() {
-        return Buffer.concat(
-            this.parts
-        );
+    result() {
+        return Buffer.concat(this.parts);
     }
 }
 
-// ============================================================
-// LUA SUBSET COMPILER
-// ============================================================
+//============================================================
+// SIMPLE LUA COMPILER
+//
+// Supported:
+// print("hello")
+// print('hello')
+// return "hello"
+// return 'hello'
+// return 123
+// return true
+// return false
+//============================================================
 
-function compileSource(source) {
-
+function compileLua(source) {
     if (typeof source !== "string") {
         throw new Error(
             "Source must be a string"
         );
     }
 
-    const w = new Writer();
+    const writer = new BytecodeWriter();
 
-    const lines =
-        source
-            .replace(/\r/g, "")
-            .split("\n");
+    const lines = source
+        .replace(/\r/g, "")
+        .split("\n");
 
-    let returned = false;
+    let compiledSomething = false;
 
-    for (const rawLine of lines) {
+    for (let rawLine of lines) {
+        let line = rawLine.trim();
 
-        const line =
-            rawLine.trim();
+        if (!line) continue;
 
-        if (!line || line.startsWith("--")) {
+        if (line.startsWith("--")) {
             continue;
         }
 
-        // ----------------------------------------------------
+        //====================================================
         // print("...")
-        // ----------------------------------------------------
+        //====================================================
 
         let match =
             line.match(
-                /^print\s*\(\s*"([\s\S]*)"\s*\)\s*;?$/
+                /^print\s*\(\s*"([\s\S]*)"\s*\)\s*$/
             );
 
         if (!match) {
             match =
                 line.match(
-                    /^print\s*\(\s*'([\s\S]*)'\s*\)\s*;?$/
+                    /^print\s*\(\s*'([\s\S]*)'\s*\)\s*$/
                 );
         }
 
         if (match) {
+            writer.byte(OP.PUSH_STRING);
+            writer.string(match[1]);
 
-            w.u8(OP.PUSH_STRING);
-            w.string(match[1]);
+            writer.byte(OP.CALL_GLOBAL);
+            writer.string("print");
 
-            w.u8(OP.CALL_GLOBAL);
-            w.string("print");
-            w.u8(1);
+            writer.byte(1);
 
-            w.u8(OP.POP);
-
+            compiledSomething = true;
             continue;
         }
 
-        // ----------------------------------------------------
+        //====================================================
         // return string
-        // ----------------------------------------------------
+        //====================================================
 
         match =
             line.match(
-                /^return\s+"([\s\S]*)"\s*;?$/
+                /^return\s*"([\s\S]*)"\s*$/
             );
 
         if (!match) {
             match =
                 line.match(
-                    /^return\s+'([\s\S]*)'\s*;?$/
+                    /^return\s*'([\s\S]*)'\s*$/
                 );
         }
 
         if (match) {
+            writer.byte(OP.PUSH_STRING);
+            writer.string(match[1]);
 
-            w.u8(OP.PUSH_STRING);
-            w.string(match[1]);
+            writer.byte(OP.RETURN);
 
-            w.u8(OP.RETURN);
-
-            returned = true;
-
-            break;
+            compiledSomething = true;
+            continue;
         }
 
-        // ----------------------------------------------------
+        //====================================================
         // return number
-        // ----------------------------------------------------
+        //====================================================
 
         match =
             line.match(
-                /^return\s+(-?\d+(?:\.\d+)?)\s*;?$/
+                /^return\s+(-?(?:\d+(?:\.\d*)?|\.\d+))\s*$/
             );
 
         if (match) {
-
-            w.u8(OP.PUSH_NUMBER);
-            w.f64(
+            writer.byte(OP.PUSH_NUMBER);
+            writer.number(
                 Number(match[1])
             );
 
-            w.u8(OP.RETURN);
+            writer.byte(OP.RETURN);
 
-            returned = true;
-
-            break;
+            compiledSomething = true;
+            continue;
         }
 
-        // ----------------------------------------------------
-        // return true / false
-        // ----------------------------------------------------
+        //====================================================
+        // return boolean
+        //====================================================
 
         match =
             line.match(
-                /^return\s+(true|false)\s*;?$/
+                /^return\s+(true|false)\s*$/
             );
 
         if (match) {
+            writer.byte(OP.PUSH_BOOL);
 
-            w.u8(OP.PUSH_BOOL);
-
-            w.u8(
+            writer.byte(
                 match[1] === "true"
                     ? 1
                     : 0
             );
 
-            w.u8(OP.RETURN);
+            writer.byte(OP.RETURN);
 
-            returned = true;
-
-            break;
+            compiledSomething = true;
+            continue;
         }
-
-        // ----------------------------------------------------
-        // unsupported
-        // ----------------------------------------------------
 
         throw new Error(
             "Unsupported Lua syntax: " +
-            line.slice(0, 120)
+            line
         );
     }
 
-    if (!returned) {
-        w.u8(OP.PUSH_NIL);
-        w.u8(OP.RETURN);
+    if (!compiledSomething) {
+        writer.byte(OP.PUSH_NIL);
+        writer.byte(OP.RETURN);
     }
 
-    return w.build();
+    return writer.result();
 }
 
-// ============================================================
+//============================================================
 // LXVM PACKET
-// ============================================================
+//
+// 4 bytes  MAGIC
+// 1 byte   VERSION
+// 1 byte   FLAGS
+// 4 bytes  PAYLOAD LENGTH
+// 32 bytes SHA256(bytecode)
+// payload  XOR encrypted bytecode
+//============================================================
 
-function packLXVM(
-    bytecode,
-    scriptId
-) {
+function packLXVM(bytecode, scriptId) {
+    const magic = Buffer.from(
+        "LXVM",
+        "ascii"
+    );
+
+    const version = Buffer.from([1]);
+    const flags = Buffer.from([1]);
+
+    const length = Buffer.alloc(4);
+
+    length.writeUInt32BE(
+        bytecode.length,
+        0
+    );
+
+    const checksum = sha256(bytecode);
 
     const key =
         deriveVMKey(scriptId);
 
     const encrypted =
-        xorBuffer(
-            bytecode,
-            key
-        );
-
-    const checksum =
-        sha256(bytecode);
-
-    const header =
-        Buffer.alloc(42);
-
-    header.write(
-        "LXVM",
-        0,
-        4,
-        "ascii"
-    );
-
-    header.writeUInt8(
-        1,
-        4
-    );
-
-    header.writeUInt8(
-        0,
-        5
-    );
-
-    header.writeUInt32BE(
-        encrypted.length,
-        6
-    );
-
-    checksum.copy(
-        header,
-        10
-    );
+        xorBuffer(bytecode, key);
 
     return Buffer.concat([
-        header,
+        magic,
+        version,
+        flags,
+        length,
+        checksum,
         encrypted
     ]);
 }
 
-// ============================================================
+//============================================================
+// LAYERS
+//============================================================
+
+function makeL1(scriptId) {
+    return `
+local BASE_URL = ${JSON.stringify(BASE_URL)}
+local SCRIPT_ID = ${JSON.stringify(scriptId)}
+
+local code = game:HttpGet(
+    BASE_URL .. "/api/l2/" .. SCRIPT_ID
+)
+
+local fn, err = loadstring(code)
+
+if not fn then
+    error("LEXINX L1 ERROR: " .. tostring(err))
+end
+
+return fn()
+`;
+}
+
+function makeL2(scriptId) {
+    return `
+local BASE_URL = ${JSON.stringify(BASE_URL)}
+local SCRIPT_ID = ${JSON.stringify(scriptId)}
+
+local code = game:HttpGet(
+    BASE_URL .. "/api/l3/" .. SCRIPT_ID
+)
+
+local fn, err = loadstring(code)
+
+if not fn then
+    error("LEXINX L2 ERROR: " .. tostring(err))
+end
+
+return fn()
+`;
+}
+
+function makeL3(scriptId) {
+    return `
+local BASE_URL = ${JSON.stringify(BASE_URL)}
+local SCRIPT_ID = ${JSON.stringify(scriptId)}
+
+local code = game:HttpGet(
+    BASE_URL .. "/api/l4/" .. SCRIPT_ID
+)
+
+local fn, err = loadstring(code)
+
+if not fn then
+    error("LEXINX L3 ERROR: " .. tostring(err))
+end
+
+return fn()
+`;
+}
+
+function makeL4(scriptId) {
+    return `
+local BASE_URL = ${JSON.stringify(BASE_URL)}
+local SCRIPT_ID = ${JSON.stringify(scriptId)}
+
+local code = game:HttpGet(
+    BASE_URL .. "/api/l5/" .. SCRIPT_ID
+)
+
+local fn, err = loadstring(code)
+
+if not fn then
+    error("LEXINX L4 ERROR: " .. tostring(err))
+end
+
+return fn()
+`;
+}
+
+//============================================================
+// L5
+//
+// Fetches LXVM packet.
+// Parses header.
+// XOR decrypts bytecode.
+// Verifies SHA256.
+// Executes supported custom VM instructions.
+//============================================================
+
+function makeL5(scriptId) {
+    return `
+local BASE_URL = ${JSON.stringify(BASE_URL)}
+local SCRIPT_ID = ${JSON.stringify(scriptId)}
+
+local HttpService = game:GetService("HttpService")
+
+local function xorBytes(data, key)
+    local out = {}
+
+    for i = 1, #data do
+        local a = string.byte(data, i)
+        local b = string.byte(
+            key,
+            ((i - 1) % #key) + 1
+        )
+
+        out[i] = string.char(
+            bit32.bxor(a, b)
+        )
+    end
+
+    return table.concat(out)
+end
+
+local function sha256(data)
+    if crypt and crypt.hash then
+        return crypt.hash(data, "sha256")
+    end
+
+    if syn and syn.crypt and syn.crypt.hash then
+        return syn.crypt.hash(data, "sha256")
+    end
+
+    error(
+        "LEXINX: SHA256 function unavailable"
+    )
+end
+
+local function hexToBytes(hex)
+    local out = {}
+
+    for i = 1, #hex, 2 do
+        out[#out + 1] =
+            string.char(
+                tonumber(
+                    hex:sub(i, i + 1),
+                    16
+                )
+            )
+    end
+
+    return table.concat(out)
+end
+
+local function deriveKey(id)
+    return hexToBytes(
+        sha256(
+            "LEXINX-V5-VM|" .. id
+        )
+    )
+end
+
+local packet = game:HttpGet(
+    BASE_URL .. "/api/vm/" .. SCRIPT_ID
+)
+
+assert(
+    packet:sub(1, 4) == "LXVM",
+    "LEXINX: invalid VM packet"
+)
+
+local version =
+    string.byte(packet, 5)
+
+local flags =
+    string.byte(packet, 6)
+
+local payloadLength =
+    string.unpack(
+        ">I4",
+        packet,
+        7
+    )
+
+local checksum =
+    packet:sub(11, 42)
+
+local encrypted =
+    packet:sub(43)
+
+assert(
+    #encrypted == payloadLength,
+    "LEXINX: payload length mismatch"
+)
+
+local key =
+    deriveKey(SCRIPT_ID)
+
+local bytecode =
+    xorBytes(encrypted, key)
+
+local actualHash =
+    hexToBytes(
+        sha256(bytecode)
+    )
+
+assert(
+    actualHash == checksum,
+    "LEXINX: bytecode integrity check failed"
+)
+
+--========================================================
+-- CUSTOM VM
+--========================================================
+
+local VM = {}
+
+function VM:readByte()
+    local value =
+        string.byte(
+            self.code,
+            self.pos
+        )
+
+    self.pos =
+        self.pos + 1
+
+    return value
+end
+
+function VM:readU32()
+    local value
+
+    value, self.pos =
+        string.unpack(
+            ">I4",
+            self.code,
+            self.pos
+        )
+
+    return value
+end
+
+function VM:readNumber()
+    local value
+
+    value, self.pos =
+        string.unpack(
+            ">d",
+            self.code,
+            self.pos
+        )
+
+    return value
+end
+
+function VM:readString()
+    local length =
+        self:readU32()
+
+    local value =
+        self.code:sub(
+            self.pos,
+            self.pos + length - 1
+        )
+
+    self.pos =
+        self.pos + length
+
+    return value
+end
+
+function VM:run(code)
+    self.code = code
+    self.pos = 1
+    self.stack = {}
+    self.globals = {}
+
+    while self.pos <= #self.code do
+
+        local op =
+            self:readByte()
+
+        -- NOP
+        if op == 0x00 then
+
+        -- PUSH_STRING
+        elseif op == 0x01 then
+
+            self.stack[#self.stack + 1] =
+                self:readString()
+
+        -- PUSH_NUMBER
+        elseif op == 0x02 then
+
+            self.stack[#self.stack + 1] =
+                self:readNumber()
+
+        -- PUSH_BOOL
+        elseif op == 0x03 then
+
+            local value =
+                self:readByte()
+
+            self.stack[#self.stack + 1] =
+                value ~= 0
+
+        -- PUSH_NIL
+        elseif op == 0x04 then
+
+            self.stack[#self.stack + 1] =
+                nil
+
+        -- GET_GLOBAL
+        elseif op == 0x10 then
+
+            local name =
+                self:readString()
+
+            self.stack[#self.stack + 1] =
+                self.globals[name]
+
+        -- SET_GLOBAL
+        elseif op == 0x11 then
+
+            local name =
+                self:readString()
+
+            local value =
+                table.remove(
+                    self.stack
+                )
+
+            self.globals[name] =
+                value
+
+        -- ADD
+        elseif op == 0x20 then
+
+            local b =
+                table.remove(
+                    self.stack
+                )
+
+            local a =
+                table.remove(
+                    self.stack
+                )
+
+            self.stack[#self.stack + 1] =
+                a + b
+
+        -- SUB
+        elseif op == 0x21 then
+
+            local b =
+                table.remove(
+                    self.stack
+                )
+
+            local a =
+                table.remove(
+                    self.stack
+                )
+
+            self.stack[#self.stack + 1] =
+                a - b
+
+        -- MUL
+        elseif op == 0x22 then
+
+            local b =
+                table.remove(
+                    self.stack
+                )
+
+            local a =
+                table.remove(
+                    self.stack
+                )
+
+            self.stack[#self.stack + 1] =
+                a * b
+
+        -- DIV
+        elseif op == 0x23 then
+
+            local b =
+                table.remove(
+                    self.stack
+                )
+
+            local a =
+                table.remove(
+                    self.stack
+                )
+
+            self.stack[#self.stack + 1] =
+                a / b
+
+        -- CONCAT
+        elseif op == 0x30 then
+
+            local b =
+                table.remove(
+                    self.stack
+                )
+
+            local a =
+                table.remove(
+                    self.stack
+                )
+
+            self.stack[#self.stack + 1] =
+                tostring(a) ..
+                tostring(b)
+
+        -- CALL_GLOBAL
+        elseif op == 0x40 then
+
+            local name =
+                self:readString()
+
+            local argc =
+                self:readByte()
+
+            local args = {}
+
+            for i = argc, 1, -1 do
+                args[i] =
+                    table.remove(
+                        self.stack
+                    )
+            end
+
+            if name == "print" then
+                print(table.unpack(args))
+            else
+                error(
+                    "LEXINX VM: unknown global " ..
+                    tostring(name)
+                )
+            end
+
+        -- POP
+        elseif op == 0x50 then
+
+            table.remove(
+                self.stack
+            )
+
+        -- RETURN
+        elseif op == 0xff then
+
+            return table.remove(
+                self.stack
+            )
+
+        else
+
+            error(
+                "LEXINX VM: unknown opcode 0x" ..
+                string.format(
+                    "%02X",
+                    op
+                )
+            )
+        end
+    end
+end
+
+return VM:run(bytecode)
+`;
+}
+
+//============================================================
+// ROOT PAGE
+// FIXES: Cannot GET /
+//============================================================
+
+app.get("/", (req, res) => {
+    res.status(200).send(`
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport"
+      content="width=device-width, initial-scale=1.0">
+
+<title>LEXINX PROTECT V5</title>
+
+<style>
+body {
+    margin: 0;
+    background: #080808;
+    color: #fff;
+    font-family: Arial, sans-serif;
+}
+
+.container {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.box {
+    padding: 40px;
+}
+
+h1 {
+    font-size: 38px;
+    margin-bottom: 10px;
+}
+
+.status {
+    color: #55ff88;
+    font-weight: bold;
+}
+
+.small {
+    color: #888;
+    margin-top: 20px;
+}
+</style>
+</head>
+
+<body>
+
+<div class="container">
+<div class="box">
+
+<h1>LEXINX PROTECT V5</h1>
+
+<p class="status">
+● SERVER ONLINE
+</p>
+
+<p>
+Protected VM / API Service
+</p>
+
+<p class="small">
+LEXINX PROTECT
+</p>
+
+</div>
+</div>
+
+</body>
+</html>
+`);
+});
+
+//============================================================
+// HEALTH
+//============================================================
+
+app.get("/health", async (req, res) => {
+    try {
+        await pool.query("SELECT 1");
+
+        res.json({
+            success: true,
+            status: "online",
+            database: "connected"
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            status: "online",
+            database: "error"
+        });
+    }
+});
+
+//============================================================
 // CREATE SCRIPT
-// ============================================================
+//============================================================
 
-app.post(
-    "/api/scripts",
-    async (req, res) => {
+app.post("/api/scripts", async (req, res) => {
+    try {
+        const {
+            name = "My Script",
+            source = "",
+            userId = null
+        } = req.body;
 
-        try {
-
-            const {
-                source = "",
-                name = "My Script",
-                userId = null
-            } = req.body;
-
-            if (
-                typeof source !== "string"
-            ) {
-                return res.status(400).json({
-                    error: "Invalid source"
-                });
-            }
-
-            let scriptId;
-
-            // Collision-safe ID generation
-            for (;;) {
-
-                const candidate =
-                    randomId(16);
-
-                const check =
-                    await query(
-                        `
-                        SELECT 1
-                        FROM scripts
-                        WHERE script_id = $1
-                        LIMIT 1
-                        `,
-                        [candidate]
-                    );
-
-                if (
-                    check.rowCount === 0
-                ) {
-                    scriptId =
-                        candidate;
-
-                    break;
-                }
-            }
-
-            const bytecode =
-                compileSource(source);
-
-            const packet =
-                packLXVM(
-                    bytecode,
-                    scriptId
-                );
-
-            const result =
-                await query(
-                    `
-                    INSERT INTO scripts
-                    (
-                        user_id,
-                        script_id,
-                        name,
-                        source,
-                        bytecode,
-                        bytecode_version,
-                        vm_version
-                    )
-                    VALUES
-                    (
-                        $1,
-                        $2,
-                        $3,
-                        $4,
-                        $5,
-                        1,
-                        1
-                    )
-                    RETURNING
-                        script_id,
-                        name,
-                        bytecode_version,
-                        vm_version,
-                        created_at
-                    `,
-                    [
-                        userId,
-                        scriptId,
-                        name,
-                        source,
-                        packet
-                    ]
-                );
-
-            return res.json({
-                success: true,
-
-                script: {
-                    ...result.rows[0],
-
-                    loader:
-                        BASE_URL +
-                        "/loader/" +
-                        scriptId
-                }
-            });
-
-        } catch (err) {
-
-            console.error(
-                "CREATE SCRIPT:",
-                err
-            );
-
-            return res.status(500).json({
-                error: err.message
+        if (!source) {
+            return res.status(400).json({
+                success: false,
+                error: "Source is required"
             });
         }
-    }
-);
 
-// ============================================================
-// SCRIPT INFO
-// ============================================================
+        let scriptId;
+
+        while (true) {
+            scriptId =
+                randomScriptId(20);
+
+            const check =
+                await pool.query(
+                    `SELECT 1
+                     FROM scripts
+                     WHERE script_id = $1
+                     LIMIT 1`,
+                    [scriptId]
+                );
+
+            if (check.rowCount === 0) {
+                break;
+            }
+        }
+
+        const bytecode =
+            compileLua(source);
+
+        const packet =
+            packLXVM(
+                bytecode,
+                scriptId
+            );
+
+        await pool.query(
+            `INSERT INTO scripts
+            (
+                user_id,
+                script_id,
+                name,
+                source,
+                bytecode,
+                bytecode_version,
+                vm_version,
+                enabled
+            )
+            VALUES
+            ($1,$2,$3,$4,$5,1,1,TRUE)`,
+            [
+                userId,
+                scriptId,
+                name,
+                source,
+                packet
+            ]
+        );
+
+        res.json({
+            success: true,
+
+            script: {
+                script_id: scriptId,
+                name,
+                bytecode_version: 1,
+                vm_version: 1,
+
+                loader:
+                    BASE_URL +
+                    "/loader/" +
+                    scriptId
+            }
+        });
+
+    } catch (error) {
+
+        console.error(error);
+
+        res.status(500).json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+//============================================================
+// GET SCRIPT INFO
+//============================================================
 
 app.get(
     "/api/scripts/:scriptId",
@@ -521,9 +1051,8 @@ app.get(
         try {
 
             const result =
-                await query(
-                    `
-                    SELECT
+                await pool.query(
+                    `SELECT
                         script_id,
                         name,
                         bytecode_version,
@@ -531,9 +1060,9 @@ app.get(
                         enabled,
                         created_at,
                         updated_at
-                    FROM scripts
-                    WHERE script_id = $1
-                    `,
+                     FROM scripts
+                     WHERE script_id = $1
+                     LIMIT 1`,
                     [req.params.scriptId]
                 );
 
@@ -541,58 +1070,52 @@ app.get(
                 result.rowCount === 0
             ) {
                 return res.status(404).json({
+                    success: false,
                     error: "Script not found"
                 });
             }
 
-            return res.json({
+            res.json({
                 success: true,
                 script: result.rows[0]
             });
 
-        } catch (err) {
+        } catch (error) {
 
-            console.error(err);
-
-            return res.status(500).json({
-                error: "Database error"
+            res.status(500).json({
+                success: false,
+                error: error.message
             });
         }
     }
 );
 
-// ============================================================
+//============================================================
 // VM BINARY
-// ============================================================
+//============================================================
 
 app.get(
     "/api/vm/:scriptId",
     async (req, res) => {
 
-        const scriptId =
-            req.params.scriptId;
-
         try {
 
             const result =
-                await query(
-                    `
-                    SELECT
-                        user_id,
+                await pool.query(
+                    `SELECT
                         bytecode,
                         enabled
-                    FROM scripts
-                    WHERE script_id = $1
-                    `,
-                    [scriptId]
+                     FROM scripts
+                     WHERE script_id = $1
+                     LIMIT 1`,
+                    [req.params.scriptId]
                 );
 
             if (
                 result.rowCount === 0
             ) {
-
                 return res.status(404).send(
-                    "NOT_FOUND"
+                    "LEXINX: Script not found"
                 );
             }
 
@@ -600,867 +1123,273 @@ app.get(
                 result.rows[0];
 
             if (!row.enabled) {
-
                 return res.status(403).send(
-                    "DISABLED"
+                    "LEXINX: Script disabled"
                 );
             }
 
-            if (!row.bytecode) {
+            const packet =
+                row.bytecode;
 
-                return res.status(404).send(
-                    "NO_BYTECODE"
-                );
-            }
-
-            await query(
-                `
-                INSERT INTO script_access_logs
-                (
-                    user_id,
-                    script_id,
-                    ip_address,
-                    success
-                )
-                VALUES
-                (
-                    $1,
-                    $2,
-                    $3,
-                    TRUE
-                )
-                `,
-                [
-                    row.user_id,
-                    scriptId,
-                    req.ip
-                ]
-            );
-
-            res.set(
+            res.setHeader(
                 "Content-Type",
                 "application/octet-stream"
             );
 
-            res.set(
+            res.setHeader(
                 "Cache-Control",
                 "no-store"
             );
 
-            return res.send(
-                row.bytecode
-            );
+            res.send(packet);
 
-        } catch (err) {
+        } catch (error) {
 
-            console.error(
-                "VM:",
-                err
-            );
+            console.error(error);
 
-            return res.status(500).send(
-                "SERVER_ERROR"
+            res.status(500).send(
+                "LEXINX: VM error"
             );
         }
     }
 );
 
-// ============================================================
-// LAYER GENERATOR
-// ============================================================
-
-function layerCode(
-    number,
-    next
-) {
-
-    return `
---// LEXINX PROTECT V5
---// L${number}
-
-local BASE_URL =
-    ${JSON.stringify(BASE_URL)}
-
-local SCRIPT_ID =
-    ${JSON.stringify(next.scriptId)}
-
-local function get(url)
-    return game:HttpGet(url)
-end
-
-local payload =
-    get(
-        BASE_URL ..
-        "/api/${next.endpoint}/" ..
-        SCRIPT_ID
-    )
-
-local fn, err =
-    loadstring(payload)
-
-if not fn then
-    error(
-        "LEXINX L${number} ERROR: " ..
-        tostring(err)
-    )
-end
-
-return fn()
-`.trim();
-}
-
-// ============================================================
+//============================================================
 // L1
-// ============================================================
+//============================================================
 
 app.get(
     "/api/l1/:scriptId",
     async (req, res) => {
 
-        const id =
-            req.params.scriptId;
-
-        const exists =
-            await query(
-                `
-                SELECT script_id, enabled
-                FROM scripts
-                WHERE script_id = $1
-                `,
-                [id]
-            );
-
-        if (
-            exists.rowCount === 0
-        ) {
-            return res.status(404).send(
-                "NOT_FOUND"
-            );
-        }
-
-        if (!exists.rows[0].enabled) {
-            return res.status(403).send(
-                "DISABLED"
-            );
-        }
-
-        const code = `
---// LEXINX PROTECT V5
---// L1
-
-local BASE_URL =
-    ${JSON.stringify(BASE_URL)}
-
-local SCRIPT_ID =
-    ${JSON.stringify(id)}
-
-local payload =
-    game:HttpGet(
-        BASE_URL ..
-        "/api/l2/" ..
-        SCRIPT_ID
-    )
-
-local fn, err =
-    loadstring(payload)
-
-if not fn then
-    error(
-        "LEXINX L1 ERROR: " ..
-        tostring(err)
-    )
-end
-
-return fn()
-`.trim();
-
-        res.type("text/plain").send(code);
-    }
-);
-
-// ============================================================
-// L2
-// ============================================================
-
-app.get(
-    "/api/l2/:scriptId",
-    async (req, res) => {
-
-        const id =
-            req.params.scriptId;
-
-        const code = `
---// LEXINX PROTECT V5
---// L2
-
-local BASE_URL =
-    ${JSON.stringify(BASE_URL)}
-
-local SCRIPT_ID =
-    ${JSON.stringify(id)}
-
-local payload =
-    game:HttpGet(
-        BASE_URL ..
-        "/api/l3/" ..
-        SCRIPT_ID
-    )
-
-local fn, err =
-    loadstring(payload)
-
-if not fn then
-    error(
-        "LEXINX L2 ERROR: " ..
-        tostring(err)
-    )
-end
-
-return fn()
-`.trim();
-
-        res.type("text/plain").send(code);
-    }
-);
-
-// ============================================================
-// L3
-// ============================================================
-
-app.get(
-    "/api/l3/:scriptId",
-    async (req, res) => {
-
-        const id =
-            req.params.scriptId;
-
-        const code = `
---// LEXINX PROTECT V5
---// L3
-
-local BASE_URL =
-    ${JSON.stringify(BASE_URL)}
-
-local SCRIPT_ID =
-    ${JSON.stringify(id)}
-
-local payload =
-    game:HttpGet(
-        BASE_URL ..
-        "/api/l4/" ..
-        SCRIPT_ID
-    )
-
-local fn, err =
-    loadstring(payload)
-
-if not fn then
-    error(
-        "LEXINX L3 ERROR: " ..
-        tostring(err)
-    )
-end
-
-return fn()
-`.trim();
-
-        res.type("text/plain").send(code);
-    }
-);
-
-// ============================================================
-// L4
-// ============================================================
-
-app.get(
-    "/api/l4/:scriptId",
-    async (req, res) => {
-
-        const id =
-            req.params.scriptId;
-
-        const code = `
---// LEXINX PROTECT V5
---// L4
-
-local BASE_URL =
-    ${JSON.stringify(BASE_URL)}
-
-local SCRIPT_ID =
-    ${JSON.stringify(id)}
-
-local payload =
-    game:HttpGet(
-        BASE_URL ..
-        "/api/l5/" ..
-        SCRIPT_ID
-    )
-
-local fn, err =
-    loadstring(payload)
-
-if not fn then
-    error(
-        "LEXINX L4 ERROR: " ..
-        tostring(err)
-    )
-end
-
-return fn()
-`.trim();
-
-        res.type("text/plain").send(code);
-    }
-);
-
-// ============================================================
-// L5
-// ============================================================
-
-app.get(
-    "/api/l5/:scriptId",
-    async (req, res) => {
-
-        const id =
-            req.params.scriptId;
-
-        const code = `
---// LEXINX PROTECT V5
---// L5
---// BINARY VM STAGE
-
-local BASE_URL =
-    ${JSON.stringify(BASE_URL)}
-
-local SCRIPT_ID =
-    ${JSON.stringify(id)}
-
-local function bxor(a, b)
-
-    local result = 0
-    local bit = 1
-
-    while a > 0 or b > 0 do
-
-        local aa = a % 2
-        local bb = b % 2
-
-        if aa ~= bb then
-            result = result + bit
-        end
-
-        a = math.floor(a / 2)
-        b = math.floor(b / 2)
-        bit = bit * 2
-    end
-
-    return result
-end
-
-local function base64Decode(data)
-
-    local chars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ" ..
-        "abcdefghijklmnopqrstuvwxyz" ..
-        "0123456789+/"
-
-    data =
-        data:gsub(
-            "[^" .. chars .. "=]",
-            ""
-        )
-
-    return (
-        data:gsub(
-            ".",
-            function(x)
-
-                if x == "=" then
-                    return ""
-                end
-
-                local r = ""
-                local f =
-                    chars:find(
-                        x,
-                        1,
-                        true
-                    ) - 1
-
-                for i = 6, 1, -1 do
-
-                    if f % 2^i -
-                       f % 2^(i-1) > 0 then
-
-                        r = r .. "1"
-                    else
-                        r = r .. "0"
-                    end
-                end
-
-                return r
-            end
-        )
-        :gsub(
-            "%d%d%d?%d?%d?%d?%d?%d?",
-            function(x)
-
-                if #x ~= 8 then
-                    return ""
-                end
-
-                local c = 0
-
-                for i = 1, 8 do
-                    c = c * 2 +
-                        (x:sub(i,i) == "1"
-                            and 1
-                            or 0)
-                end
-
-                return string.char(c)
-            end
-        )
-    )
-end
-
-local function readU8(data, pos)
-
-    return
-        string.byte(
-            data,
-            pos
-        ),
-        pos + 1
-end
-
-local function readU32(data, pos)
-
-    local a
-    local b
-    local c
-    local d
-
-    a, pos =
-        readU8(data, pos)
-
-    b, pos =
-        readU8(data, pos)
-
-    c, pos =
-        readU8(data, pos)
-
-    d, pos =
-        readU8(data, pos)
-
-    return
-        a * 16777216 +
-        b * 65536 +
-        c * 256 +
-        d,
-        pos
-end
-
-local function readString(
-    data,
-    pos
-)
-
-    local len
-
-    len, pos =
-        readU32(
-            data,
-            pos
-        )
-
-    local value =
-        data:sub(
-            pos,
-            pos + len - 1
-        )
-
-    return
-        value,
-        pos + len
-end
-
--- =========================================================
--- GET BINARY
--- =========================================================
-
-local raw =
-    game:HttpGet(
-        BASE_URL ..
-        "/api/vm/" ..
-        SCRIPT_ID
-    )
-
--- Some environments may expose the
--- binary response as raw bytes.
--- This stage expects LXVM directly.
-
-if raw:sub(1, 4) ~= "LXVM" then
-
-    error(
-        "LEXINX L5: invalid LXVM packet"
-    )
-end
-
--- =========================================================
--- HEADER
--- =========================================================
-
-local version =
-    string.byte(raw, 5)
-
-if version ~= 1 then
-
-    error(
-        "LEXINX L5: unsupported VM version"
-    )
-end
-
-local payloadLength
-
-payloadLength =
-    string.byte(raw, 7) * 16777216 +
-    string.byte(raw, 8) * 65536 +
-    string.byte(raw, 9) * 256 +
-    string.byte(raw, 10)
-
-local storedHash =
-    raw:sub(11, 42)
-
-local encrypted =
-    raw:sub(
-        43,
-        42 + payloadLength
-    )
-
-if #encrypted ~= payloadLength then
-
-    error(
-        "LEXINX L5: invalid payload length"
-    )
-end
-
--- =========================================================
--- KEY
--- =========================================================
--- This prototype uses a deterministic
--- per-script key matching server.js.
-
-local keySeed =
-    "LEXINX-V5-VM|" ..
-    SCRIPT_ID
-
--- SHA-256 implementation is required
--- here to exactly match server.js.
--- For production, replace this with
--- a compact audited SHA-256 implementation
--- compatible with the target executor.
-
-local function sha256Bytes(input)
-
-    -- Lua implementation intentionally
-    -- omitted from the transport layer.
-    -- The VM packet must be processed by
-    -- an executor/runtime providing SHA-256,
-    -- or this function must be replaced
-    -- with an audited implementation.
-
-    error(
-        "LEXINX L5: SHA-256 runtime is required"
-    )
-end
-
-local key =
-    sha256Bytes(keySeed)
-
-local decrypted =
-    {}
-
-for i = 1, #encrypted do
-
-    local a =
-        string.byte(
-            encrypted,
-            i
-        )
-
-    local b =
-        string.byte(
-            key,
-            ((i - 1) % #key) + 1
-        )
-
-    decrypted[i] =
-        string.char(
-            bxor(a, b)
-        )
-end
-
-local bytecode =
-    table.concat(decrypted)
-
--- =========================================================
--- VM
--- =========================================================
-
-local VM = {}
-
-function VM.run(code)
-
-    local pc = 1
-    local stack = {}
-    local globals = {}
-
-    local function push(v)
-        stack[#stack + 1] = v
-    end
-
-    local function pop()
-
-        local v =
-            stack[#stack]
-
-        stack[#stack] = nil
-
-        return v
-    end
-
-    while pc <= #code do
-
-        local opcode
-
-        opcode, pc =
-            readU8(
-                code,
-                pc
-            )
-
-        if opcode == 0x00 then
-
-        elseif opcode == 0x01 then
-
-            local value
-
-            value, pc =
-                readString(
-                    code,
-                    pc
-                )
-
-            push(value)
-
-        elseif opcode == 0x02 then
-
-            error(
-                "L5 VM: number decoder required"
-            )
-
-        elseif opcode == 0x03 then
-
-            local value
-
-            value, pc =
-                readU8(
-                    code,
-                    pc
-                )
-
-            push(
-                value ~= 0
-            )
-
-        elseif opcode == 0x04 then
-
-            push(nil)
-
-        elseif opcode == 0x10 then
-
-            local name
-
-            name, pc =
-                readString(
-                    code,
-                    pc
-                )
-
-            push(
-                globals[name]
-            )
-
-        elseif opcode == 0x11 then
-
-            local name
-
-            name, pc =
-                readString(
-                    code,
-                    pc
-                )
-
-            globals[name] =
-                pop()
-
-        elseif opcode == 0x20 then
-
-            local b = pop()
-            local a = pop()
-
-            push(a + b)
-
-        elseif opcode == 0x21 then
-
-            local b = pop()
-            local a = pop()
-
-            push(a - b)
-
-        elseif opcode == 0x22 then
-
-            local b = pop()
-            local a = pop()
-
-            push(a * b)
-
-        elseif opcode == 0x23 then
-
-            local b = pop()
-            local a = pop()
-
-            push(a / b)
-
-        elseif opcode == 0x30 then
-
-            local b = pop()
-            local a = pop()
-
-            push(
-                tostring(a) ..
-                tostring(b)
-            )
-
-        elseif opcode == 0x40 then
-
-            local name
-
-            name, pc =
-                readString(
-                    code,
-                    pc
-                )
-
-            local argc
-
-            argc, pc =
-                readU8(
-                    code,
-                    pc
-                )
-
-            local args = {}
-
-            for i = argc, 1, -1 do
-                args[i] = pop()
-            end
-
-            if name == "print" then
-
-                print(
-                    table.unpack(args)
-                )
-
-                push(nil)
-
-            else
-
-                error(
-                    "Unknown global call: " ..
-                    tostring(name)
-                )
-            end
-
-        elseif opcode == 0x50 then
-
-            pop()
-
-        elseif opcode == 0xFF then
-
-            return pop()
-
-        else
-
-            error(
-                "LEXINX VM: unknown opcode " ..
-                tostring(opcode)
-            )
-        end
-    end
-
-    return nil
-end
-
-return VM.run(bytecode)
-`.trim();
-
-        res.type("text/plain").send(code);
-    }
-);
-
-// ============================================================
-// LOADER URL
-// ============================================================
-
-app.get(
-    "/loader/:scriptId",
-    async (req, res) => {
-
-        const id =
-            req.params.scriptId;
-
         const result =
-            await query(
-                `
-                SELECT script_id, enabled
-                FROM scripts
-                WHERE script_id = $1
-                `,
-                [id]
+            await pool.query(
+                `SELECT enabled
+                 FROM scripts
+                 WHERE script_id = $1
+                 LIMIT 1`,
+                [req.params.scriptId]
             );
 
         if (
             result.rowCount === 0
         ) {
             return res.status(404).send(
-                "NOT_FOUND"
+                "LEXINX: Script not found"
             );
         }
 
         if (!result.rows[0].enabled) {
             return res.status(403).send(
-                "DISABLED"
+                "LEXINX: Script disabled"
             );
         }
 
-        const loader = `
-local BASE_URL =
-    ${JSON.stringify(BASE_URL)}
+        res.type("text/plain");
+        res.send(
+            makeL1(req.params.scriptId)
+        );
+    }
+);
 
-local SCRIPT_ID =
-    ${JSON.stringify(id)}
+//============================================================
+// L2
+//============================================================
 
-local l1 =
-    game:HttpGet(
-        BASE_URL ..
-        "/api/l1/" ..
-        SCRIPT_ID
-    )
+app.get(
+    "/api/l2/:scriptId",
+    async (req, res) => {
 
-local fn, err =
-    loadstring(l1)
+        const result =
+            await pool.query(
+                `SELECT enabled
+                 FROM scripts
+                 WHERE script_id = $1
+                 LIMIT 1`,
+                [req.params.scriptId]
+            );
+
+        if (
+            result.rowCount === 0
+        ) {
+            return res.status(404).send(
+                "LEXINX: Script not found"
+            );
+        }
+
+        if (!result.rows[0].enabled) {
+            return res.status(403).send(
+                "LEXINX: Script disabled"
+            );
+        }
+
+        res.type("text/plain");
+        res.send(
+            makeL2(req.params.scriptId)
+        );
+    }
+);
+
+//============================================================
+// L3
+//============================================================
+
+app.get(
+    "/api/l3/:scriptId",
+    async (req, res) => {
+
+        const result =
+            await pool.query(
+                `SELECT enabled
+                 FROM scripts
+                 WHERE script_id = $1
+                 LIMIT 1`,
+                [req.params.scriptId]
+            );
+
+        if (
+            result.rowCount === 0
+        ) {
+            return res.status(404).send(
+                "LEXINX: Script not found"
+            );
+        }
+
+        if (!result.rows[0].enabled) {
+            return res.status(403).send(
+                "LEXINX: Script disabled"
+            );
+        }
+
+        res.type("text/plain");
+        res.send(
+            makeL3(req.params.scriptId)
+        );
+    }
+);
+
+//============================================================
+// L4
+//============================================================
+
+app.get(
+    "/api/l4/:scriptId",
+    async (req, res) => {
+
+        const result =
+            await pool.query(
+                `SELECT enabled
+                 FROM scripts
+                 WHERE script_id = $1
+                 LIMIT 1`,
+                [req.params.scriptId]
+            );
+
+        if (
+            result.rowCount === 0
+        ) {
+            return res.status(404).send(
+                "LEXINX: Script not found"
+            );
+        }
+
+        if (!result.rows[0].enabled) {
+            return res.status(403).send(
+                "LEXINX: Script disabled"
+            );
+        }
+
+        res.type("text/plain");
+        res.send(
+            makeL4(req.params.scriptId)
+        );
+    }
+);
+
+//============================================================
+// L5
+//============================================================
+
+app.get(
+    "/api/l5/:scriptId",
+    async (req, res) => {
+
+        const result =
+            await pool.query(
+                `SELECT enabled
+                 FROM scripts
+                 WHERE script_id = $1
+                 LIMIT 1`,
+                [req.params.scriptId]
+            );
+
+        if (
+            result.rowCount === 0
+        ) {
+            return res.status(404).send(
+                "LEXINX: Script not found"
+            );
+        }
+
+        if (!result.rows[0].enabled) {
+            return res.status(403).send(
+                "LEXINX: Script disabled"
+            );
+        }
+
+        res.type("text/plain");
+        res.send(
+            makeL5(req.params.scriptId)
+        );
+    }
+);
+
+//============================================================
+// DYNAMIC LOADER
+// No loader.lua file required
+//============================================================
+
+app.get(
+    "/loader/:scriptId",
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await pool.query(
+                    `SELECT enabled
+                     FROM scripts
+                     WHERE script_id = $1
+                     LIMIT 1`,
+                    [req.params.scriptId]
+                );
+
+            if (
+                result.rowCount === 0
+            ) {
+                return res.status(404).send(
+                    "LEXINX: Script not found"
+                );
+            }
+
+            if (!result.rows[0].enabled) {
+                return res.status(403).send(
+                    "LEXINX: Script disabled"
+                );
+            }
+
+            const scriptId =
+                req.params.scriptId;
+
+            const loader = `
+local BASE_URL = ${JSON.stringify(BASE_URL)}
+local SCRIPT_ID = ${JSON.stringify(scriptId)}
+
+local l1 = game:HttpGet(
+    BASE_URL .. "/api/l1/" .. SCRIPT_ID
+)
+
+local fn, err = loadstring(l1)
 
 if not fn then
     error(
@@ -1470,57 +1399,81 @@ if not fn then
 end
 
 return fn()
-`.trim();
+`;
 
-        res.type("text/plain").send(
-            loader
-        );
-    }
-);
+            res.type("text/plain");
+            res.send(loader);
 
-// ============================================================
-// HEALTH
-// ============================================================
+        } catch (error) {
 
-app.get(
-    "/health",
-    async (req, res) => {
+            console.error(error);
 
-        try {
-
-            await query(
-                "SELECT 1"
+            res.status(500).send(
+                "LEXINX: Loader error"
             );
-
-            res.json({
-                ok: true,
-                service: "LEXINX PROTECT V5",
-                database: "connected",
-                vm: "LXVM v1"
-            });
-
-        } catch (err) {
-
-            res.status(500).json({
-                ok: false,
-                database: "error"
-            });
         }
     }
 );
 
-// ============================================================
+//============================================================
+// 404
+//============================================================
+
+app.use((req, res) => {
+
+    res.status(404).json({
+        success: false,
+        error: "Not Found",
+        path: req.path
+    });
+
+});
+
+//============================================================
+// ERROR HANDLER
+//============================================================
+
+app.use(
+    (error, req, res, next) => {
+
+        console.error(error);
+
+        res.status(500).json({
+            success: false,
+            error: "Internal Server Error"
+        });
+    }
+);
+
+//============================================================
 // START
-// ============================================================
+//============================================================
 
 app.listen(
     PORT,
+    "0.0.0.0",
     () => {
 
         console.log(
-            "LEXINX PROTECT V5 running on port " +
+            "===================================="
+        );
+
+        console.log(
+            "LEXINX PROTECT V5 ONLINE"
+        );
+
+        console.log(
+            "PORT:",
             PORT
         );
 
+        console.log(
+            "BASE_URL:",
+            BASE_URL
+        );
+
+        console.log(
+            "===================================="
+        );
     }
 );
