@@ -7,7 +7,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const PUBLIC_URL =
     process.env.PUBLIC_URL ||
-    "https://lexinx-protect.onrender.com";
+    "https://lexinx-protect-v230.vercel.app";
 
 const WEB_SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
 const LOADER_SESSION_TTL = 60 * 1000;
