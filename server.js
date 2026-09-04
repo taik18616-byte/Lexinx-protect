@@ -1,13 +1,13 @@
 const express = require("express");
 const crypto = require("crypto");
 const path = require("path");
+const mysql = require("mysql2/promise");
+require("dotenv").config();
 
 const app = express();
 
 const PORT = process.env.PORT || 3000;
-const PUBLIC_URL =
-    process.env.PUBLIC_URL ||
-    "https://lexinx-protect-v230.vercel.app";
+const PUBLIC_URL = process.env.PUBLIC_URL || "https://lexinx-protect-v230.vercel.app";
 
 const WEB_SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
 const LOADER_SESSION_TTL = 60 * 1000;
@@ -28,13 +28,22 @@ app.use(
 );
 
 /* =========================================================
-   STORAGE
+   DATABASE CONNECTION
 ========================================================= */
 
-const users = new Map();
-const scripts = new Map();
-const webSessions = new Map();
-const loaderSessions = new Map();
+const pool = mysql.createPool({
+    host: process.env.DB_HOST || "localhost",
+    port: process.env.DB_PORT || 3306,
+    user: process.env.DB_USER || "root",
+    password: process.env.DB_PASSWORD || "",
+    database: process.env.DB_NAME || "lexinx_protect",
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0,
+    enableKeepAlive: true,
+    keepAliveInitialDelay: 0,
+    charset: "utf8mb4"
+});
 
 /* =========================================================
    HELPERS
@@ -119,27 +128,45 @@ function getCookie(req, name) {
    WEB SESSION
 ========================================================= */
 
-function createWebSession(username) {
+async function createWebSession(username) {
 
     const id =
         randomHex(32);
 
-    webSessions.set(
-        id,
-        {
-            id,
-            username,
-            created: Date.now(),
-            expires:
-                Date.now() +
-                WEB_SESSION_TTL
-        }
-    );
+    const now =
+        Date.now();
 
-    return id;
+    const expires =
+        now + WEB_SESSION_TTL;
+
+    try {
+
+        await pool.execute(
+            `INSERT INTO web_sessions 
+             (session_id, username_lower, created_at, expires_at) 
+             VALUES (?, ?, ?, ?)`,
+            [
+                id,
+                username.toLowerCase(),
+                now,
+                expires
+            ]
+        );
+
+        return id;
+
+    } catch (error) {
+
+        console.error(
+            "Error creating web session:",
+            error
+        );
+
+        return null;
+    }
 }
 
-function getWebAuth(req) {
+async function getWebAuth(req) {
 
     const sid =
         getCookie(
@@ -150,41 +177,60 @@ function getWebAuth(req) {
     if (!sid)
         return null;
 
-    const session =
-        webSessions.get(sid);
+    try {
 
-    if (!session)
-        return null;
+        const [rows] = await pool.execute(
+            `SELECT 
+                ws.session_id,
+                ws.username_lower,
+                u.username,
+                u.password_hash
+             FROM web_sessions ws 
+             JOIN users u ON ws.username_lower = u.username_lower 
+             WHERE ws.session_id = ? 
+               AND ws.expires_at > ?`,
+            [
+                sid,
+                Date.now()
+            ]
+        );
 
-    if (
-        Date.now() >
-        session.expires
-    ) {
+        if (rows.length === 0) {
 
-        webSessions.delete(sid);
+            await pool.execute(
+                "DELETE FROM web_sessions WHERE session_id = ?",
+                [sid]
+            );
+
+            return null;
+        }
+
+        const session = rows[0];
+
+        return {
+            sid: session.session_id,
+            username: session.username,
+            username_lower: session.username_lower,
+            user: {
+                username: session.username
+            }
+        };
+
+    } catch (error) {
+
+        console.error(
+            "Error getting web auth:",
+            error
+        );
 
         return null;
     }
-
-    const user =
-        users.get(
-            session.username
-        );
-
-    if (!user)
-        return null;
-
-    return {
-        sid,
-        username: session.username,
-        user
-    };
 }
 
-function requireAuth(req, res, next) {
+async function requireAuth(req, res, next) {
 
     const auth =
-        getWebAuth(req);
+        await getWebAuth(req);
 
     if (!auth) {
 
@@ -206,7 +252,7 @@ function requireAuth(req, res, next) {
 
 app.post(
     "/api/register",
-    (req, res) => {
+    async (req, res) => {
 
         try {
 
@@ -272,7 +318,15 @@ app.post(
             const key =
                 username.toLowerCase();
 
-            if (users.has(key)) {
+            const now =
+                Date.now();
+
+            const [existing] = await pool.execute(
+                "SELECT username_lower FROM users WHERE username_lower = ?",
+                [key]
+            );
+
+            if (existing.length > 0) {
 
                 return apiError(
                     res,
@@ -281,21 +335,30 @@ app.post(
                 );
             }
 
-            users.set(
-                key,
-                {
+            await pool.execute(
+                `INSERT INTO users 
+                 (username, username_lower, password_hash, created_at, updated_at) 
+                 VALUES (?, ?, ?, ?, ?)`,
+                [
                     username,
-                    password:
-                        hashPassword(
-                            password
-                        ),
-                    created:
-                        Date.now()
-                }
+                    key,
+                    hashPassword(password),
+                    now,
+                    now
+                ]
             );
 
             const sid =
-                createWebSession(key);
+                await createWebSession(username);
+
+            if (!sid) {
+
+                return apiError(
+                    res,
+                    500,
+                    "Failed to create session."
+                );
+            }
 
             res.cookie(
                 "lexinx_session",
@@ -312,7 +375,7 @@ app.post(
 
             return res.json({
                 ok: true,
-                username,
+                username: username,
                 url:
                     PUBLIC_URL + "/"
             });
@@ -339,7 +402,7 @@ app.post(
 
 app.post(
     "/api/login",
-    (req, res) => {
+    async (req, res) => {
 
         try {
 
@@ -356,10 +419,12 @@ app.post(
             const key =
                 username.toLowerCase();
 
-            const user =
-                users.get(key);
+            const [users] = await pool.execute(
+                "SELECT username, username_lower, password_hash FROM users WHERE username_lower = ?",
+                [key]
+            );
 
-            if (!user) {
+            if (users.length === 0) {
 
                 return apiError(
                     res,
@@ -368,8 +433,10 @@ app.post(
                 );
             }
 
+            const user = users[0];
+
             if (
-                user.password !==
+                user.password_hash !==
                 hashPassword(password)
             ) {
 
@@ -381,7 +448,16 @@ app.post(
             }
 
             const sid =
-                createWebSession(key);
+                await createWebSession(user.username);
+
+            if (!sid) {
+
+                return apiError(
+                    res,
+                    500,
+                    "Failed to create session."
+                );
+            }
 
             res.cookie(
                 "lexinx_session",
@@ -426,10 +502,10 @@ app.post(
 
 app.get(
     "/api/me",
-    (req, res) => {
+    async (req, res) => {
 
         const auth =
-            getWebAuth(req);
+            await getWebAuth(req);
 
         if (!auth) {
 
@@ -456,7 +532,7 @@ app.get(
 
 app.post(
     "/api/logout",
-    (req, res) => {
+    async (req, res) => {
 
         const sid =
             getCookie(
@@ -466,9 +542,20 @@ app.post(
 
         if (sid) {
 
-            webSessions.delete(
-                sid
-            );
+            try {
+
+                await pool.execute(
+                    "DELETE FROM web_sessions WHERE session_id = ?",
+                    [sid]
+                );
+
+            } catch (error) {
+
+                console.error(
+                    "Error deleting session:",
+                    error
+                );
+            }
         }
 
         res.clearCookie(
@@ -491,7 +578,7 @@ app.post(
 app.post(
     "/api/create",
     requireAuth,
-    (req, res) => {
+    async (req, res) => {
 
         try {
 
@@ -523,24 +610,24 @@ app.post(
             do {
                 id = randomHex(12);
             } while (
-                scripts.has(id)
+                await checkScriptExists(id)
             );
 
-            scripts.set(
-                id,
-                {
+            const now =
+                Date.now();
+
+            await pool.execute(
+                `INSERT INTO scripts 
+                 (id, name, source, owner_username, created_at, updated_at, is_active) 
+                 VALUES (?, ?, ?, ?, ?, ?, 1)`,
+                [
                     id,
-                    name:
-                        name ||
-                        "Untitled Script",
+                    name || "Untitled Script",
                     source,
-                    owner:
-                        req.auth.username,
-                    created:
-                        Date.now(),
-                    updated:
-                        Date.now()
-                }
+                    req.auth.username_lower,
+                    now,
+                    now
+                ]
             );
 
             const loader =
@@ -548,8 +635,8 @@ app.post(
 
             return res.json({
                 ok: true,
-                id,
-                loader
+                id: id,
+                loader: loader
             });
 
         } catch (error) {
@@ -568,6 +655,28 @@ app.post(
     }
 );
 
+async function checkScriptExists(id) {
+
+    try {
+
+        const [rows] = await pool.execute(
+            "SELECT id FROM scripts WHERE id = ?",
+            [id]
+        );
+
+        return rows.length > 0;
+
+    } catch (error) {
+
+        console.error(
+            "Error checking script:",
+            error
+        );
+
+        return false;
+    }
+}
+
 /* =========================================================
    LIST SCRIPTS
 ========================================================= */
@@ -575,49 +684,39 @@ app.post(
 app.get(
     "/api/scripts",
     requireAuth,
-    (req, res) => {
+    async (req, res) => {
 
         try {
 
-            const result = [];
-
-            for (
-                const script
-                of scripts.values()
-            ) {
-
-                if (
-                    script.owner !==
-                    req.auth.username
-                ) {
-                    continue;
-                }
-
-                result.push({
-
-                    id:
-                        script.id,
-
-                    name:
-                        script.name,
-
-                    loader:
-                        `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${script.id}"))()`,
-
-                    created:
-                        script.created,
-
-                    updated:
-                        script.updated
-
-                });
-            }
-
-            result.sort(
-                (a, b) =>
-                    b.created -
-                    a.created
+            const [scripts] = await pool.execute(
+                `SELECT id, name, created_at, updated_at 
+                 FROM scripts 
+                 WHERE owner_username = ? 
+                   AND is_active = 1 
+                 ORDER BY created_at DESC`,
+                [
+                    req.auth.username_lower
+                ]
             );
+
+            const result = scripts.map(script => ({
+
+                id:
+                    script.id,
+
+                name:
+                    script.name,
+
+                loader:
+                    `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${script.id}"))()`,
+
+                created:
+                    script.created_at,
+
+                updated:
+                    script.updated_at
+
+            }));
 
             return res.json({
                 ok: true,
@@ -647,52 +746,75 @@ app.get(
 app.get(
     "/api/script/:id",
     requireAuth,
-    (req, res) => {
+    async (req, res) => {
 
-        const script =
-            scripts.get(
-                req.params.id
+        try {
+
+            const [scripts] = await pool.execute(
+                `SELECT id, name, source, owner_username 
+                 FROM scripts 
+                 WHERE id = ? 
+                   AND is_active = 1`,
+                [
+                    req.params.id
+                ]
             );
 
-        if (!script) {
+            if (scripts.length === 0) {
 
-            return apiError(
-                res,
-                404,
-                "Script not found."
-            );
-        }
-
-        if (
-            script.owner !==
-            req.auth.username
-        ) {
-
-            return apiError(
-                res,
-                403,
-                "Access denied."
-            );
-        }
-
-        return res.json({
-
-            ok: true,
-
-            script: {
-
-                id:
-                    script.id,
-
-                name:
-                    script.name,
-
-                source:
-                    script.source
-
+                return apiError(
+                    res,
+                    404,
+                    "Script not found."
+                );
             }
 
-        });
+            const script = scripts[0];
+
+            if (
+                script.owner_username !==
+                req.auth.username_lower
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "Access denied."
+                );
+            }
+
+            return res.json({
+
+                ok: true,
+
+                script: {
+
+                    id:
+                        script.id,
+
+                    name:
+                        script.name,
+
+                    source:
+                        script.source
+
+                }
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "GET SCRIPT ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Failed to load script."
+            );
+        }
     }
 );
 
@@ -703,73 +825,112 @@ app.get(
 app.put(
     "/api/script/:id",
     requireAuth,
-    (req, res) => {
+    async (req, res) => {
 
-        const script =
-            scripts.get(
-                req.params.id
+        try {
+
+            const [scripts] = await pool.execute(
+                "SELECT id, owner_username FROM scripts WHERE id = ? AND is_active = 1",
+                [req.params.id]
             );
 
-        if (!script) {
+            if (scripts.length === 0) {
 
-            return apiError(
-                res,
-                404,
-                "Script not found."
-            );
-        }
+                return apiError(
+                    res,
+                    404,
+                    "Script not found."
+                );
+            }
 
-        if (
-            script.owner !==
-            req.auth.username
-        ) {
-
-            return apiError(
-                res,
-                403,
-                "Access denied."
-            );
-        }
-
-        if (
-            typeof req.body.name ===
-            "string"
-        ) {
-
-            script.name =
-                req.body.name
-                    .trim()
-                    .slice(0, 100)
-                    ||
-                    "Untitled Script";
-        }
-
-        if (
-            typeof req.body.source ===
-            "string"
-        ) {
+            const script = scripts[0];
 
             if (
-                !req.body.source.trim()
+                script.owner_username !==
+                req.auth.username_lower
             ) {
 
                 return apiError(
                     res,
-                    400,
-                    "Script source cannot be empty."
+                    403,
+                    "Access denied."
                 );
             }
 
-            script.source =
-                req.body.source;
+            const updateFields = [];
+            const updateValues = [];
+
+            if (
+                typeof req.body.name ===
+                "string"
+            ) {
+
+                const name =
+                    req.body.name
+                        .trim()
+                        .slice(0, 100)
+                        ||
+                        "Untitled Script";
+
+                updateFields.push("name = ?");
+                updateValues.push(name);
+            }
+
+            if (
+                typeof req.body.source ===
+                "string"
+            ) {
+
+                if (
+                    !req.body.source.trim()
+                ) {
+
+                    return apiError(
+                        res,
+                        400,
+                        "Script source cannot be empty."
+                    );
+                }
+
+                updateFields.push("source = ?");
+                updateValues.push(req.body.source);
+            }
+
+            if (updateFields.length === 0) {
+
+                return apiError(
+                    res,
+                    400,
+                    "No fields to update."
+                );
+            }
+
+            updateFields.push("updated_at = ?");
+            updateValues.push(Date.now());
+            updateValues.push(req.params.id);
+
+            await pool.execute(
+                `UPDATE scripts SET ${updateFields.join(", ")} WHERE id = ?`,
+                updateValues
+            );
+
+            return res.json({
+                ok: true
+            });
+
+        } catch (error) {
+
+            console.error(
+                "UPDATE ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Update script server error."
+            );
         }
-
-        script.updated =
-            Date.now();
-
-        return res.json({
-            ok: true
-        });
     }
 );
 
@@ -780,41 +941,60 @@ app.put(
 app.delete(
     "/api/script/:id",
     requireAuth,
-    (req, res) => {
+    async (req, res) => {
 
-        const script =
-            scripts.get(
-                req.params.id
+        try {
+
+            const [scripts] = await pool.execute(
+                "SELECT id, owner_username FROM scripts WHERE id = ? AND is_active = 1",
+                [req.params.id]
             );
 
-        if (!script) {
+            if (scripts.length === 0) {
+
+                return apiError(
+                    res,
+                    404,
+                    "Script not found."
+                );
+            }
+
+            const script = scripts[0];
+
+            if (
+                script.owner_username !==
+                req.auth.username_lower
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "Access denied."
+                );
+            }
+
+            await pool.execute(
+                "UPDATE scripts SET is_active = 0, updated_at = ? WHERE id = ?",
+                [Date.now(), req.params.id]
+            );
+
+            return res.json({
+                ok: true
+            });
+
+        } catch (error) {
+
+            console.error(
+                "DELETE ERROR:",
+                error
+            );
 
             return apiError(
                 res,
-                404,
-                "Script not found."
+                500,
+                "Delete script server error."
             );
         }
-
-        if (
-            script.owner !==
-            req.auth.username
-        ) {
-
-            return apiError(
-                res,
-                403,
-                "Access denied."
-            );
-        }
-
-        scripts.delete(
-            req.params.id
-        );
-
-        return res.json({
-            ok: true
-        });
     }
 );
 
@@ -822,57 +1002,84 @@ app.delete(
    LOADER SESSION
 ========================================================= */
 
-function createLoaderSession(
-    scriptId
-) {
+async function createLoaderSession(scriptId) {
 
     const id =
         randomHex(32);
 
-    const session = {
+    const now =
+        Date.now();
 
-        id,
+    const expires =
+        now + LOADER_SESSION_TTL;
 
-        scriptId,
+    try {
 
+        await pool.execute(
+            `INSERT INTO loader_sessions 
+             (session_id, script_id, stage, created_at, expires_at) 
+             VALUES (?, ?, 0, ?, ?)`,
+            [
+                id,
+                scriptId,
+                now,
+                expires
+            ]
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Error creating loader session:",
+            error
+        );
+    }
+
+    return {
+        id: id,
+        scriptId: scriptId,
         stage: 0,
-
-        tokens:
-            new Set(),
-
-        created:
-            Date.now(),
-
-        expires:
-            Date.now() +
-            LOADER_SESSION_TTL
-
+        tokens: new Set(),
+        created: now,
+        expires: expires
     };
-
-    loaderSessions.set(
-        id,
-        session
-    );
-
-    return session;
 }
 
-function issueToken(session) {
+async function issueToken(session) {
 
     const token =
         randomHex(32);
 
-    session.tokens.add(
-        token
-    );
+    try {
 
-    return token;
+        await pool.execute(
+            `INSERT INTO loader_tokens 
+             (session_id, token, stage, is_used, created_at) 
+             VALUES (?, ?, ?, 0, ?)`,
+            [
+                session.id,
+                token,
+                session.stage,
+                Date.now()
+            ]
+        );
+
+        session.tokens.add(token);
+
+        return token;
+
+    } catch (error) {
+
+        console.error(
+            "Error issuing token:",
+            error
+        );
+
+        return null;
+    }
 }
 
-function consumeToken(
-    session,
-    token
-) {
+async function consumeToken(session, token) {
 
     if (!token)
         return false;
@@ -883,33 +1090,117 @@ function consumeToken(
         return false;
     }
 
-    session.tokens.delete(
-        token
-    );
+    session.tokens.delete(token);
+
+    try {
+
+        await pool.execute(
+            `UPDATE loader_tokens 
+             SET is_used = 1, used_at = ? 
+             WHERE token = ? 
+               AND is_used = 0`,
+            [
+                Date.now(),
+                token
+            ]
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Error consuming token:",
+            error
+        );
+    }
 
     return true;
 }
 
-function validLoaderSession(
-    session
-) {
+async function getLoaderSession(sessionId, expectedStage) {
 
-    if (!session)
-        return false;
+    try {
 
-    if (
-        Date.now() >
-        session.expires
-    ) {
-
-        loaderSessions.delete(
-            session.id
+        const [sessions] = await pool.execute(
+            `SELECT * FROM loader_sessions 
+             WHERE session_id = ? 
+               AND stage = ? 
+               AND expires_at > ?`,
+            [
+                sessionId,
+                expectedStage,
+                Date.now()
+            ]
         );
 
-        return false;
-    }
+        if (sessions.length === 0) {
+            return null;
+        }
 
-    return true;
+        const sessionData = sessions[0];
+
+        const session = {
+            id: sessionData.session_id,
+            scriptId: sessionData.script_id,
+            stage: sessionData.stage,
+            tokens: new Set(),
+            created: sessionData.created_at,
+            expires: sessionData.expires_at
+        };
+
+        const [tokens] = await pool.execute(
+            "SELECT token FROM loader_tokens WHERE session_id = ? AND is_used = 0",
+            [session.id]
+        );
+
+        tokens.forEach(t => session.tokens.add(t.token));
+
+        return session;
+
+    } catch (error) {
+
+        console.error(
+            "Error getting loader session:",
+            error
+        );
+
+        return null;
+    }
+}
+
+async function updateLoaderStage(sessionId, newStage) {
+
+    try {
+
+        await pool.execute(
+            "UPDATE loader_sessions SET stage = ? WHERE session_id = ?",
+            [newStage, sessionId]
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Error updating loader stage:",
+            error
+        );
+    }
+}
+
+async function deleteLoaderSession(sessionId) {
+
+    try {
+
+        await pool.execute(
+            "DELETE FROM loader_sessions WHERE session_id = ?",
+            [sessionId]
+        );
+
+    } catch (error) {
+
+        console.error(
+            "Error deleting loader session:",
+            error
+        );
+    }
 }
 
 /* =========================================================
@@ -1576,7 +1867,7 @@ return ${execute}()
 
 app.get(
     "/api/loader/:id",
-    (req, res) => {
+    async (req, res) => {
 
         try {
 
@@ -1589,18 +1880,15 @@ app.get(
                 return blockPage(res);
             }
 
-            const script =
-                scripts.get(id);
+            const [scripts] = await pool.execute(
+                "SELECT id FROM scripts WHERE id = ? AND is_active = 1",
+                [id]
+            );
 
-            if (!script) {
+            if (scripts.length === 0) {
 
                 return blockPage(res);
             }
-
-            /*
-             * Direct browser navigation normally
-             * contains text/html in Accept.
-             */
 
             const accept =
                 String(
@@ -1614,13 +1902,9 @@ app.get(
                 return blockPage(res);
             }
 
-            /*
-             * Create a fresh loader session.
-             */
-
             const session =
-                createLoaderSession(
-                    script.id
+                await createLoaderSession(
+                    id
                 );
 
             const wrapper =
@@ -1656,20 +1940,17 @@ app.get(
 
 app.get(
     "/api/l3",
-    (req, res) => {
+    async (req, res) => {
 
         try {
 
             const session =
-                loaderSessions.get(
-                    req.query.session
+                await getLoaderSession(
+                    req.query.session,
+                    0
                 );
 
-            if (
-                !validLoaderSession(
-                    session
-                )
-            ) {
+            if (!session) {
 
                 return apiError(
                     res,
@@ -1679,18 +1960,7 @@ app.get(
             }
 
             if (
-                session.stage !== 0
-            ) {
-
-                return apiError(
-                    res,
-                    403,
-                    "LEXINX BLOCK"
-                );
-            }
-
-            if (
-                !consumeToken(
+                !await consumeToken(
                     session,
                     req.query.token
                 )
@@ -1703,15 +1973,21 @@ app.get(
                 );
             }
 
+            await updateLoaderStage(
+                session.id,
+                1
+            );
+
             session.stage = 1;
+
+            const l2 =
+                buildL2(
+                    session
+                );
 
             return res
                 .type("text/plain")
-                .send(
-                    buildL2(
-                        session
-                    )
-                );
+                .send(l2);
 
         } catch (error) {
 
@@ -1735,20 +2011,17 @@ app.get(
 
 app.get(
     "/api/l4",
-    (req, res) => {
+    async (req, res) => {
 
         try {
 
             const session =
-                loaderSessions.get(
-                    req.query.session
+                await getLoaderSession(
+                    req.query.session,
+                    1
                 );
 
-            if (
-                !validLoaderSession(
-                    session
-                )
-            ) {
+            if (!session) {
 
                 return apiError(
                     res,
@@ -1758,18 +2031,7 @@ app.get(
             }
 
             if (
-                session.stage !== 1
-            ) {
-
-                return apiError(
-                    res,
-                    403,
-                    "LEXINX BLOCK"
-                );
-            }
-
-            if (
-                !consumeToken(
+                !await consumeToken(
                     session,
                     req.query.token
                 )
@@ -1782,15 +2044,21 @@ app.get(
                 );
             }
 
+            await updateLoaderStage(
+                session.id,
+                2
+            );
+
             session.stage = 2;
+
+            const l3 =
+                buildL3(
+                    session
+                );
 
             return res
                 .type("text/plain")
-                .send(
-                    buildL3(
-                        session
-                    )
-                );
+                .send(l3);
 
         } catch (error) {
 
@@ -1814,20 +2082,17 @@ app.get(
 
 app.get(
     "/api/l5",
-    (req, res) => {
+    async (req, res) => {
 
         try {
 
             const session =
-                loaderSessions.get(
-                    req.query.session
+                await getLoaderSession(
+                    req.query.session,
+                    2
                 );
 
-            if (
-                !validLoaderSession(
-                    session
-                )
-            ) {
+            if (!session) {
 
                 return apiError(
                     res,
@@ -1837,18 +2102,7 @@ app.get(
             }
 
             if (
-                session.stage !== 2
-            ) {
-
-                return apiError(
-                    res,
-                    403,
-                    "LEXINX BLOCK"
-                );
-            }
-
-            if (
-                !consumeToken(
+                !await consumeToken(
                     session,
                     req.query.token
                 )
@@ -1861,15 +2115,21 @@ app.get(
                 );
             }
 
+            await updateLoaderStage(
+                session.id,
+                3
+            );
+
             session.stage = 3;
+
+            const l4 =
+                buildL4(
+                    session
+                );
 
             return res
                 .type("text/plain")
-                .send(
-                    buildL4(
-                        session
-                    )
-                );
+                .send(l4);
 
         } catch (error) {
 
@@ -1893,39 +2153,17 @@ app.get(
 
 app.get(
     "/api/l5/final",
-    (req, res) => {
+    async (req, res) => {
 
         try {
 
             const session =
-                loaderSessions.get(
-                    req.query.session
+                await getLoaderSession(
+                    req.query.session,
+                    3
                 );
 
-            if (
-                !validLoaderSession(
-                    session
-                )
-            ) {
-
-                return apiError(
-                    res,
-                    403,
-                    "LEXINX BLOCK"
-                );
-            }
-
-            /*
-             * /api/l5 changes:
-             *
-             * stage 2 -> stage 3
-             *
-             * Therefore final requires stage 3.
-             */
-
-            if (
-                session.stage !== 3
-            ) {
+            if (!session) {
 
                 return apiError(
                     res,
@@ -1935,7 +2173,7 @@ app.get(
             }
 
             if (
-                !consumeToken(
+                !await consumeToken(
                     session,
                     req.query.token
                 )
@@ -1948,14 +2186,14 @@ app.get(
                 );
             }
 
-            const script =
-                scripts.get(
-                    session.scriptId
-                );
+            const [scripts] = await pool.execute(
+                "SELECT source FROM scripts WHERE id = ? AND is_active = 1",
+                [session.scriptId]
+            );
 
-            if (!script) {
+            if (scripts.length === 0) {
 
-                loaderSessions.delete(
+                await deleteLoaderSession(
                     session.id
                 );
 
@@ -1969,10 +2207,10 @@ app.get(
             const output =
                 buildL5(
                     session,
-                    script.source
+                    scripts[0].source
                 );
 
-            loaderSessions.delete(
+            await deleteLoaderSession(
                 session.id
             );
 
@@ -2047,55 +2285,62 @@ app.use(
 );
 
 /* =========================================================
+   ERROR HANDLER
+========================================================= */
+
+app.use(
+    (err, req, res, next) => {
+
+        console.error(
+            "GLOBAL ERROR:",
+            err
+        );
+
+        return apiError(
+            res,
+            500,
+            "Internal server error"
+        );
+    }
+);
+
+/* =========================================================
    CLEANUP
 ========================================================= */
 
 setInterval(
-    () => {
+    async () => {
 
         const now =
             Date.now();
 
-        for (
-            const [
-                id,
-                session
-            ]
-            of loaderSessions
-        ) {
+        try {
 
-            if (
-                now >
-                session.expires
-            ) {
+            await pool.execute(
+                "DELETE FROM loader_sessions WHERE expires_at < ?",
+                [now]
+            );
 
-                loaderSessions.delete(
-                    id
-                );
-            }
-        }
+            await pool.execute(
+                "DELETE FROM web_sessions WHERE expires_at < ?",
+                [now]
+            );
 
-        for (
-            const [
-                id,
-                session
-            ]
-            of webSessions
-        ) {
+            await pool.execute(
+                "DELETE FROM rate_limits WHERE window_start < ?",
+                [now - 3600000]
+            );
 
-            if (
-                now >
-                session.expires
-            ) {
+        } catch (error) {
 
-                webSessions.delete(
-                    id
-                );
-            }
+            console.error(
+                "CLEANUP ERROR:",
+                error
+            );
         }
 
     },
-    30 * 1000
+    5 * 60 * 1000
 );
 
 /* =========================================================
@@ -2107,14 +2352,56 @@ app.listen(
     () => {
 
         console.log(
-            "LEXINX server running on port " +
+            "========================================"
+        );
+
+        console.log(
+            "LEXINX PROTECT SERVER"
+        );
+
+        console.log(
+            "========================================"
+        );
+
+        console.log(
+            "Server running on port: " +
             PORT
         );
 
         console.log(
-            "PUBLIC URL: " +
+            "Public URL: " +
             PUBLIC_URL
         );
 
+        console.log(
+            "Database: Connected"
+        );
+
+        console.log(
+            "========================================"
+        );
+
+    }
+);
+
+process.on(
+    'unhandledRejection',
+    (error) => {
+
+        console.error(
+            'UNHANDLED REJECTION:',
+            error
+        );
+    }
+);
+
+process.on(
+    'uncaughtException',
+    (error) => {
+
+        console.error(
+            'UNCAUGHT EXCEPTION:',
+            error
+        );
     }
 );
