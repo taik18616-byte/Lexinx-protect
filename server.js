@@ -1,25 +1,9 @@
-"use strict";
-
 const express = require("express");
 const crypto = require("crypto");
+const path = require("path");
 const { Pool } = require("pg");
 
 const app = express();
-
-app.set("trust proxy", true);
-
-app.use(express.json({
-    limit: "10mb"
-}));
-
-app.use(express.urlencoded({
-    extended: true,
-    limit: "10mb"
-}));
-
-// ============================================================
-// CONFIG
-// ============================================================
 
 const PORT = process.env.PORT || 3000;
 
@@ -27,681 +11,613 @@ const PUBLIC_URL =
     process.env.PUBLIC_URL ||
     "https://lexinx-protect-v230.vercel.app";
 
-const DATABASE_URL = process.env.DATABASE_URL;
+const WEB_SESSION_TTL =
+    7 * 24 * 60 * 60 * 1000;
 
-if (!DATABASE_URL) {
-    console.error("[LEXINX] DATABASE_URL is missing");
+const LOADER_SESSION_TTL =
+    60 * 1000;
+
+app.set("trust proxy", 1);
+
+app.use(
+    express.json({
+        limit: "1mb"
+    })
+);
+
+app.use(
+    express.urlencoded({
+        extended: false
+    })
+);
+
+/* =========================================================
+   POSTGRESQL
+========================================================= */
+
+if (!process.env.DATABASE_URL) {
+
+    console.warn(
+        "WARNING: DATABASE_URL is not configured."
+    );
 }
 
-// ============================================================
-// POSTGRESQL
-// ============================================================
-
 const pool = new Pool({
-    connectionString: DATABASE_URL,
 
-    ssl: DATABASE_URL
-        ? {
-            rejectUnauthorized: false
-        }
-        : false,
+    connectionString:
+        process.env.DATABASE_URL,
+
+    ssl:
+        process.env.DATABASE_URL
+            ? {
+                rejectUnauthorized: false
+            }
+            : false,
 
     max: 10,
 
-    idleTimeoutMillis: 30000,
+    idleTimeoutMillis:
+        30000,
 
-    connectionTimeoutMillis: 10000
+    connectionTimeoutMillis:
+        10000
+
 });
 
-pool.on("error", (err) => {
-    console.error("[POSTGRES]", err);
-});
+pool.on(
+    "error",
+    (error) => {
 
-// ============================================================
-// GENERAL HELPERS
-// ============================================================
+        console.error(
+            "POSTGRES POOL ERROR:",
+            error
+        );
+
+    }
+);
+
+/* =========================================================
+   STATIC
+========================================================= */
+
+app.use(
+    express.static(
+        path.join(
+            __dirname,
+            "public"
+        )
+    )
+);
+
+/* =========================================================
+   HELPERS
+========================================================= */
 
 function randomHex(bytes = 32) {
+
     return crypto
         .randomBytes(bytes)
         .toString("hex");
-}
 
-function now() {
-    return Date.now();
-}
-
-function base64Encode(value) {
-    return Buffer
-        .from(String(value), "utf8")
-        .toString("base64");
-}
-
-function base64Decode(value) {
-    return Buffer
-        .from(String(value), "base64")
-        .toString("utf8");
-}
-
-function safeEqual(a, b) {
-    if (
-        typeof a !== "string" ||
-        typeof b !== "string"
-    ) {
-        return false;
-    }
-
-    const aa = Buffer.from(a);
-    const bb = Buffer.from(b);
-
-    if (aa.length !== bb.length) {
-        return false;
-    }
-
-    return crypto.timingSafeEqual(aa, bb);
 }
 
 function hashPassword(password) {
-    const salt = crypto
-        .randomBytes(16)
-        .toString("hex");
 
-    const hash = crypto
-        .scryptSync(
-            password,
-            salt,
-            64
+    return crypto
+        .createHash("sha256")
+        .update(String(password))
+        .digest("hex");
+
+}
+
+function luaString(value) {
+
+    return JSON.stringify(
+        String(value)
+    );
+
+}
+
+function hexEncode(value) {
+
+    return Buffer
+        .from(
+            String(value),
+            "utf8"
         )
         .toString("hex");
 
-    return `${salt}:${hash}`;
 }
 
-function verifyPassword(password, stored) {
-    try {
-        const parts = stored.split(":");
+function apiError(
+    res,
+    status,
+    message
+) {
 
-        if (parts.length !== 2) {
-            return false;
-        }
+    return res
+        .status(status)
+        .json({
+            ok: false,
+            error: message
+        });
 
-        const salt = parts[0];
-        const original = Buffer.from(
-            parts[1],
-            "hex"
-        );
+}
 
-        const calculated = crypto.scryptSync(
-            password,
-            salt,
-            64
-        );
+function dbError(error) {
+
+    console.error(
+        "DATABASE ERROR:",
+        error
+    );
+
+}
+
+/* =========================================================
+   COOKIE
+========================================================= */
+
+function getCookie(
+    req,
+    name
+) {
+
+    const raw =
+        req.headers.cookie || "";
+
+    const parts =
+        raw.split(";");
+
+    for (
+        const part of parts
+    ) {
+
+        const item =
+            part.trim();
+
+        const index =
+            item.indexOf("=");
 
         if (
-            calculated.length !==
-            original.length
+            index === -1
+        )
+            continue;
+
+        const key =
+            item.slice(
+                0,
+                index
+            );
+
+        const value =
+            item.slice(
+                index + 1
+            );
+
+        if (
+            key === name
         ) {
-            return false;
+
+            try {
+
+                return decodeURIComponent(
+                    value
+                );
+
+            } catch {
+
+                return value;
+
+            }
+
         }
 
-        return crypto.timingSafeEqual(
-            calculated,
-            original
-        );
-    } catch {
-        return false;
-    }
-}
-
-function getIP(req) {
-    return (
-        req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
-        req.headers["x-real-ip"] ||
-        req.socket?.remoteAddress ||
-        null
-    );
-}
-
-function getAuthToken(req) {
-    const authorization =
-        req.headers.authorization;
-
-    if (
-        authorization &&
-        authorization.startsWith("Bearer ")
-    ) {
-        return authorization
-            .slice(7)
-            .trim();
-    }
-
-    if (req.headers["x-session-token"]) {
-        return req.headers[
-            "x-session-token"
-        ];
-    }
-
-    if (req.body?.token) {
-        return req.body.token;
-    }
-
-    if (req.query?.token) {
-        return req.query.token;
     }
 
     return null;
+
 }
 
-// ============================================================
-// LOGIN SESSION
-// ============================================================
+/* =========================================================
+   WEB SESSION
+========================================================= */
 
-async function getLoginSession(req) {
-    const token = getAuthToken(req);
+async function createWebSession(
+    username
+) {
 
-    if (!token) {
-        return null;
-    }
+    const sessionToken =
+        randomHex(32);
 
-    const result = await pool.query(
-        `
-        SELECT
-            ls.id,
-            ls.user_id,
-            ls.session_token,
-            ls.expires_at,
-            ls.last_seen_at,
-            u.username
-        FROM login_sessions ls
-        INNER JOIN users u
-            ON u.id = ls.user_id
-        WHERE ls.session_token = $1
-          AND ls.expires_at > NOW()
-        LIMIT 1
-        `,
-        [token]
-    );
-
-    if (!result.rows.length) {
-        return null;
-    }
-
-    await pool.query(
-        `
-        UPDATE login_sessions
-        SET last_seen_at = NOW()
-        WHERE id = $1
-        `,
-        [result.rows[0].id]
-    );
-
-    return result.rows[0];
-}
-
-async function requireAuth(req, res, next) {
-    try {
-        const session =
-            await getLoginSession(req);
-
-        if (!session) {
-            return res.status(401).json({
-                success: false,
-                error: "Unauthorized"
-            });
-        }
-
-        req.session = session;
-
-        req.user = {
-            id: session.user_id,
-            username: session.username
-        };
-
-        next();
-    } catch (err) {
-        console.error(
-            "[AUTH]",
-            err
+    const expires =
+        new Date(
+            Date.now() +
+            WEB_SESSION_TTL
         );
 
-        res.status(500).json({
-            success: false,
-            error: "Authentication error"
-        });
-    }
-}
-
-// ============================================================
-// LOADER SESSION HELPERS
-// ============================================================
-
-async function createLoaderSession(
-    scriptId,
-    req
-) {
-    const token = randomHex(48);
-
-    const stageToken = randomHex(32);
-
-    const expiresSeconds =
-        Number(
-            process.env.LOADER_SESSION_SECONDS ||
-            300
-        );
-
-    const result = await pool.query(
-        `
-        INSERT INTO loader_sessions
-        (
-            session_token,
-            script_id,
-            ip_address,
-            current_stage,
-            stage_token,
-            expires_at,
-            created_at,
-            last_seen_at
-        )
-        VALUES
-        (
-            $1,
-            $2,
-            $3,
-            1,
-            $4,
-            NOW() +
-                ($5 * INTERVAL '1 second'),
-            NOW(),
-            NOW()
-        )
-        RETURNING
-            id,
-            session_token,
-            script_id,
-            current_stage,
-            stage_token,
-            expires_at
-        `,
-        [
-            token,
-            scriptId,
-            getIP(req),
-            stageToken,
-            expiresSeconds
-        ]
-    );
-
-    return result.rows[0];
-}
-
-async function getLoaderSession(token) {
-    if (!token) {
-        return null;
-    }
-
-    const result = await pool.query(
-        `
-        SELECT
-            id,
-            session_token,
-            script_id,
-            ip_address,
-            current_stage,
-            stage_token,
-            expires_at,
-            created_at,
-            last_seen_at
-        FROM loader_sessions
-        WHERE session_token = $1
-          AND expires_at > NOW()
-        LIMIT 1
-        `,
-        [token]
-    );
-
-    if (!result.rows.length) {
-        return null;
-    }
-
-    return result.rows[0];
-}
-
-async function updateLoaderStage(
-    id,
-    stage,
-    newToken
-) {
-    const result = await pool.query(
-        `
-        UPDATE loader_sessions
-        SET
-            current_stage = $1,
-            stage_token = $2,
-            last_seen_at = NOW()
-        WHERE id = $3
-          AND expires_at > NOW()
-        RETURNING *
-        `,
-        [
-            stage,
-            newToken,
-            id
-        ]
-    );
-
-    return result.rows[0] || null;
-}
-
-async function deleteLoaderSession(token) {
-    await pool.query(
-        `
-        DELETE FROM loader_sessions
-        WHERE session_token = $1
-        `,
-        [token]
-    );
-}
-
-// ============================================================
-// ACCESS LOG
-// ============================================================
-
-async function writeAccessLog({
-    userId = null,
-    scriptId,
-    req,
-    success,
-    stage = null
-}) {
-    try {
+    const result =
         await pool.query(
             `
-            INSERT INTO script_access_logs
+            INSERT INTO login_sessions
             (
                 user_id,
-                script_id,
-                ip_address,
-                success,
-                stage,
-                created_at
+                session_token,
+                created_at,
+                expires_at,
+                last_seen_at
             )
-            VALUES
-            (
+            SELECT
+                id,
                 $1,
+                NOW(),
                 $2,
-                $3,
-                $4,
-                $5,
                 NOW()
-            )
+            FROM users
+            WHERE LOWER(username) = LOWER($3)
+            RETURNING
+                session_token,
+                expires_at
             `,
             [
-                userId,
-                scriptId,
-                getIP(req),
-                success,
-                stage
+                sessionToken,
+                expires,
+                username
             ]
         );
-    } catch (err) {
-        console.error(
-            "[ACCESS LOG]",
-            err.message
+
+    if (
+        result.rowCount === 0
+    ) {
+
+        throw new Error(
+            "Unable to create web session."
         );
+
     }
+
+    return sessionToken;
+
 }
 
-// ============================================================
-// ROOT
-// ============================================================
+async function getWebAuth(
+    req
+) {
 
-app.get("/", (req, res) => {
-    res.status(200).send(`
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="UTF-8">
-<meta name="viewport"
-      content="width=device-width,initial-scale=1">
-<title>LEXINX PROTECT</title>
-
-<style>
-* {
-    box-sizing: border-box;
-}
-
-body {
-    margin: 0;
-    min-height: 100vh;
-
-    display: flex;
-    align-items: center;
-    justify-content: center;
-
-    background:
-        radial-gradient(
-            circle at center,
-            #151515 0%,
-            #070707 45%,
-            #000 100%
+    const sid =
+        getCookie(
+            req,
+            "lexinx_session"
         );
 
-    color: #fff;
-    font-family: Arial, sans-serif;
-}
+    if (!sid)
+        return null;
 
-.box {
-    width: min(600px, 92%);
-    text-align: center;
-    padding: 45px 30px;
-
-    border: 1px solid #292929;
-    border-radius: 18px;
-
-    background: rgba(10,10,10,.9);
-
-    box-shadow:
-        0 20px 80px rgba(0,0,0,.6);
-}
-
-.logo {
-    font-size: 38px;
-    font-weight: 900;
-    letter-spacing: 3px;
-}
-
-.sub {
-    margin-top: 12px;
-    color: #777;
-}
-
-.status {
-    margin-top: 25px;
-    color: #777;
-    font-size: 13px;
-}
-</style>
-</head>
-
-<body>
-
-<div class="box">
-
-    <div class="logo">
-        LEXINX PROTECT
-    </div>
-
-    <div class="sub">
-        Protected API Service
-    </div>
-
-    <div class="status">
-        API ONLINE
-    </div>
-
-</div>
-
-</body>
-</html>
-    `);
-});
-
-// ============================================================
-// HEALTH
-// ============================================================
-
-app.get("/api/health", async (req, res) => {
     try {
-        await pool.query("SELECT 1");
 
-        res.json({
-            success: true,
-            status: "online",
-            database: "connected",
-            timestamp: new Date().toISOString()
-        });
-    } catch (err) {
-        res.status(500).json({
-            success: false,
-            status: "online",
-            database: "disconnected"
-        });
+        const result =
+            await pool.query(
+                `
+                SELECT
+                    ls.session_token,
+                    ls.expires_at,
+                    u.id,
+                    u.username,
+                    u.password_hash,
+                    u.created_at,
+                    u.updated_at
+                FROM login_sessions ls
+                INNER JOIN users u
+                    ON u.id = ls.user_id
+                WHERE
+                    ls.session_token = $1
+                    AND (
+                        ls.expires_at IS NULL
+                        OR ls.expires_at > NOW()
+                    )
+                LIMIT 1
+                `,
+                [sid]
+            );
+
+        if (
+            result.rowCount === 0
+        ) {
+
+            return null;
+
+        }
+
+        const row =
+            result.rows[0];
+
+        await pool.query(
+            `
+            UPDATE login_sessions
+            SET last_seen_at = NOW()
+            WHERE session_token = $1
+            `,
+            [sid]
+        );
+
+        return {
+
+            sid,
+
+            username:
+                row.username,
+
+            user: {
+
+                id:
+                    row.id,
+
+                username:
+                    row.username,
+
+                password:
+                    row.password_hash,
+
+                created:
+                    row.created_at,
+
+                updated:
+                    row.updated_at
+
+            }
+
+        };
+
+    } catch (error) {
+
+        dbError(error);
+
+        return null;
+
     }
-});
 
-// ============================================================
-// REGISTER
-// ============================================================
+}
+
+async function requireAuth(
+    req,
+    res,
+    next
+) {
+
+    try {
+
+        const auth =
+            await getWebAuth(req);
+
+        if (!auth) {
+
+            return apiError(
+                res,
+                401,
+                "Authentication required."
+            );
+
+        }
+
+        req.auth =
+            auth;
+
+        next();
+
+    } catch (error) {
+
+        dbError(error);
+
+        return apiError(
+            res,
+            500,
+            "Authentication server error."
+        );
+
+    }
+
+}
+
+/* =========================================================
+   REGISTER
+========================================================= */
 
 app.post(
     "/api/register",
     async (req, res) => {
+
         try {
-            const {
-                username,
-                password
-            } = req.body;
 
-            if (
-                typeof username !== "string" ||
-                typeof password !== "string"
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    error:
-                        "Username and password are required"
-                });
-            }
+            const username =
+                String(
+                    req.body.username || ""
+                ).trim();
 
-            if (
-                !/^[a-zA-Z0-9_]{3,32}$/
-                    .test(username)
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    error:
-                        "Invalid username"
-                });
-            }
-
-            if (password.length < 6) {
-                return res.status(400).json({
-                    success: false,
-                    error:
-                        "Password must contain at least 6 characters"
-                });
-            }
-
-            const existing =
-                await pool.query(
-                    `
-                    SELECT id
-                    FROM users
-                    WHERE username = $1
-                    LIMIT 1
-                    `,
-                    [username]
+            const password =
+                String(
+                    req.body.password || ""
                 );
 
-            if (existing.rows.length) {
-                return res.status(409).json({
-                    success: false,
-                    error:
-                        "Username already exists"
-                });
+            if (!username) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Username is required."
+                );
+
+            }
+
+            if (
+                username.length < 3
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Username must contain at least 3 characters."
+                );
+
+            }
+
+            if (
+                username.length > 32
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Username is too long."
+                );
+
+            }
+
+            if (
+                !/^[a-zA-Z0-9_]+$/.test(
+                    username
+                )
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Username may only contain letters, numbers and underscore."
+                );
+
+            }
+
+            if (
+                password.length < 6
+            ) {
+
+                return apiError(
+                    res,
+                    400,
+                    "Password must contain at least 6 characters."
+                );
+
             }
 
             const passwordHash =
-                hashPassword(password);
-
-            const result =
-                await pool.query(
-                    `
-                    INSERT INTO users
-                    (
-                        username,
-                        password_hash
-                    )
-                    VALUES
-                    (
-                        $1,
-                        $2
-                    )
-                    RETURNING
-                        id,
-                        username,
-                        created_at,
-                        updated_at
-                    `,
-                    [
-                        username,
-                        passwordHash
-                    ]
+                hashPassword(
+                    password
                 );
 
-            res.json({
-                success: true,
-                user: result.rows[0]
-            });
+            let user;
 
-        } catch (err) {
-            console.error(
-                "[REGISTER]",
-                err
+            try {
+
+                const result =
+                    await pool.query(
+                        `
+                        INSERT INTO users
+                        (
+                            username,
+                            password_hash
+                        )
+                        VALUES
+                        (
+                            $1,
+                            $2
+                        )
+                        RETURNING
+                            id,
+                            username,
+                            created_at
+                        `,
+                        [
+                            username,
+                            passwordHash
+                        ]
+                    );
+
+                user =
+                    result.rows[0];
+
+            } catch (error) {
+
+                if (
+                    error.code === "23505"
+                ) {
+
+                    return apiError(
+                        res,
+                        409,
+                        "Username already exists."
+                    );
+
+                }
+
+                throw error;
+
+            }
+
+            const sid =
+                await createWebSession(
+                    user.username
+                );
+
+            res.cookie(
+                "lexinx_session",
+                sid,
+                {
+                    httpOnly: true,
+                    sameSite: "lax",
+                    secure: true,
+                    maxAge:
+                        WEB_SESSION_TTL,
+                    path: "/"
+                }
             );
 
-            res.status(500).json({
-                success: false,
-                error:
-                    "Registration failed"
+            return res.json({
+
+                ok: true,
+
+                username:
+                    user.username,
+
+                url:
+                    PUBLIC_URL + "/"
+
             });
+
+        } catch (error) {
+
+            console.error(
+                "REGISTER ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Registration server error."
+            );
+
         }
+
     }
 );
 
-// ============================================================
-// LOGIN
-// ============================================================
+/* =========================================================
+   LOGIN
+========================================================= */
 
 app.post(
     "/api/login",
     async (req, res) => {
-        try {
-            const {
-                username,
-                password
-            } = req.body;
 
-            if (
-                !username ||
-                !password
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    error:
-                        "Username and password are required"
-                });
-            }
+        try {
+
+            const username =
+                String(
+                    req.body.username || ""
+                ).trim();
+
+            const password =
+                String(
+                    req.body.password || ""
+                );
 
             const result =
                 await pool.query(
@@ -709,181 +625,243 @@ app.post(
                     SELECT
                         id,
                         username,
-                        password_hash
+                        password_hash,
+                        created_at,
+                        updated_at
                     FROM users
-                    WHERE username = $1
+                    WHERE LOWER(username) = LOWER($1)
                     LIMIT 1
                     `,
                     [username]
                 );
 
-            if (!result.rows.length) {
-                return res.status(401).json({
-                    success: false,
-                    error:
-                        "Invalid username or password"
-                });
+            if (
+                result.rowCount === 0
+            ) {
+
+                return apiError(
+                    res,
+                    401,
+                    "Invalid username or password."
+                );
+
             }
 
-            const user =
+            const row =
                 result.rows[0];
 
             if (
-                !verifyPassword(
-                    password,
-                    user.password_hash
-                )
+                row.password_hash !==
+                hashPassword(password)
             ) {
-                return res.status(401).json({
-                    success: false,
-                    error:
-                        "Invalid username or password"
-                });
+
+                return apiError(
+                    res,
+                    401,
+                    "Invalid username or password."
+                );
+
             }
 
-            const token =
-                randomHex(48);
+            const sid =
+                await createWebSession(
+                    row.username
+                );
 
-            await pool.query(
-                `
-                INSERT INTO login_sessions
-                (
-                    user_id,
-                    session_token,
-                    created_at,
-                    expires_at,
-                    last_seen_at
-                )
-                VALUES
-                (
-                    $1,
-                    $2,
-                    NOW(),
-                    NOW() + INTERVAL '30 days',
-                    NOW()
-                )
-                `,
-                [
-                    user.id,
-                    token
-                ]
-            );
-
-            res.json({
-                success: true,
-
-                token,
-
-                expires_in:
-                    60 * 60 * 24 * 30,
-
-                user: {
-                    id: user.id,
-                    username:
-                        user.username
+            res.cookie(
+                "lexinx_session",
+                sid,
+                {
+                    httpOnly: true,
+                    sameSite: "lax",
+                    secure: true,
+                    maxAge:
+                        WEB_SESSION_TTL,
+                    path: "/"
                 }
-            });
-
-        } catch (err) {
-            console.error(
-                "[LOGIN]",
-                err
             );
 
-            res.status(500).json({
-                success: false,
-                error:
-                    "Login failed"
+            return res.json({
+
+                ok: true,
+
+                username:
+                    row.username,
+
+                url:
+                    PUBLIC_URL + "/"
+
             });
+
+        } catch (error) {
+
+            console.error(
+                "LOGIN ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Login server error."
+            );
+
         }
+
     }
 );
 
-// ============================================================
-// ME
-// ============================================================
+/* =========================================================
+   ME
+========================================================= */
 
 app.get(
     "/api/me",
-    requireAuth,
     async (req, res) => {
-        res.json({
-            success: true,
-            user: req.user
+
+        const auth =
+            await getWebAuth(req);
+
+        if (!auth) {
+
+            return apiError(
+                res,
+                401,
+                "Not authenticated."
+            );
+
+        }
+
+        return res.json({
+
+            ok: true,
+
+            username:
+                auth.username,
+
+            url:
+                PUBLIC_URL + "/"
+
         });
+
     }
 );
 
-// ============================================================
-// LOGOUT
-// ============================================================
+/* =========================================================
+   LOGOUT
+========================================================= */
 
 app.post(
     "/api/logout",
-    requireAuth,
     async (req, res) => {
-        try {
-            await pool.query(
-                `
-                DELETE FROM login_sessions
-                WHERE session_token = $1
-                `,
-                [
-                    req.session.session_token
-                ]
+
+        const sid =
+            getCookie(
+                req,
+                "lexinx_session"
             );
 
-            res.json({
-                success: true
-            });
-        } catch (err) {
-            res.status(500).json({
-                success: false,
-                error:
-                    "Logout failed"
-            });
+        try {
+
+            if (sid) {
+
+                await pool.query(
+                    `
+                    DELETE FROM login_sessions
+                    WHERE session_token = $1
+                    `,
+                    [sid]
+                );
+
+            }
+
+        } catch (error) {
+
+            dbError(error);
+
         }
+
+        res.clearCookie(
+            "lexinx_session",
+            {
+                path: "/"
+            }
+        );
+
+        return res.json({
+            ok: true
+        });
+
     }
 );
 
-// ============================================================
-// CREATE SCRIPT
-// ============================================================
+/* =========================================================
+   CREATE SCRIPT
+========================================================= */
 
 app.post(
     "/api/create",
     requireAuth,
     async (req, res) => {
+
         try {
-            const {
-                name,
-                source
-            } = req.body;
+
+            const name =
+                String(
+                    req.body.name ||
+                    "Untitled Script"
+                )
+                .trim()
+                .slice(
+                    0,
+                    100
+                );
+
+            const source =
+                String(
+                    req.body.source ||
+                    ""
+                );
 
             if (
-                typeof name !== "string" ||
-                typeof source !== "string"
+                !source.trim()
             ) {
-                return res.status(400).json({
-                    success: false,
-                    error:
-                        "name and source are required"
-                });
+
+                return apiError(
+                    res,
+                    400,
+                    "Script source cannot be empty."
+                );
+
             }
 
-            if (
-                name.length < 1 ||
-                name.length > 255
-            ) {
-                return res.status(400).json({
-                    success: false,
-                    error:
-                        "Invalid script name"
-                });
-            }
+            let id;
 
-            const scriptId =
-                randomHex(16);
+            do {
+
+                id =
+                    randomHex(12);
+
+                const exists =
+                    await pool.query(
+                        `
+                        SELECT 1
+                        FROM scripts
+                        WHERE script_id = $1
+                        LIMIT 1
+                        `,
+                        [id]
+                    );
+
+                if (
+                    exists.rowCount === 0
+                ) {
+
+                    break;
+
+                }
+
+            } while (true);
 
             const result =
                 await pool.query(
@@ -894,9 +872,7 @@ app.post(
                         script_id,
                         name,
                         source,
-                        enabled,
-                        created_at,
-                        updated_at
+                        enabled
                     )
                     VALUES
                     (
@@ -904,1063 +880,1409 @@ app.post(
                         $2,
                         $3,
                         $4,
-                        TRUE,
-                        NOW(),
-                        NOW()
+                        TRUE
                     )
                     RETURNING
-                        id,
                         script_id,
                         name,
-                        enabled,
                         created_at,
                         updated_at
                     `,
                     [
-                        req.user.id,
-                        scriptId,
-                        name,
+                        req.auth.user.id,
+                        id,
+                        name ||
+                            "Untitled Script",
                         source
                     ]
                 );
 
-            res.json({
-                success: true,
+            const script =
+                result.rows[0];
 
-                script:
-                    result.rows[0],
+            const loader =
+                `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${script.script_id}"))()`;
 
-                loader:
-                    `${PUBLIC_URL}/api/loader/${scriptId}`,
+            return res.json({
 
-                roblox:
-                    `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${scriptId}"))()`
+                ok: true,
+
+                id:
+                    script.script_id,
+
+                loader
+
             });
 
-        } catch (err) {
+        } catch (error) {
+
             console.error(
-                "[CREATE]",
-                err
+                "CREATE ERROR:",
+                error
             );
 
-            res.status(500).json({
-                success: false,
-                error:
-                    "Failed to create script"
-            });
+            return apiError(
+                res,
+                500,
+                "Create script server error."
+            );
+
         }
+
     }
 );
 
-// ============================================================
-// LIST SCRIPTS
-// ============================================================
+/* =========================================================
+   LIST SCRIPTS
+========================================================= */
 
 app.get(
     "/api/scripts",
     requireAuth,
     async (req, res) => {
+
         try {
+
             const result =
                 await pool.query(
                     `
                     SELECT
-                        id,
                         script_id,
                         name,
-                        enabled,
                         created_at,
                         updated_at
                     FROM scripts
                     WHERE user_id = $1
-                    ORDER BY id DESC
+                    ORDER BY created_at DESC
                     `,
                     [
-                        req.user.id
+                        req.auth.user.id
                     ]
                 );
 
-            res.json({
-                success: true,
-                scripts:
-                    result.rows
-            });
+            const scripts =
+                result.rows.map(
+                    (script) => {
 
-        } catch (err) {
-            res.status(500).json({
-                success: false,
-                error:
-                    "Failed to get scripts"
-            });
-        }
-    }
-);
+                        return {
 
-// ============================================================
-// GET SCRIPT
-// ============================================================
+                            id:
+                                script.script_id,
 
-app.get(
-    "/api/script/:id",
-    requireAuth,
-    async (req, res) => {
-        try {
-            const result =
-                await pool.query(
-                    `
-                    SELECT
-                        id,
-                        script_id,
-                        name,
-                        source,
-                        enabled,
-                        created_at,
-                        updated_at
-                    FROM scripts
-                    WHERE script_id = $1
-                      AND user_id = $2
-                    LIMIT 1
-                    `,
-                    [
-                        req.params.id,
-                        req.user.id
-                    ]
+                            name:
+                                script.name,
+
+                            loader:
+                                `loadstring(game:HttpGet("${PUBLIC_URL}/api/loader/${script.script_id}"))()`,
+
+                            created:
+                                new Date(
+                                    script.created_at
+                                ).getTime(),
+
+                            updated:
+                                new Date(
+                                    script.updated_at
+                                ).getTime()
+
+                        };
+
+                    }
                 );
 
-            if (!result.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    error:
-                        "Script not found"
-                });
-            }
+            return res.json({
 
-            res.json({
-                success: true,
-                script:
-                    result.rows[0]
-            });
-
-        } catch (err) {
-            res.status(500).json({
-                success: false,
-                error:
-                    "Failed to get script"
-            });
-        }
-    }
-);
-
-// ============================================================
-// UPDATE SCRIPT
-// ============================================================
-
-app.put(
-    "/api/script/:id",
-    requireAuth,
-    async (req, res) => {
-        try {
-            const {
-                name,
-                source,
-                enabled
-            } = req.body;
-
-            const result =
-                await pool.query(
-                    `
-                    UPDATE scripts
-                    SET
-                        name =
-                            COALESCE(
-                                $1,
-                                name
-                            ),
-
-                        source =
-                            COALESCE(
-                                $2,
-                                source
-                            ),
-
-                        enabled =
-                            COALESCE(
-                                $3,
-                                enabled
-                            ),
-
-                        updated_at =
-                            NOW()
-
-                    WHERE script_id = $4
-                      AND user_id = $5
-
-                    RETURNING
-                        id,
-                        script_id,
-                        name,
-                        source,
-                        enabled,
-                        created_at,
-                        updated_at
-                    `,
-                    [
-                        name ?? null,
-                        source ?? null,
-
-                        typeof enabled ===
-                        "boolean"
-                            ? enabled
-                            : null,
-
-                        req.params.id,
-                        req.user.id
-                    ]
-                );
-
-            if (!result.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    error:
-                        "Script not found"
-                });
-            }
-
-            res.json({
-                success: true,
-                script:
-                    result.rows[0]
-            });
-
-        } catch (err) {
-            console.error(
-                "[UPDATE]",
-                err
-            );
-
-            res.status(500).json({
-                success: false,
-                error:
-                    "Failed to update script"
-            });
-        }
-    }
-);
-
-// ============================================================
-// DELETE SCRIPT
-// ============================================================
-
-app.delete(
-    "/api/script/:id",
-    requireAuth,
-    async (req, res) => {
-        try {
-            const result =
-                await pool.query(
-                    `
-                    DELETE FROM scripts
-                    WHERE script_id = $1
-                      AND user_id = $2
-                    RETURNING id
-                    `,
-                    [
-                        req.params.id,
-                        req.user.id
-                    ]
-                );
-
-            if (!result.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    error:
-                        "Script not found"
-                });
-            }
-
-            res.json({
-                success: true,
-                message:
-                    "Script deleted"
-            });
-
-        } catch (err) {
-            res.status(500).json({
-                success: false,
-                error:
-                    "Failed to delete script"
-            });
-        }
-    }
-);
-
-// ============================================================
-// TOGGLE SCRIPT
-// ============================================================
-
-app.post(
-    "/api/script/:id/toggle",
-    requireAuth,
-    async (req, res) => {
-        try {
-            const result =
-                await pool.query(
-                    `
-                    UPDATE scripts
-                    SET
-                        enabled =
-                            NOT enabled,
-                        updated_at =
-                            NOW()
-                    WHERE script_id = $1
-                      AND user_id = $2
-                    RETURNING
-                        script_id,
-                        name,
-                        enabled,
-                        updated_at
-                    `,
-                    [
-                        req.params.id,
-                        req.user.id
-                    ]
-                );
-
-            if (!result.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    error:
-                        "Script not found"
-                });
-            }
-
-            res.json({
-                success: true,
-                script:
-                    result.rows[0]
-            });
-
-        } catch (err) {
-            res.status(500).json({
-                success: false,
-                error:
-                    "Failed to toggle script"
-            });
-        }
-    }
-);
-
-// ============================================================
-// PUBLIC LOADER
-// ============================================================
-//
-// Browser mở trực tiếp:
-// /api/loader/ID
-//
-// -> tạo loader session
-// -> trả L1
-//
-// Roblox:
-// loadstring(game:HttpGet(URL))()
-//
-// ============================================================
-
-app.get(
-    "/api/loader/:id",
-    async (req, res) => {
-        const scriptId =
-            req.params.id;
-
-        try {
-            // --------------------------------------------
-            // SCRIPT
-            // --------------------------------------------
-
-            const scriptResult =
-                await pool.query(
-                    `
-                    SELECT
-                        id,
-                        user_id,
-                        script_id,
-                        name,
-                        source,
-                        enabled
-                    FROM scripts
-                    WHERE script_id = $1
-                    LIMIT 1
-                    `,
-                    [scriptId]
-                );
-
-            if (
-                !scriptResult.rows.length
-            ) {
-                await writeAccessLog({
-                    scriptId,
-                    req,
-                    success: false,
-                    stage: "L1_NOT_FOUND"
-                });
-
-                return res.status(404)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Script not found"
-                    );
-            }
-
-            const script =
-                scriptResult.rows[0];
-
-            if (!script.enabled) {
-                await writeAccessLog({
-                    userId: script.user_id,
-                    scriptId,
-                    req,
-                    success: false,
-                    stage: "L1_DISABLED"
-                });
-
-                return res.status(403)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Script disabled"
-                    );
-            }
-
-            // --------------------------------------------
-            // CREATE PERSISTENT LOADER SESSION
-            // --------------------------------------------
-
-            const session =
-                await createLoaderSession(
-                    scriptId,
-                    req
-                );
-
-            await writeAccessLog({
-                userId: script.user_id,
-                scriptId,
-                req,
-                success: true,
-                stage: "L1"
-            });
-
-            // --------------------------------------------
-            // L1 RESPONSE
-            // --------------------------------------------
-
-            const payload = {
                 ok: true,
-                version: "LEXINX-L1",
-                session:
-                    session.session_token,
 
-                next:
-                    `${PUBLIC_URL}/api/l3`
-            };
+                scripts
 
-            /*
-             * L1 chỉ trả bootstrap data.
-             * Source không nằm trong L1.
-             */
-
-            const encoded =
-                base64Encode(
-                    JSON.stringify(payload)
-                );
-
-            res.status(200)
-                .type("text/plain")
-                .send(
-                    `-- LEXINX PROTECT L1\n` +
-                    `-- ${encoded}`
-                );
-
-        } catch (err) {
-            console.error(
-                "[L1]",
-                err
-            );
-
-            res.status(500)
-                .type("text/plain")
-                .send(
-                    "-- LEXINX PROTECT\n" +
-                    "-- Internal error"
-                );
-        }
-    }
-);
-
-// ============================================================
-// L3
-// ============================================================
-
-app.get(
-    "/api/l3",
-    async (req, res) => {
-        try {
-            const token =
-                req.query.session ||
-                req.headers[
-                    "x-loader-session"
-                ];
-
-            const session =
-                await getLoaderSession(
-                    token
-                );
-
-            if (!session) {
-                return res.status(403)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Invalid or expired session"
-                    );
-            }
-
-            if (
-                Number(
-                    session.current_stage
-                ) !== 1
-            ) {
-                await deleteLoaderSession(
-                    token
-                );
-
-                return res.status(403)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Invalid stage"
-                    );
-            }
-
-            const nextToken =
-                randomHex(32);
-
-            await updateLoaderStage(
-                session.id,
-                3,
-                nextToken
-            );
-
-            const payload = {
-                version: "LEXINX-L3",
-
-                session:
-                    session.session_token,
-
-                stage_token:
-                    nextToken,
-
-                next:
-                    `${PUBLIC_URL}/api/l4`
-            };
-
-            const encoded =
-                base64Encode(
-                    JSON.stringify(payload)
-                );
-
-            await writeAccessLog({
-                scriptId:
-                    session.script_id,
-
-                req,
-
-                success: true,
-
-                stage: "L3"
             });
 
-            res.status(200)
-                .type("text/plain")
-                .send(
-                    `-- LEXINX PROTECT L3\n` +
-                    encoded
-                );
+        } catch (error) {
 
-        } catch (err) {
             console.error(
-                "[L3]",
-                err
+                "LIST ERROR:",
+                error
             );
 
-            res.status(500)
-                .type("text/plain")
-                .send(
-                    "-- LEXINX PROTECT\n" +
-                    "-- L3 error"
-                );
+            return apiError(
+                res,
+                500,
+                "Failed to load scripts."
+            );
+
         }
+
     }
 );
 
-// ============================================================
-// L4
-// ============================================================
+/* =========================================================
+   GET SCRIPT
+========================================================= */
 
 app.get(
-    "/api/l4",
+    "/api/script/:id",
+    requireAuth,
     async (req, res) => {
+
         try {
-            const sessionToken =
-                req.query.session ||
-                req.headers[
-                    "x-loader-session"
-                ];
-
-            const stageToken =
-                req.query.token ||
-                req.headers[
-                    "x-stage-token"
-                ];
-
-            const session =
-                await getLoaderSession(
-                    sessionToken
-                );
-
-            if (!session) {
-                return res.status(403)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Invalid session"
-                    );
-            }
-
-            if (
-                Number(
-                    session.current_stage
-                ) !== 3
-            ) {
-                return res.status(403)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Invalid stage"
-                    );
-            }
-
-            if (
-                !safeEqual(
-                    String(
-                        session.stage_token
-                    ),
-                    String(
-                        stageToken || ""
-                    )
-                )
-            ) {
-                await deleteLoaderSession(
-                    sessionToken
-                );
-
-                return res.status(403)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Invalid stage token"
-                    );
-            }
-
-            const nextToken =
-                randomHex(32);
-
-            await updateLoaderStage(
-                session.id,
-                4,
-                nextToken
-            );
-
-            const payload = {
-                version: "LEXINX-L4",
-
-                session:
-                    session.session_token,
-
-                stage_token:
-                    nextToken,
-
-                next:
-                    `${PUBLIC_URL}/api/l5`
-            };
-
-            const encoded =
-                base64Encode(
-                    JSON.stringify(payload)
-                );
-
-            await writeAccessLog({
-                scriptId:
-                    session.script_id,
-
-                req,
-
-                success: true,
-
-                stage: "L4"
-            });
-
-            res.status(200)
-                .type("text/plain")
-                .send(
-                    `-- LEXINX PROTECT L4\n` +
-                    encoded
-                );
-
-        } catch (err) {
-            console.error(
-                "[L4]",
-                err
-            );
-
-            res.status(500)
-                .type("text/plain")
-                .send(
-                    "-- LEXINX PROTECT\n" +
-                    "-- L4 error"
-                );
-        }
-    }
-);
-
-// ============================================================
-// L5
-// ============================================================
-
-app.get(
-    "/api/l5",
-    async (req, res) => {
-        try {
-            const sessionToken =
-                req.query.session ||
-                req.headers[
-                    "x-loader-session"
-                ];
-
-            const stageToken =
-                req.query.token ||
-                req.headers[
-                    "x-stage-token"
-                ];
-
-            const session =
-                await getLoaderSession(
-                    sessionToken
-                );
-
-            if (!session) {
-                return res.status(403)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Invalid session"
-                    );
-            }
-
-            if (
-                Number(
-                    session.current_stage
-                ) !== 4
-            ) {
-                return res.status(403)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Invalid stage"
-                    );
-            }
-
-            if (
-                !safeEqual(
-                    String(
-                        session.stage_token
-                    ),
-                    String(
-                        stageToken || ""
-                    )
-                )
-            ) {
-                await deleteLoaderSession(
-                    sessionToken
-                );
-
-                return res.status(403)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Invalid token"
-                    );
-            }
-
-            const nextToken =
-                randomHex(32);
-
-            await updateLoaderStage(
-                session.id,
-                5,
-                nextToken
-            );
-
-            const payload = {
-                version: "LEXINX-L5",
-
-                session:
-                    session.session_token,
-
-                stage_token:
-                    nextToken,
-
-                next:
-                    `${PUBLIC_URL}/api/l5/final`
-            };
-
-            const encoded =
-                base64Encode(
-                    JSON.stringify(payload)
-                );
-
-            await writeAccessLog({
-                scriptId:
-                    session.script_id,
-
-                req,
-
-                success: true,
-
-                stage: "L5"
-            });
-
-            res.status(200)
-                .type("text/plain")
-                .send(
-                    `-- LEXINX PROTECT L5\n` +
-                    encoded
-                );
-
-        } catch (err) {
-            console.error(
-                "[L5]",
-                err
-            );
-
-            res.status(500)
-                .type("text/plain")
-                .send(
-                    "-- LEXINX PROTECT\n" +
-                    "-- L5 error"
-                );
-        }
-    }
-);
-
-// ============================================================
-// FINAL
-// ============================================================
-
-app.get(
-    "/api/l5/final",
-    async (req, res) => {
-        try {
-            const sessionToken =
-                req.query.session ||
-                req.headers[
-                    "x-loader-session"
-                ];
-
-            const stageToken =
-                req.query.token ||
-                req.headers[
-                    "x-stage-token"
-                ];
-
-            const session =
-                await getLoaderSession(
-                    sessionToken
-                );
-
-            if (!session) {
-                return res.status(403)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Invalid session"
-                    );
-            }
-
-            if (
-                Number(
-                    session.current_stage
-                ) !== 5
-            ) {
-                return res.status(403)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Invalid stage"
-                    );
-            }
-
-            if (
-                !safeEqual(
-                    String(
-                        session.stage_token
-                    ),
-                    String(
-                        stageToken || ""
-                    )
-                )
-            ) {
-                await deleteLoaderSession(
-                    sessionToken
-                );
-
-                return res.status(403)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Invalid final token"
-                    );
-            }
-
-            // --------------------------------------------
-            // GET SOURCE
-            // --------------------------------------------
 
             const result =
                 await pool.query(
                     `
                     SELECT
-                        id,
-                        user_id,
                         script_id,
+                        name,
                         source,
                         enabled
                     FROM scripts
-                    WHERE script_id = $1
+                    WHERE
+                        script_id = $1
+                        AND user_id = $2
                     LIMIT 1
                     `,
                     [
-                        session.script_id
+                        req.params.id,
+                        req.auth.user.id
                     ]
                 );
 
-            if (!result.rows.length) {
-                await deleteLoaderSession(
-                    sessionToken
+            if (
+                result.rowCount === 0
+            ) {
+
+                const exists =
+                    await pool.query(
+                        `
+                        SELECT 1
+                        FROM scripts
+                        WHERE script_id = $1
+                        LIMIT 1
+                        `,
+                        [
+                            req.params.id
+                        ]
+                    );
+
+                if (
+                    exists.rowCount === 0
+                ) {
+
+                    return apiError(
+                        res,
+                        404,
+                        "Script not found."
+                    );
+
+                }
+
+                return apiError(
+                    res,
+                    403,
+                    "Access denied."
                 );
 
-                return res.status(404)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Script not found"
-                    );
             }
 
             const script =
                 result.rows[0];
 
-            if (!script.enabled) {
-                await deleteLoaderSession(
-                    sessionToken
+            return res.json({
+
+                ok: true,
+
+                script: {
+
+                    id:
+                        script.script_id,
+
+                    name:
+                        script.name,
+
+                    source:
+                        script.source
+
+                }
+
+            });
+
+        } catch (error) {
+
+            console.error(
+                "GET SCRIPT ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Failed to load script."
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   UPDATE SCRIPT
+========================================================= */
+
+app.put(
+    "/api/script/:id",
+    requireAuth,
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        script_id,
+                        name,
+                        source
+                    FROM scripts
+                    WHERE
+                        script_id = $1
+                        AND user_id = $2
+                    LIMIT 1
+                    `,
+                    [
+                        req.params.id,
+                        req.auth.user.id
+                    ]
                 );
 
-                return res.status(403)
-                    .type("text/plain")
-                    .send(
-                        "-- LEXINX PROTECT\n" +
-                        "-- Script disabled"
+            if (
+                result.rowCount === 0
+            ) {
+
+                const exists =
+                    await pool.query(
+                        `
+                        SELECT 1
+                        FROM scripts
+                        WHERE script_id = $1
+                        LIMIT 1
+                        `,
+                        [
+                            req.params.id
+                        ]
                     );
+
+                if (
+                    exists.rowCount === 0
+                ) {
+
+                    return apiError(
+                        res,
+                        404,
+                        "Script not found."
+                    );
+
+                }
+
+                return apiError(
+                    res,
+                    403,
+                    "Access denied."
+                );
+
             }
 
-            // --------------------------------------------
-            // FINAL WRAPPER
-            // --------------------------------------------
+            const current =
+                result.rows[0];
 
-            const source =
-                String(script.source);
+            let name =
+                current.name;
 
-            const encodedSource =
-                Buffer
-                    .from(
-                        source,
-                        "utf8"
-                    )
-                    .toString("base64");
+            let source =
+                current.source;
 
-            const finalScript = `
--- ============================================================
--- LEXINX PROTECT
--- FINAL PAYLOAD
--- ============================================================
+            if (
+                typeof req.body.name ===
+                "string"
+            ) {
 
-local __LEXINX_DATA = [[${encodedSource}]]
+                name =
+                    req.body.name
+                        .trim()
+                        .slice(
+                            0,
+                            100
+                        )
+                        ||
+                        "Untitled Script";
 
-local __LEXINX_B64 =
-    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+            }
 
-local function __LEXINX_DECODE(data)
+            if (
+                typeof req.body.source ===
+                "string"
+            ) {
 
-    data = data:gsub("[^" .. __LEXINX_B64 .. "=]", "")
+                if (
+                    !req.body.source.trim()
+                ) {
 
-    local result = {}
+                    return apiError(
+                        res,
+                        400,
+                        "Script source cannot be empty."
+                    );
 
-    local chars =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+                }
 
-    local map = {}
+                source =
+                    req.body.source;
 
-    for i = 1, #chars do
-        map[chars:sub(i,i)] = i - 1
-    end
+            }
 
-    local buffer = 0
-    local bits = 0
+            await pool.query(
+                `
+                UPDATE scripts
+                SET
+                    name = $1,
+                    source = $2,
+                    updated_at = NOW()
+                WHERE
+                    script_id = $3
+                    AND user_id = $4
+                `,
+                [
+                    name,
+                    source,
+                    req.params.id,
+                    req.auth.user.id
+                ]
+            );
 
-    for i = 1, #data do
+            return res.json({
+                ok: true
+            });
 
-        local c = data:sub(i,i)
+        } catch (error) {
 
-        if c == "=" then
-            break
+            console.error(
+                "UPDATE ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Update script server error."
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   DELETE SCRIPT
+========================================================= */
+
+app.delete(
+    "/api/script/:id",
+    requireAuth,
+    async (req, res) => {
+
+        try {
+
+            const result =
+                await pool.query(
+                    `
+                    DELETE FROM scripts
+                    WHERE
+                        script_id = $1
+                        AND user_id = $2
+                    RETURNING script_id
+                    `,
+                    [
+                        req.params.id,
+                        req.auth.user.id
+                    ]
+                );
+
+            if (
+                result.rowCount === 0
+            ) {
+
+                const exists =
+                    await pool.query(
+                        `
+                        SELECT 1
+                        FROM scripts
+                        WHERE script_id = $1
+                        LIMIT 1
+                        `,
+                        [
+                            req.params.id
+                        ]
+                    );
+
+                if (
+                    exists.rowCount === 0
+                ) {
+
+                    return apiError(
+                        res,
+                        404,
+                        "Script not found."
+                    );
+
+                }
+
+                return apiError(
+                    res,
+                    403,
+                    "Access denied."
+                );
+
+            }
+
+            return res.json({
+                ok: true
+            });
+
+        } catch (error) {
+
+            console.error(
+                "DELETE ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "Delete script server error."
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   LOADER SESSION
+========================================================= */
+
+async function createLoaderSession(
+    scriptId
+) {
+
+    const id =
+        randomHex(32);
+
+    const expires =
+        new Date(
+            Date.now() +
+            LOADER_SESSION_TTL
+        );
+
+    const result =
+        await pool.query(
+            `
+            INSERT INTO loader_sessions
+            (
+                session_token,
+                script_id,
+                stage,
+                tokens,
+                created_at,
+                expires_at,
+                last_seen_at
+            )
+            VALUES
+            (
+                $1,
+                $2,
+                0,
+                '[]'::jsonb,
+                NOW(),
+                $3,
+                NOW()
+            )
+            RETURNING
+                session_token,
+                script_id,
+                stage,
+                tokens,
+                created_at,
+                expires_at
+            `,
+            [
+                id,
+                scriptId,
+                expires
+            ]
+        );
+
+    const row =
+        result.rows[0];
+
+    return {
+
+        id:
+            row.session_token,
+
+        scriptId:
+            row.script_id,
+
+        stage:
+            row.stage,
+
+        tokens:
+            Array.isArray(row.tokens)
+                ? row.tokens
+                : [],
+
+        created:
+            new Date(
+                row.created_at
+            ).getTime(),
+
+        expires:
+            new Date(
+                row.expires_at
+            ).getTime()
+
+    };
+
+}
+
+async function getLoaderSession(
+    sessionId
+) {
+
+    if (!sessionId)
+        return null;
+
+    const result =
+        await pool.query(
+            `
+            SELECT
+                session_token,
+                script_id,
+                stage,
+                tokens,
+                created_at,
+                expires_at,
+                last_seen_at
+            FROM loader_sessions
+            WHERE
+                session_token = $1
+                AND expires_at > NOW()
+            LIMIT 1
+            `,
+            [sessionId]
+        );
+
+    if (
+        result.rowCount === 0
+    ) {
+
+        await pool.query(
+            `
+            DELETE FROM loader_sessions
+            WHERE
+                session_token = $1
+            `,
+            [sessionId]
+        );
+
+        return null;
+
+    }
+
+    const row =
+        result.rows[0];
+
+    await pool.query(
+        `
+        UPDATE loader_sessions
+        SET last_seen_at = NOW()
+        WHERE session_token = $1
+        `,
+        [sessionId]
+    );
+
+    return {
+
+        id:
+            row.session_token,
+
+        scriptId:
+            row.script_id,
+
+        stage:
+            row.stage,
+
+        tokens:
+            Array.isArray(row.tokens)
+                ? row.tokens
+                : [],
+
+        created:
+            new Date(
+                row.created_at
+            ).getTime(),
+
+        expires:
+            new Date(
+                row.expires_at
+            ).getTime()
+
+    };
+
+}
+
+async function saveLoaderSession(
+    session
+) {
+
+    await pool.query(
+        `
+        UPDATE loader_sessions
+        SET
+            stage = $1,
+            tokens = $2::jsonb,
+            last_seen_at = NOW()
+        WHERE
+            session_token = $3
+            AND expires_at > NOW()
+        `,
+        [
+            session.stage,
+            JSON.stringify(
+                session.tokens
+            ),
+            session.id
+        ]
+    );
+
+}
+
+async function deleteLoaderSession(
+    sessionId
+) {
+
+    await pool.query(
+        `
+        DELETE FROM loader_sessions
+        WHERE session_token = $1
+        `,
+        [sessionId]
+    );
+
+}
+
+async function issueToken(
+    session
+) {
+
+    const token =
+        randomHex(32);
+
+    session.tokens.push(
+        token
+    );
+
+    await saveLoaderSession(
+        session
+    );
+
+    return token;
+
+}
+
+async function consumeToken(
+    session,
+    token
+) {
+
+    if (!token)
+        return false;
+
+    const index =
+        session.tokens.indexOf(
+            token
+        );
+
+    if (
+        index === -1
+    ) {
+
+        return false;
+
+    }
+
+    session.tokens.splice(
+        index,
+        1
+    );
+
+    await saveLoaderSession(
+        session
+    );
+
+    return true;
+
+}
+
+async function validLoaderSession(
+    session
+) {
+
+    if (!session)
+        return false;
+
+    if (
+        Date.now() >
+        session.expires
+    ) {
+
+        await deleteLoaderSession(
+            session.id
+        );
+
+        return false;
+
+    }
+
+    return true;
+
+}
+
+/* =========================================================
+   PROTECT PAGE
+========================================================= */
+
+function blockPage(res) {
+
+    return res
+        .status(403)
+        .type("html")
+        .send(`
+<!doctype html>
+
+<html>
+
+<head>
+
+<meta charset="utf-8">
+
+<meta
+name="viewport"
+content="width=device-width,initial-scale=1"
+>
+
+<title>LEXINX PROTECT</title>
+
+<style>
+
+html,body{
+    margin:0;
+    width:100%;
+    height:100%;
+    background:#050505;
+    color:#eee;
+    font-family:Arial,sans-serif;
+}
+
+body{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+}
+
+.box{
+    width:min(520px,88%);
+    padding:55px 30px;
+    text-align:center;
+    background:#111;
+    border:1px solid #292929;
+    border-radius:18px;
+    box-shadow:
+        0 0 60px
+        rgba(255,255,255,.04);
+}
+
+.logo{
+    font-size:42px;
+    font-weight:900;
+    letter-spacing:8px;
+}
+
+.sub{
+    margin-top:16px;
+    color:#777;
+    font-size:13px;
+    letter-spacing:4px;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="box">
+
+<div class="logo">
+LEXINX
+</div>
+
+<div class="sub">
+PROTECT
+</div>
+
+<div class="sub">
+ANTI-SKID
+</div>
+
+</div>
+
+</body>
+
+</html>
+`);
+
+}
+
+/* =========================================================
+   LUA HEX DECODER
+========================================================= */
+
+function luaHexDecoder() {
+
+    return `
+local function decodeHex(s)
+
+    local out = {}
+
+    for i = 1, #s, 2 do
+
+        local n =
+            tonumber(
+                s:sub(i, i + 1),
+                16
+            )
+
+        if n then
+
+            out[#out + 1] =
+                string.char(n)
+
         end
 
-        local v = map[c]
+    end
 
-        if v then
+    return table.concat(out)
 
-            buffer =
-                buffer * 64 + v
+end
+`;
 
-            bits =
-                bits + 6
+}
 
-            if bits >= 8 then
+/* =========================================================
+   RANDOM LUA NAME
+========================================================= */
 
-                bits =
-                    bits - 8
+function randomLuaName() {
 
-                local byte =
-                    math.floor(
-                        buffer /
-                        (2 ^ bits)
-                    ) % 256
+    const chars =
+        "abcdefghijklmnopqrstuvwxyz";
 
-                result[#result + 1] =
-                    string.char(byte)
+    let result = "_";
 
-                buffer =
-                    buffer %
-                    (2 ^ bits)
+    for (
+        let i = 0;
+        i < 10;
+        i++
+    ) {
+
+        result +=
+            chars[
+                crypto.randomInt(
+                    0,
+                    chars.length
+                )
+            ];
+
+    }
+
+    return result;
+
+}
+
+/* =========================================================
+   WRAPPER
+========================================================= */
+
+async function buildWrapper(
+    session
+) {
+
+    const token =
+        await issueToken(
+            session
+        );
+
+    const endpoint =
+        hexEncode(
+            PUBLIC_URL
+        );
+
+    const endpointVar =
+        randomLuaName();
+
+    const sessionVar =
+        randomLuaName();
+
+    const tokenVar =
+        randomLuaName();
+
+    const request =
+        randomLuaName();
+
+    return `
+
+-- LEXINX WRAPPER VM
+
+local ${endpointVar} =
+    "${endpoint}"
+
+${luaHexDecoder()}
+
+local ${sessionVar} =
+    ${luaString(session.id)}
+
+local ${tokenVar} =
+    ${luaString(token)}
+
+local function ${request}()
+
+    local endpoint =
+        decodeHex(
+            ${endpointVar}
+        )
+
+    local url =
+        endpoint
+        .. "/api/l3"
+        .. "?session="
+        .. ${sessionVar}
+        .. "&token="
+        .. ${tokenVar}
+
+    local ok, response =
+        pcall(function()
+
+            return game:HttpGet(
+                url
+            )
+
+        end)
+
+    if not ok then
+        return
+    end
+
+    if type(response)
+        ~= "string"
+    then
+        return
+    end
+
+    local fn =
+        loadstring(response)
+
+    if fn then
+        return fn()
+    end
+
+end
+
+return ${request}()
+
+`;
+
+}
+
+/* =========================================================
+   L2
+========================================================= */
+
+async function buildL2(
+    session
+) {
+
+    const token =
+        await issueToken(
+            session
+        );
+
+    const endpoint =
+        hexEncode(
+            PUBLIC_URL
+        );
+
+    const endpointVar =
+        randomLuaName();
+
+    const sessionVar =
+        randomLuaName();
+
+    const tokenVar =
+        randomLuaName();
+
+    const vm =
+        randomLuaName();
+
+    return `
+
+-- LEXINX L2
+
+local ${endpointVar} =
+    "${endpoint}"
+
+${luaHexDecoder()}
+
+local ${vm} = {
+
+    endpoint =
+        decodeHex(
+            ${endpointVar}
+        ),
+
+    session =
+        ${luaString(session.id)},
+
+    token =
+        ${luaString(token)}
+
+}
+
+local function runVM(state)
+
+    local url =
+        state.endpoint
+        .. "/api/l4"
+        .. "?session="
+        .. state.session
+        .. "&token="
+        .. state.token
+
+    local ok, response =
+        pcall(function()
+
+            return game:HttpGet(
+                url
+            )
+
+        end)
+
+    if not ok then
+        return
+    end
+
+    local fn =
+        loadstring(response)
+
+    if fn then
+        return fn()
+    end
+
+end
+
+return runVM(${vm})
+
+`;
+
+}
+
+/* =========================================================
+   L3 PACKED PROTOTYPE
+========================================================= */
+
+async function buildL3(
+    session
+) {
+
+    const token =
+        await issueToken(
+            session
+        );
+
+    const endpoint =
+        hexEncode(
+            PUBLIC_URL
+        );
+
+    const endpointVar =
+        randomLuaName();
+
+    const prototype =
+        randomLuaName();
+
+    return `
+
+-- LEXINX L3
+-- PACKED PROTOTYPE
+
+local ${endpointVar} =
+    "${endpoint}"
+
+${luaHexDecoder()}
+
+local ${prototype} = {
+
+    endpoint =
+        decodeHex(
+            ${endpointVar}
+        ),
+
+    session =
+        ${luaString(session.id)},
+
+    token =
+        ${luaString(token)},
+
+    opcode = {
+
+        LOAD = 1,
+        REQUEST = 2,
+        EXEC = 3
+
+    }
+
+}
+
+local function executeVM(p)
+
+    local url =
+        p.endpoint
+        .. "/api/l5"
+        .. "?session="
+        .. p.session
+        .. "&token="
+        .. p.token
+
+    local ok, response =
+        pcall(function()
+
+            return game:HttpGet(
+                url
+            )
+
+        end)
+
+    if not ok then
+        return
+    end
+
+    local fn =
+        loadstring(response)
+
+    if fn then
+        return fn()
+    end
+
+end
+
+return executeVM(
+    ${prototype}
+)
+
+`;
+
+}
+
+/* =========================================================
+   L4 RUNTIME
+========================================================= */
+
+async function buildL4(
+    session
+) {
+
+    const token =
+        await issueToken(
+            session
+        );
+
+    const endpoint =
+        hexEncode(
+            PUBLIC_URL
+        );
+
+    const endpointVar =
+        randomLuaName();
+
+    const runtime =
+        randomLuaName();
+
+    return `
+
+-- LEXINX L4
+-- RUNTIME BOOTSTRAP
+
+local ${endpointVar} =
+    "${endpoint}"
+
+${luaHexDecoder()}
+
+local ${runtime} = {
+
+    endpoint =
+        decodeHex(
+            ${endpointVar}
+        ),
+
+    session =
+        ${luaString(session.id)},
+
+    token =
+        ${luaString(token)},
+
+    stage = 4
+
+}
+
+local function bootstrap(state)
+
+    local url =
+        state.endpoint
+        .. "/api/l5/final"
+        .. "?session="
+        .. state.session
+        .. "&token="
+        .. state.token
+
+    local ok, response =
+        pcall(function()
+
+            return game:HttpGet(
+                url
+            )
+
+        end)
+
+    if not ok then
+        return
+    end
+
+    if type(response)
+        ~= "string"
+    then
+        return
+    end
+
+    local fn =
+        loadstring(response)
+
+    if fn then
+        return fn()
+    end
+
+end
+
+return bootstrap(
+    ${runtime}
+)
+
+`;
+
+}
+
+/* =========================================================
+   L5
+========================================================= */
+
+function buildL5(
+    session,
+    source
+) {
+
+    const payload =
+        Buffer
+            .from(
+                source,
+                "utf8"
+            )
+            .toString("base64");
+
+    const data =
+        randomLuaName();
+
+    const decode =
+        randomLuaName();
+
+    const execute =
+        randomLuaName();
+
+    return `
+
+-- LEXINX L5
+-- FINAL RUNTIME
+
+local ${data} =
+    ${luaString(payload)}
+
+local function ${decode}(input)
+
+    local alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+
+    input =
+        input:gsub(
+            "[^"
+            .. alphabet
+            .. "=]",
+            ""
+        )
+
+    local bits = {}
+
+    for i = 1, #input do
+
+        local c =
+            input:sub(i, i)
+
+        if c ~= "=" then
+
+            local p =
+                alphabet:find(
+                    c,
+                    1,
+                    true
+                )
+
+            if p then
+
+                p = p - 1
+
+                for j = 6, 1, -1 do
+
+                    if
+                        p % 2^j >=
+                        2^(j - 1)
+                    then
+
+                        bits[#bits + 1] =
+                            "1"
+
+                    else
+
+                        bits[#bits + 1] =
+                            "0"
+
+                    end
+
+                end
 
             end
 
@@ -1968,273 +2290,754 @@ local function __LEXINX_DECODE(data)
 
     end
 
-    return table.concat(result)
+    local output = {}
+
+    for i = 1,
+        #bits - 7,
+        8
+    do
+
+        local byte = 0
+
+        for j = 0, 7 do
+
+            if
+                bits[i + j]
+                == "1"
+            then
+
+                byte =
+                    byte +
+                    2^(7 - j)
+
+            end
+
+        end
+
+        output[#output + 1] =
+            string.char(byte)
+
+    end
+
+    return table.concat(
+        output
+    )
 
 end
 
-local __LEXINX_SOURCE =
-    __LEXINX_DECODE(
-        __LEXINX_DATA
-    )
+local function ${execute}()
 
-local __LEXINX_LOAD =
-    loadstring
+    local source =
+        ${decode}(
+            ${data}
+        )
 
-if type(__LEXINX_LOAD) ~= "function" then
-    error("LEXINX_NO_LOADSTRING")
+    local fn =
+        loadstring(source)
+
+    if fn then
+        return fn()
+    end
+
 end
 
-local __LEXINX_FN,
-      __LEXINX_ERR =
-    __LEXINX_LOAD(
-        __LEXINX_SOURCE
-    )
+return ${execute}()
 
-if not __LEXINX_FN then
-    error(
-        "LEXINX_COMPILE_ERROR " ..
-        tostring(__LEXINX_ERR)
-    )
-end
-
-return __LEXINX_FN()
 `;
 
-            // --------------------------------------------
-            // LOG
-            // --------------------------------------------
+}
 
-            await writeAccessLog({
-                userId:
-                    script.user_id,
-
-                scriptId:
-                    script.script_id,
-
-                req,
-
-                success: true,
-
-                stage: "FINAL"
-            });
-
-            // --------------------------------------------
-            // DELETE SESSION
-            // --------------------------------------------
-
-            await deleteLoaderSession(
-                sessionToken
-            );
-
-            // --------------------------------------------
-            // RESPONSE
-            // --------------------------------------------
-
-            res.status(200)
-                .type("text/plain")
-                .send(finalScript);
-
-        } catch (err) {
-            console.error(
-                "[FINAL]",
-                err
-            );
-
-            res.status(500)
-                .type("text/plain")
-                .send(
-                    "-- LEXINX PROTECT\\n" +
-                    "-- Final error"
-                );
-        }
-    }
-);
-
-// ============================================================
-// BLOCK INVALID LOADER ROUTES
-// ============================================================
+/* =========================================================
+   LOADER
+========================================================= */
 
 app.get(
-    "/api/loader",
-    (req, res) => {
-        res.status(403)
-            .type("text/plain")
-            .send(
-                "-- LEXINX PROTECT\n" +
-                "-- Invalid loader request"
-            );
-    }
-);
-
-// ============================================================
-// ACCESS LOGS
-// ============================================================
-
-app.get(
-    "/api/logs/:id",
-    requireAuth,
+    "/api/loader/:id",
     async (req, res) => {
+
         try {
-            const scriptCheck =
-                await pool.query(
-                    `
-                    SELECT id
-                    FROM scripts
-                    WHERE script_id = $1
-                      AND user_id = $2
-                    LIMIT 1
-                    `,
-                    [
-                        req.params.id,
-                        req.user.id
-                    ]
+
+            const id =
+                String(
+                    req.params.id || ""
+                ).trim();
+
+            if (!id) {
+
+                return blockPage(
+                    res
                 );
 
-            if (!scriptCheck.rows.length) {
-                return res.status(404).json({
-                    success: false,
-                    error:
-                        "Script not found"
-                });
             }
 
             const result =
                 await pool.query(
                     `
                     SELECT
-                        id,
                         script_id,
-                        ip_address,
-                        success,
-                        stage,
-                        created_at
-                    FROM script_access_logs
+                        enabled
+                    FROM scripts
                     WHERE script_id = $1
-                    ORDER BY id DESC
-                    LIMIT 500
+                    LIMIT 1
                     `,
-                    [
-                        req.params.id
-                    ]
+                    [id]
                 );
 
-            res.json({
-                success: true,
-                logs:
-                    result.rows
-            });
+            if (
+                result.rowCount === 0
+            ) {
 
-        } catch (err) {
+                return blockPage(
+                    res
+                );
+
+            }
+
+            const script =
+                result.rows[0];
+
+            if (
+                script.enabled === false
+            ) {
+
+                return blockPage(
+                    res
+                );
+
+            }
+
+            /*
+             * Direct browser navigation normally
+             * contains text/html in Accept.
+             */
+
+            const accept =
+                String(
+                    req.headers.accept || ""
+                ).toLowerCase();
+
+            if (
+                accept.includes(
+                    "text/html"
+                )
+            ) {
+
+                return blockPage(
+                    res
+                );
+
+            }
+
+            /*
+             * Create a fresh loader session.
+             */
+
+            const session =
+                await createLoaderSession(
+                    script.script_id
+                );
+
+            const wrapper =
+                await buildWrapper(
+                    session
+                );
+
+            return res
+                .status(200)
+                .type("text/plain")
+                .send(wrapper);
+
+        } catch (error) {
+
             console.error(
-                "[LOGS]",
-                err
+                "LOADER ERROR:",
+                error
             );
 
-            res.status(500).json({
-                success: false,
-                error:
-                    "Failed to get logs"
-            });
+            return res
+                .status(500)
+                .type("text/plain")
+                .send(
+                    "LEXINX INTERNAL ERROR"
+                );
+
         }
+
     }
 );
 
-// ============================================================
-// CLEAN EXPIRED SESSIONS
-// ============================================================
+/* =========================================================
+   L3
+========================================================= */
 
-async function cleanupSessions() {
+app.get(
+    "/api/l3",
+    async (req, res) => {
+
+        try {
+
+            const session =
+                await getLoaderSession(
+                    req.query.session
+                );
+
+            if (
+                !(await validLoaderSession(
+                    session
+                ))
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
+                );
+
+            }
+
+            if (
+                session.stage !== 0
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
+                );
+
+            }
+
+            if (
+                !(await consumeToken(
+                    session,
+                    req.query.token
+                ))
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
+                );
+
+            }
+
+            session.stage =
+                1;
+
+            await saveLoaderSession(
+                session
+            );
+
+            return res
+                .type("text/plain")
+                .send(
+                    await buildL2(
+                        session
+                    )
+                );
+
+        } catch (error) {
+
+            console.error(
+                "L3 ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "L3 SERVER ERROR"
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   L4
+========================================================= */
+
+app.get(
+    "/api/l4",
+    async (req, res) => {
+
+        try {
+
+            const session =
+                await getLoaderSession(
+                    req.query.session
+                );
+
+            if (
+                !(await validLoaderSession(
+                    session
+                ))
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
+                );
+
+            }
+
+            if (
+                session.stage !== 1
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
+                );
+
+            }
+
+            if (
+                !(await consumeToken(
+                    session,
+                    req.query.token
+                ))
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
+                );
+
+            }
+
+            session.stage =
+                2;
+
+            await saveLoaderSession(
+                session
+            );
+
+            return res
+                .type("text/plain")
+                .send(
+                    await buildL3(
+                        session
+                    )
+                );
+
+        } catch (error) {
+
+            console.error(
+                "L4 ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "L4 SERVER ERROR"
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   L5
+========================================================= */
+
+app.get(
+    "/api/l5",
+    async (req, res) => {
+
+        try {
+
+            const session =
+                await getLoaderSession(
+                    req.query.session
+                );
+
+            if (
+                !(await validLoaderSession(
+                    session
+                ))
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
+                );
+
+            }
+
+            if (
+                session.stage !== 2
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
+                );
+
+            }
+
+            if (
+                !(await consumeToken(
+                    session,
+                    req.query.token
+                ))
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
+                );
+
+            }
+
+            session.stage =
+                3;
+
+            await saveLoaderSession(
+                session
+            );
+
+            return res
+                .type("text/plain")
+                .send(
+                    await buildL4(
+                        session
+                    )
+                );
+
+        } catch (error) {
+
+            console.error(
+                "L5 ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "L5 SERVER ERROR"
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   FINAL
+========================================================= */
+
+app.get(
+    "/api/l5/final",
+    async (req, res) => {
+
+        try {
+
+            const session =
+                await getLoaderSession(
+                    req.query.session
+                );
+
+            if (
+                !(await validLoaderSession(
+                    session
+                ))
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
+                );
+
+            }
+
+            /*
+             * /api/l5 changes:
+             *
+             * stage 2 -> stage 3
+             *
+             * Therefore final requires stage 3.
+             */
+
+            if (
+                session.stage !== 3
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
+                );
+
+            }
+
+            if (
+                !(await consumeToken(
+                    session,
+                    req.query.token
+                ))
+            ) {
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
+                );
+
+            }
+
+            const result =
+                await pool.query(
+                    `
+                    SELECT
+                        script_id,
+                        source,
+                        enabled
+                    FROM scripts
+                    WHERE script_id = $1
+                    LIMIT 1
+                    `,
+                    [
+                        session.scriptId
+                    ]
+                );
+
+            if (
+                result.rowCount === 0
+            ) {
+
+                await deleteLoaderSession(
+                    session.id
+                );
+
+                return apiError(
+                    res,
+                    404,
+                    "Script not found."
+                );
+
+            }
+
+            const script =
+                result.rows[0];
+
+            if (
+                script.enabled === false
+            ) {
+
+                await deleteLoaderSession(
+                    session.id
+                );
+
+                return apiError(
+                    res,
+                    403,
+                    "LEXINX BLOCK"
+                );
+
+            }
+
+            /*
+             * Access log
+             */
+
+            try {
+
+                await pool.query(
+                    `
+                    INSERT INTO script_access_logs
+                    (
+                        user_id,
+                        script_id,
+                        ip_address,
+                        success
+                    )
+                    VALUES
+                    (
+                        NULL,
+                        $1,
+                        $2,
+                        TRUE
+                    )
+                    `,
+                    [
+                        script.script_id,
+                        req.ip || null
+                    ]
+                );
+
+            } catch (logError) {
+
+                console.error(
+                    "ACCESS LOG ERROR:",
+                    logError
+                );
+
+            }
+
+            const output =
+                buildL5(
+                    session,
+                    script.source
+                );
+
+            await deleteLoaderSession(
+                session.id
+            );
+
+            return res
+                .status(200)
+                .type("text/plain")
+                .send(output);
+
+        } catch (error) {
+
+            console.error(
+                "FINAL ERROR:",
+                error
+            );
+
+            return apiError(
+                res,
+                500,
+                "FINAL SERVER ERROR"
+            );
+
+        }
+
+    }
+);
+
+/* =========================================================
+   API 404
+========================================================= */
+
+app.use(
+    "/api",
+    (req, res) => {
+
+        return apiError(
+            res,
+            404,
+            "API ROUTE NOT FOUND"
+        );
+
+    }
+);
+
+/* =========================================================
+   ROOT
+========================================================= */
+
+app.get(
+    "/",
+    (req, res) => {
+
+        return res.sendFile(
+            path.join(
+                __dirname,
+                "public",
+                "index.html"
+            )
+        );
+
+    }
+);
+
+/* =========================================================
+   UNKNOWN PAGE
+========================================================= */
+
+app.use(
+    (req, res) => {
+
+        return res
+            .status(404)
+            .send(
+                "Page not found."
+            );
+
+    }
+);
+
+/* =========================================================
+   DATABASE CLEANUP
+========================================================= */
+
+async function cleanupDatabase() {
+
     try {
 
         await pool.query(
             `
             DELETE FROM login_sessions
-            WHERE expires_at < NOW()
+            WHERE
+                expires_at IS NOT NULL
+                AND expires_at <= NOW()
             `
         );
 
         await pool.query(
             `
             DELETE FROM loader_sessions
-            WHERE expires_at < NOW()
+            WHERE
+                expires_at <= NOW()
             `
         );
 
-    } catch (err) {
+    } catch (error) {
 
         console.error(
-            "[CLEANUP]",
-            err.message
+            "DATABASE CLEANUP ERROR:",
+            error
         );
 
     }
+
 }
 
-// Chạy cleanup nếu instance đang sống.
-// Không phụ thuộc vào cleanup để bảo mật:
-// expires_at vẫn được kiểm tra trong SQL.
 setInterval(
-    cleanupSessions,
-    60 * 60 * 1000
+    cleanupDatabase,
+    30 * 1000
 );
 
-// ============================================================
-// 404
-// ============================================================
+/* =========================================================
+   SERVER
+========================================================= */
 
-app.use(
-    (req, res) => {
+app.listen(
+    PORT,
+    () => {
 
-        res.status(404)
-            .type("text/plain")
-            .send(
-                "-- LEXINX PROTECT\n" +
-                "-- 404 Not Found"
-            );
-
-    }
-);
-
-// ============================================================
-// ERROR HANDLER
-// ============================================================
-
-app.use(
-    (err, req, res, next) => {
-
-        console.error(
-            "[SERVER ERROR]",
-            err
+        console.log(
+            "LEXINX server running on port " +
+            PORT
         );
 
-        if (res.headersSent) {
-            return next(err);
-        }
+        console.log(
+            "PUBLIC URL: " +
+            PUBLIC_URL
+        );
 
-        res.status(500).json({
-            success: false,
-            error:
-                "Internal server error"
-        });
+        console.log(
+            "POSTGRESQL: " +
+            (
+                process.env.DATABASE_URL
+                    ? "CONFIGURED"
+                    : "NOT CONFIGURED"
+            )
+        );
 
     }
 );
-
-// ============================================================
-// VERCEL / LOCAL
-// ============================================================
-
-if (!process.env.VERCEL) {
-
-    app.listen(
-        PORT,
-        () => {
-            console.log(
-                `[LEXINX] Server running on port ${PORT}`
-            );
-        }
-    );
-
-}
-
-module.exports = app;
