@@ -1,227 +1,509 @@
--- ============================================
--- LEXINX PROTECT DATABASE - COMPLETE
--- PostgreSQL
--- ============================================
+-- =========================================================
+-- LEXINX PROTECT DATABASE SCHEMA
+-- Version: 1.0
+-- Description: Full database schema for LEXINX PROTECT
+-- Supports: 24/7 operation, persistent storage
+-- =========================================================
 
--- ============================================
+-- Create database if not exists
+CREATE DATABASE IF NOT EXISTS lexinx_protect
+    CHARACTER SET utf8mb4
+    COLLATE utf8mb4_unicode_ci;
+
+USE lexinx_protect;
+
+-- =========================================================
 -- 1. USERS TABLE
--- ============================================
+-- Stores: User accounts (register/login)
+-- =========================================================
+
 CREATE TABLE IF NOT EXISTS users (
-    id BIGSERIAL PRIMARY KEY,
+    id INT AUTO_INCREMENT PRIMARY KEY,
     username VARCHAR(32) NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================
--- 2. SCRIPTS TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS scripts (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    script_id VARCHAR(64) NOT NULL UNIQUE,
-    name VARCHAR(100) NOT NULL DEFAULT 'My Script',
-    source TEXT NOT NULL DEFAULT '',
-    enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================
--- 3. LOGIN SESSIONS TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS login_sessions (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    session_token TEXT NOT NULL UNIQUE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMPTZ,
-    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================
--- 4. LOADER SESSIONS TABLE (BẮT BUỘC)
--- ============================================
-CREATE TABLE IF NOT EXISTS loader_sessions (
-    id BIGSERIAL PRIMARY KEY,
-    session_token TEXT NOT NULL UNIQUE,
-    script_id VARCHAR(64) NOT NULL REFERENCES scripts(script_id) ON DELETE CASCADE,
-    stage INTEGER NOT NULL DEFAULT 0,
-    tokens JSONB NOT NULL DEFAULT '[]'::jsonb,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at TIMESTAMPTZ NOT NULL,
-    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================
--- 5. SCRIPT ACCESS LOGS TABLE
--- ============================================
-CREATE TABLE IF NOT EXISTS script_access_logs (
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
-    script_id VARCHAR(64),
-    ip_address INET,
-    success BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- ============================================
--- INDEXES
--- ============================================
-
--- Users indexes
-CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
-
--- Scripts indexes
-CREATE INDEX IF NOT EXISTS idx_scripts_user_id ON scripts(user_id);
-CREATE INDEX IF NOT EXISTS idx_scripts_script_id ON scripts(script_id);
-CREATE INDEX IF NOT EXISTS idx_scripts_enabled ON scripts(enabled);
-
--- Login sessions indexes
-CREATE INDEX IF NOT EXISTS idx_login_sessions_token ON login_sessions(session_token);
-CREATE INDEX IF NOT EXISTS idx_login_sessions_user_id ON login_sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_login_sessions_expires ON login_sessions(expires_at);
-
--- Loader sessions indexes
-CREATE INDEX IF NOT EXISTS idx_loader_sessions_token ON loader_sessions(session_token);
-CREATE INDEX IF NOT EXISTS idx_loader_sessions_script ON loader_sessions(script_id);
-CREATE INDEX IF NOT EXISTS idx_loader_sessions_expires ON loader_sessions(expires_at);
-CREATE INDEX IF NOT EXISTS idx_loader_sessions_stage ON loader_sessions(stage);
-
--- Script access logs indexes
-CREATE INDEX IF NOT EXISTS idx_access_logs_script ON script_access_logs(script_id);
-CREATE INDEX IF NOT EXISTS idx_access_logs_user ON script_access_logs(user_id);
-CREATE INDEX IF NOT EXISTS idx_access_logs_created ON script_access_logs(created_at);
-
--- ============================================
--- TRIGGER: Tự động cập nhật updated_at cho users
--- ============================================
-CREATE OR REPLACE FUNCTION update_updated_at_column()
-RETURNS TRIGGER AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$ language 'plpgsql';
-
-DROP TRIGGER IF EXISTS update_users_updated_at ON users;
-CREATE TRIGGER update_users_updated_at
-    BEFORE UPDATE ON users
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
--- ============================================
--- TRIGGER: Tự động cập nhật updated_at cho scripts
--- ============================================
-DROP TRIGGER IF EXISTS update_scripts_updated_at ON scripts;
-CREATE TRIGGER update_scripts_updated_at
-    BEFORE UPDATE ON scripts
-    FOR EACH ROW
-    EXECUTE FUNCTION update_updated_at_column();
-
--- ============================================
--- CLEANUP FUNCTION: Xóa sessions hết hạn
--- ============================================
-CREATE OR REPLACE FUNCTION cleanup_expired_sessions()
-RETURNS void AS $$
-BEGIN
-    -- Xóa login sessions hết hạn
-    DELETE FROM login_sessions 
-    WHERE expires_at IS NOT NULL 
-    AND expires_at <= NOW();
+    username_lower VARCHAR(32) NOT NULL UNIQUE COMMENT 'Lowercase username for lookups',
+    password_hash VARCHAR(64) NOT NULL COMMENT 'SHA256 hash',
+    created_at BIGINT NOT NULL COMMENT 'Unix timestamp in milliseconds',
+    updated_at BIGINT NOT NULL COMMENT 'Unix timestamp in milliseconds',
     
-    -- Xóa loader sessions hết hạn
-    DELETE FROM loader_sessions 
-    WHERE expires_at <= NOW();
-END;
-$$ LANGUAGE plpgsql;
+    INDEX idx_username_lower (username_lower),
+    INDEX idx_created_at (created_at)
+) ENGINE=InnoDB 
+  DEFAULT CHARSET=utf8mb4 
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='User accounts';
 
--- ============================================
--- VIEW: Thống kê scripts theo user
--- ============================================
-CREATE OR REPLACE VIEW v_user_script_stats AS
-SELECT 
-    u.id AS user_id,
-    u.username,
-    COUNT(s.id) AS total_scripts,
-    COUNT(CASE WHEN s.enabled = TRUE THEN 1 END) AS enabled_scripts,
-    COUNT(CASE WHEN s.enabled = FALSE THEN 1 END) AS disabled_scripts,
-    MAX(s.created_at) AS last_script_created,
-    MAX(s.updated_at) AS last_script_updated
-FROM users u
-LEFT JOIN scripts s ON s.user_id = u.id
-GROUP BY u.id, u.username;
+-- =========================================================
+-- 2. WEB SESSIONS TABLE
+-- Stores: Web login sessions (7 days TTL)
+-- =========================================================
 
--- ============================================
--- VIEW: Thống kê access logs
--- ============================================
-CREATE OR REPLACE VIEW v_script_access_stats AS
+CREATE TABLE IF NOT EXISTS web_sessions (
+    session_id VARCHAR(64) PRIMARY KEY COMMENT 'Random 32 bytes hex',
+    username_lower VARCHAR(32) NOT NULL COMMENT 'Reference to users',
+    created_at BIGINT NOT NULL COMMENT 'Unix timestamp in ms',
+    expires_at BIGINT NOT NULL COMMENT 'Unix timestamp in ms',
+    last_accessed_at BIGINT NULL COMMENT 'For session tracking',
+    
+    INDEX idx_username (username_lower),
+    INDEX idx_expires (expires_at),
+    INDEX idx_last_accessed (last_accessed_at),
+    
+    FOREIGN KEY (username_lower) 
+        REFERENCES users(username_lower)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB 
+  DEFAULT CHARSET=utf8mb4 
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Web sessions (7 days TTL)';
+
+-- =========================================================
+-- 3. SCRIPTS TABLE
+-- Stores: User scripts with source code
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS scripts (
+    id VARCHAR(24) PRIMARY KEY COMMENT 'Random 12 bytes hex',
+    name VARCHAR(100) NOT NULL DEFAULT 'Untitled Script',
+    source LONGTEXT NOT NULL COMMENT 'Lua script source code',
+    owner_username VARCHAR(32) NOT NULL COMMENT 'Reference to users',
+    created_at BIGINT NOT NULL COMMENT 'Unix timestamp in ms',
+    updated_at BIGINT NOT NULL COMMENT 'Unix timestamp in ms',
+    is_active TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Soft delete flag',
+    
+    INDEX idx_owner (owner_username),
+    INDEX idx_created (created_at),
+    INDEX idx_updated (updated_at),
+    INDEX idx_active (is_active),
+    
+    FOREIGN KEY (owner_username) 
+        REFERENCES users(username_lower)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB 
+  DEFAULT CHARSET=utf8mb4 
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='User scripts';
+
+-- =========================================================
+-- 4. LOADER SESSIONS TABLE
+-- Stores: Loader execution sessions (60 seconds TTL)
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS loader_sessions (
+    session_id VARCHAR(64) PRIMARY KEY COMMENT 'Random 32 bytes hex',
+    script_id VARCHAR(24) NOT NULL COMMENT 'Reference to scripts',
+    stage INT NOT NULL DEFAULT 0 COMMENT 'Execution stage: 0-3',
+    created_at BIGINT NOT NULL COMMENT 'Unix timestamp in ms',
+    expires_at BIGINT NOT NULL COMMENT 'Unix timestamp in ms',
+    completed_at BIGINT NULL COMMENT 'When script was delivered',
+    user_agent VARCHAR(255) NULL COMMENT 'Client user agent',
+    ip_address VARCHAR(45) NULL COMMENT 'Client IP address',
+    
+    INDEX idx_script (script_id),
+    INDEX idx_expires (expires_at),
+    INDEX idx_stage (stage),
+    INDEX idx_created (created_at),
+    
+    FOREIGN KEY (script_id) 
+        REFERENCES scripts(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB 
+  DEFAULT CHARSET=utf8mb4 
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Loader sessions (60 seconds TTL)';
+
+-- =========================================================
+-- 5. LOADER TOKENS TABLE
+-- Stores: One-time tokens for each stage
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS loader_tokens (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    session_id VARCHAR(64) NOT NULL COMMENT 'Reference to loader_sessions',
+    token VARCHAR(64) NOT NULL UNIQUE COMMENT 'Random 32 bytes hex',
+    stage INT NOT NULL COMMENT 'Stage this token belongs to',
+    is_used TINYINT(1) NOT NULL DEFAULT 0 COMMENT 'Token consumed?',
+    created_at BIGINT NOT NULL COMMENT 'Unix timestamp in ms',
+    used_at BIGINT NULL COMMENT 'When token was consumed',
+    
+    INDEX idx_session (session_id),
+    INDEX idx_token (token),
+    INDEX idx_used (is_used),
+    
+    FOREIGN KEY (session_id) 
+        REFERENCES loader_sessions(session_id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB 
+  DEFAULT CHARSET=utf8mb4 
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Loader tokens for each stage';
+
+-- =========================================================
+-- 6. SCRIPT EXECUTION LOGS TABLE
+-- Stores: Execution history and statistics
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS script_execution_logs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    script_id VARCHAR(24) NOT NULL COMMENT 'Reference to scripts',
+    loader_session_id VARCHAR(64) NULL COMMENT 'Reference to loader_sessions',
+    executed_at BIGINT NOT NULL COMMENT 'Unix timestamp in ms',
+    success TINYINT(1) NOT NULL DEFAULT 1 COMMENT 'Execution successful?',
+    error_message TEXT NULL COMMENT 'Error details if failed',
+    ip_address VARCHAR(45) NULL,
+    user_agent VARCHAR(255) NULL,
+    execution_time_ms INT NULL COMMENT 'Time to complete execution',
+    
+    INDEX idx_script (script_id),
+    INDEX idx_executed (executed_at),
+    INDEX idx_success (success),
+    
+    FOREIGN KEY (script_id) 
+        REFERENCES scripts(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE,
+        
+    FOREIGN KEY (loader_session_id) 
+        REFERENCES loader_sessions(session_id)
+        ON DELETE SET NULL
+        ON UPDATE CASCADE
+) ENGINE=InnoDB 
+  DEFAULT CHARSET=utf8mb4 
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Script execution logs';
+
+-- =========================================================
+-- 7. RATE LIMITING TABLE
+-- Stores: API rate limiting data
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS rate_limits (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    ip_address VARCHAR(45) NOT NULL,
+    endpoint VARCHAR(255) NOT NULL,
+    request_count INT NOT NULL DEFAULT 0,
+    window_start BIGINT NOT NULL COMMENT 'Unix timestamp in ms',
+    last_request_at BIGINT NULL,
+    
+    INDEX idx_ip_endpoint (ip_address, endpoint),
+    INDEX idx_window (window_start),
+    
+    UNIQUE KEY unique_ip_endpoint_window (ip_address, endpoint, window_start)
+) ENGINE=InnoDB 
+  DEFAULT CHARSET=utf8mb4 
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Rate limiting data';
+
+-- =========================================================
+-- 8. AUDIT LOGS TABLE
+-- Stores: Security and activity logs
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    username_lower VARCHAR(32) NULL COMMENT 'User involved (if any)',
+    action VARCHAR(50) NOT NULL COMMENT 'Action type',
+    details TEXT NULL COMMENT 'Additional details',
+    ip_address VARCHAR(45) NULL,
+    user_agent VARCHAR(255) NULL,
+    created_at BIGINT NOT NULL COMMENT 'Unix timestamp in ms',
+    success TINYINT(1) NOT NULL DEFAULT 1,
+    
+    INDEX idx_username (username_lower),
+    INDEX idx_action (action),
+    INDEX idx_created (created_at)
+) ENGINE=InnoDB 
+  DEFAULT CHARSET=utf8mb4 
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Security and activity logs';
+
+-- =========================================================
+-- 9. SCRIPT VERSIONS TABLE (Optional)
+-- Stores: Version history for scripts
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS script_versions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    script_id VARCHAR(24) NOT NULL,
+    version_number INT NOT NULL DEFAULT 1,
+    name VARCHAR(100) NOT NULL,
+    source LONGTEXT NOT NULL,
+    created_at BIGINT NOT NULL,
+    created_by VARCHAR(32) NOT NULL,
+    
+    INDEX idx_script (script_id),
+    INDEX idx_version (version_number),
+    
+    UNIQUE KEY unique_script_version (script_id, version_number),
+    
+    FOREIGN KEY (script_id) 
+        REFERENCES scripts(id)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB 
+  DEFAULT CHARSET=utf8mb4 
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='Script version history';
+
+-- =========================================================
+-- 10. SETTINGS TABLE
+-- Stores: System configuration
+-- =========================================================
+
+CREATE TABLE IF NOT EXISTS settings (
+    setting_key VARCHAR(100) PRIMARY KEY,
+    setting_value TEXT NULL,
+    updated_at BIGINT NULL,
+    updated_by VARCHAR(32) NULL,
+    
+    INDEX idx_updated_at (updated_at)
+) ENGINE=InnoDB 
+  DEFAULT CHARSET=utf8mb4 
+  COLLATE=utf8mb4_unicode_ci
+  COMMENT='System settings';
+
+-- =========================================================
+-- INSERT DEFAULT SETTINGS
+-- =========================================================
+
+INSERT INTO settings (setting_key, setting_value, updated_at) VALUES
+    ('public_url', 'https://lexinx-protect-v230.vercel.app', UNIX_TIMESTAMP() * 1000),
+    ('web_session_ttl', '604800000', UNIX_TIMESTAMP() * 1000), -- 7 days in ms
+    ('loader_session_ttl', '60000', UNIX_TIMESTAMP() * 1000), -- 60 seconds in ms
+    ('max_script_size', '1048576', UNIX_TIMESTAMP() * 1000), -- 1MB
+    ('registration_enabled', 'true', UNIX_TIMESTAMP() * 1000)
+ON DUPLICATE KEY UPDATE 
+    setting_value = VALUES(setting_value),
+    updated_at = VALUES(updated_at);
+
+-- =========================================================
+-- VIEWS FOR COMMON QUERIES
+-- =========================================================
+
+-- View: Active scripts with owner info
+CREATE OR REPLACE VIEW v_active_scripts AS
 SELECT 
-    s.script_id,
+    s.id,
     s.name,
-    s.user_id,
-    u.username,
-    COUNT(l.id) AS total_access,
-    COUNT(CASE WHEN l.success = TRUE THEN 1 END) AS successful_access,
-    COUNT(CASE WHEN l.success = FALSE THEN 1 END) AS failed_access,
-    MAX(l.created_at) AS last_access
+    s.owner_username,
+    u.username as owner_display_name,
+    s.created_at,
+    s.updated_at,
+    (SELECT COUNT(*) FROM script_execution_logs sel 
+     WHERE sel.script_id = s.id AND sel.success = 1) as execution_count,
+    (SELECT MAX(sel.executed_at) FROM script_execution_logs sel 
+     WHERE sel.script_id = s.id) as last_executed_at
 FROM scripts s
-LEFT JOIN script_access_logs l ON l.script_id = s.script_id
-LEFT JOIN users u ON u.id = s.user_id
-GROUP BY s.script_id, s.name, s.user_id, u.username;
+JOIN users u ON s.owner_username = u.username_lower
+WHERE s.is_active = 1;
 
--- ============================================
--- GRANT PERMISSIONS (nếu cần)
--- ============================================
--- GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO your_user;
--- GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO your_user;
--- GRANT ALL PRIVILEGES ON ALL FUNCTIONS IN SCHEMA public TO your_user;
-
--- ============================================
--- CHECK TABLES
--- ============================================
+-- View: Active web sessions with user info
+CREATE OR REPLACE VIEW v_active_web_sessions AS
 SELECT 
-    table_name,
-    table_type
-FROM information_schema.tables
-WHERE table_schema = 'public'
-ORDER BY table_name;
+    ws.session_id,
+    ws.username_lower,
+    u.username,
+    ws.created_at,
+    ws.expires_at,
+    (ws.expires_at - UNIX_TIMESTAMP() * 1000) / 1000 as seconds_remaining
+FROM web_sessions ws
+JOIN users u ON ws.username_lower = u.username_lower
+WHERE ws.expires_at > UNIX_TIMESTAMP() * 1000;
 
--- ============================================
--- CHECK INDEXES
--- ============================================
+-- View: Active loader sessions
+CREATE OR REPLACE VIEW v_active_loader_sessions AS
 SELECT 
-    tablename,
-    indexname,
-    indexdef
-FROM pg_indexes
-WHERE schemaname = 'public'
-ORDER BY tablename, indexname;
+    ls.session_id,
+    ls.script_id,
+    s.name as script_name,
+    ls.stage,
+    ls.created_at,
+    ls.expires_at,
+    (ls.expires_at - UNIX_TIMESTAMP() * 1000) / 1000 as seconds_remaining
+FROM loader_sessions ls
+JOIN scripts s ON ls.script_id = s.id
+WHERE ls.expires_at > UNIX_TIMESTAMP() * 1000;
 
--- ============================================
--- SAMPLE DATA (OPTIONAL - CÓ THỂ BỎ QUA)
--- ============================================
--- Thêm user mẫu
--- INSERT INTO users (username, password_hash) 
--- VALUES ('admin', 'hashed_password_here');
+-- =========================================================
+-- STORED PROCEDURES
+-- =========================================================
 
--- ============================================
--- MAINTENANCE QUERIES
--- ============================================
+-- Procedure: Clean expired sessions
+DELIMITER $$
 
--- Xóa tất cả sessions hết hạn ngay lập tức
--- SELECT cleanup_expired_sessions();
+CREATE PROCEDURE IF NOT EXISTS sp_cleanup_expired_sessions()
+BEGIN
+    DECLARE current_time BIGINT;
+    SET current_time = UNIX_TIMESTAMP() * 1000;
+    
+    -- Delete expired web sessions
+    DELETE FROM web_sessions WHERE expires_at < current_time;
+    
+    -- Delete expired loader sessions and their tokens
+    DELETE FROM loader_tokens WHERE session_id IN (
+        SELECT session_id FROM loader_sessions WHERE expires_at < current_time
+    );
+    
+    DELETE FROM loader_sessions WHERE expires_at < current_time;
+    
+    -- Delete old rate limits (1 hour)
+    DELETE FROM rate_limits WHERE window_start < (current_time - 3600000);
+    
+    -- Delete old audit logs (30 days)
+    DELETE FROM audit_logs WHERE created_at < (current_time - 2592000000);
+    
+    -- Delete old execution logs (90 days)
+    DELETE FROM script_execution_logs WHERE executed_at < (current_time - 7776000000);
+END$$
 
--- Xem thống kê users
--- SELECT * FROM v_user_script_stats;
+-- Procedure: Get user scripts
+CREATE PROCEDURE IF NOT EXISTS sp_get_user_scripts(IN p_username VARCHAR(32))
+BEGIN
+    SELECT 
+        id,
+        name,
+        created_at,
+        updated_at
+    FROM scripts
+    WHERE owner_username = LOWER(p_username)
+        AND is_active = 1
+    ORDER BY created_at DESC;
+END$$
 
--- Xem thống kê access
--- SELECT * FROM v_script_access_stats;
+-- Procedure: Create loader session with token
+CREATE PROCEDURE IF NOT EXISTS sp_create_loader_session(
+    IN p_script_id VARCHAR(24),
+    IN p_session_id VARCHAR(64),
+    IN p_token VARCHAR(64),
+    IN p_stage INT,
+    IN p_expires_at BIGINT
+)
+BEGIN
+    INSERT INTO loader_sessions (session_id, script_id, stage, created_at, expires_at)
+    VALUES (p_session_id, p_script_id, 0, UNIX_TIMESTAMP() * 1000, p_expires_at);
+    
+    INSERT INTO loader_tokens (session_id, token, stage, created_at)
+    VALUES (p_session_id, p_token, p_stage, UNIX_TIMESTAMP() * 1000);
+END$$
 
--- Xóa toàn bộ dữ liệu (CẨN THẬN!)
--- TRUNCATE TABLE script_access_logs CASCADE;
--- TRUNCATE TABLE loader_sessions CASCADE;
--- TRUNCATE TABLE login_sessions CASCADE;
--- TRUNCATE TABLE scripts CASCADE;
--- TRUNCATE TABLE users CASCADE;
+DELIMITER ;
+
+-- =========================================================
+-- EVENTS FOR AUTOMATIC CLEANUP
+-- =========================================================
+
+-- Event: Cleanup every 5 minutes
+CREATE EVENT IF NOT EXISTS ev_cleanup_sessions
+    ON SCHEDULE EVERY 5 MINUTE
+    DO
+    CALL sp_cleanup_expired_sessions();
+
+-- Event: Update stats every hour
+CREATE EVENT IF NOT EXISTS ev_update_stats
+    ON SCHEDULE EVERY 1 HOUR
+    DO
+    BEGIN
+        -- Update script statistics
+        UPDATE scripts s
+        SET s.updated_at = UNIX_TIMESTAMP() * 1000
+        WHERE s.id IN (
+            SELECT DISTINCT script_id 
+            FROM script_execution_logs 
+            WHERE executed_at > (UNIX_TIMESTAMP() * 1000 - 3600000)
+        );
+    END;
+
+-- =========================================================
+-- TRIGGERS
+-- =========================================================
+
+-- Trigger: Log user registration
+DELIMITER $$
+
+CREATE TRIGGER IF NOT EXISTS trg_user_register
+AFTER INSERT ON users
+FOR EACH ROW
+BEGIN
+    INSERT INTO audit_logs (username_lower, action, details, created_at, success)
+    VALUES (NEW.username_lower, 'USER_REGISTER', 
+            CONCAT('User registered: ', NEW.username), 
+            UNIX_TIMESTAMP() * 1000, 1);
+END$$
+
+-- Trigger: Log script creation
+CREATE TRIGGER IF NOT EXISTS trg_script_create
+AFTER INSERT ON scripts
+FOR EACH ROW
+BEGIN
+    INSERT INTO audit_logs (username_lower, action, details, created_at, success)
+    VALUES (NEW.owner_username, 'SCRIPT_CREATE', 
+            CONCAT('Script created: ', NEW.name, ' (ID: ', NEW.id, ')'), 
+            UNIX_TIMESTAMP() * 1000, 1);
+END$$
+
+-- Trigger: Log script deletion
+CREATE TRIGGER IF NOT EXISTS trg_script_delete
+AFTER DELETE ON scripts
+FOR EACH ROW
+BEGIN
+    INSERT INTO audit_logs (username_lower, action, details, created_at, success)
+    VALUES (OLD.owner_username, 'SCRIPT_DELETE', 
+            CONCAT('Script deleted: ', OLD.name, ' (ID: ', OLD.id, ')'), 
+            UNIX_TIMESTAMP() * 1000, 1);
+END$$
+
+-- Trigger: Track token usage
+CREATE TRIGGER IF NOT EXISTS trg_token_use
+AFTER UPDATE ON loader_tokens
+FOR EACH ROW
+BEGIN
+    IF NEW.is_used = 1 AND OLD.is_used = 0 THEN
+        UPDATE loader_tokens 
+        SET used_at = UNIX_TIMESTAMP() * 1000
+        WHERE id = NEW.id;
+    END IF;
+END$$
+
+DELIMITER ;
+
+-- =========================================================
+-- INITIAL INDEXES FOR PERFORMANCE
+-- =========================================================
+
+-- Composite indexes for common queries
+CREATE INDEX idx_scripts_owner_created ON scripts(owner_username, created_at DESC);
+CREATE INDEX idx_logs_script_time ON script_execution_logs(script_id, executed_at DESC);
+CREATE INDEX idx_sessions_expires ON web_sessions(expires_at);
+CREATE INDEX idx_loader_expires ON loader_sessions(expires_at);
+
+-- Full-text search for script names (MySQL 5.7+)
+ALTER TABLE scripts ADD FULLTEXT INDEX ft_script_name (name);
+ALTER TABLE scripts ADD FULLTEXT INDEX ft_script_source (source);
+
+-- =========================================================
+-- DATABASE OPTIMIZATION
+-- =========================================================
+
+-- Set global variables for performance (run as root)
+SET GLOBAL max_connections = 1000;
+SET GLOBAL innodb_buffer_pool_size = 1073741824; -- 1GB
+SET GLOBAL innodb_log_file_size = 268435456; -- 256MB
+SET GLOBAL innodb_flush_log_at_trx_commit = 2;
+SET GLOBAL query_cache_size = 67108864; -- 64MB
+SET GLOBAL query_cache_type = 1;
+
+-- =========================================================
+-- BACKUP SCHEDULE (Run manually or via cron)
+-- =========================================================
+-- Backup command:
+-- mysqldump -u root -p lexinx_protect > backup_$(date +%Y%m%d_%H%M%S).sql
+-- 
+-- Restore command:
+-- mysql -u root -p lexinx_protect < backup_file.sql
+
+-- =========================================================
+-- END OF SCHEMA
+-- =========================================================
