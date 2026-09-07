@@ -1,16 +1,11 @@
 {
   "name": "lexinx-protect",
   "version": "5.1.0",
-  "description": "LEXINX PROTECT V5 - PostgreSQL + custom LXVM",
-  "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
-  "engines": {
-    "node": ">=18"
-  },
   "dependencies": {
     "express": "^4.21.2",
-    "pg": "^8.13.1"
+    "mysql2": "^3.14.3"
   }
 }
